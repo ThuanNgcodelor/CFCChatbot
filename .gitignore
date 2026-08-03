@@ -3,3 +3,6 @@ ChatbotN8n/cloudflared.deb
 ChatbotN8n/docx/.~lock.*
 ChatbotN8n/workflows/local-n8n/.n8n-state.json
 ChatbotN8n/workflows/local-n8n/.n8n-sync-events.jsonl
+ChatbotN8n/infra/redis/.env
+ChatbotN8n/infra/redis/redis-credential.local.json
+ChatbotN8n/infra/redis/data/

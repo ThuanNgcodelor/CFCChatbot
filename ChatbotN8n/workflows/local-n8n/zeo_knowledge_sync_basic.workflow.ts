@@ -2,23 +2,25 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : Zeo Knowledge Sync Basic
-// Nodes   : 5  |  Connections: 4
+// Nodes   : 6  |  Connections: 5
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
 // ManualTrigger                      manualTrigger
 // ScheduleTrigger                    scheduleTrigger
-// ReadFaqRows                        googleSheets
+// ReadFaqRows                        googleSheets               [creds]
 // NormalizeKnowledge                 code
-// WriteKnowledgeSnapshot             googleSheets
+// WriteRedisSnapshot                 redis                      [creds]
+// WriteRedisSyncMetadata             redis                      [creds]
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
 // ManualTrigger
 //    → ReadFaqRows
 //      → NormalizeKnowledge
-//        → WriteKnowledgeSnapshot
+//        → WriteRedisSnapshot
+//          → WriteRedisSyncMetadata
 // ScheduleTrigger
 //    → ReadFaqRows (↩ loop)
 // </workflow-map>
@@ -32,7 +34,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
     name: 'Zeo Knowledge Sync Basic',
     active: false,
     isArchived: false,
-    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1' },
+    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate' },
 })
 export class ZeoKnowledgeSyncBasicWorkflow {
     // =====================================================================
@@ -72,24 +74,22 @@ export class ZeoKnowledgeSyncBasicWorkflow {
         type: 'n8n-nodes-base.googleSheets',
         version: 4.7,
         position: [256, 256],
+        credentials: { googleSheetsOAuth2Api: { id: 'li88zysXKFUU5A0d', name: 'Google Sheets account' } },
     })
     ReadFaqRows = {
-        authentication: 'oAuth2',
-        resource: 'sheet',
-        operation: 'read',
         documentId: {
+            __rl: true,
+            value: 'https://docs.google.com/spreadsheets/d/1o4vk2YwTVHbuvJxPedTAELCDeQa7iAszZ1kfDKQx0nk/edit?gid=0#gid=0',
             mode: 'url',
-            value: '',
         },
         sheetName: {
-            mode: 'name',
-            value: 'FAQ',
+            __rl: true,
+            value: 'gid=0',
+            mode: 'list',
+            cachedResultName: 'FAQ',
+            cachedResultUrl:
+                'https://docs.google.com/spreadsheets/d/1o4vk2YwTVHbuvJxPedTAELCDeQa7iAszZ1kfDKQx0nk/edit#gid=0',
         },
-        columns: {
-            mappingMode: 'defineBelow',
-            value: null,
-        },
-        range: 'A:H',
         options: {},
     };
 
@@ -101,8 +101,6 @@ export class ZeoKnowledgeSyncBasicWorkflow {
         position: [512, 256],
     })
     NormalizeKnowledge = {
-        mode: 'runOnceForAllItems',
-        language: 'javaScript',
         jsCode: `
 function normalizeText(value) {
   return String(value || '').replace(/\\s+/g, ' ').trim();
@@ -142,7 +140,16 @@ function normalizeRow(row, index) {
   };
 }
 
-const allowedBrands = new Set(['zeo', 'pano', 'oplus', 'zeo/pano/oplus']);
+function fnv1a(value) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+const allowedBrands = new Set(['zeo', 'pano', 'oplus', 'zeo/oplus', 'zeo/pano', 'zeo/pano/oplus']);
 const knowledgeItems = $input.all()
   .map((item, index) => normalizeRow(item.json, index))
   .filter(item => item.active)
@@ -150,14 +157,17 @@ const knowledgeItems = $input.all()
   .filter(item => item.answer && item.intent);
 
 knowledgeItems.sort((a, b) => b.priority - a.priority || a.intent.localeCompare(b.intent));
+const snapshotJson = JSON.stringify(knowledgeItems);
 
 return [{
   json: {
-    snapshot_key: 'zeo_kb_basic_v1',
+    snapshot_key: 'zeo:kb:basic:active',
     brand_scope: 'ZeO/PANO/Oplus',
     knowledge_count: knowledgeItems.length,
     updated_at: new Date().toISOString(),
-    snapshot_json: JSON.stringify(knowledgeItems),
+    schema_version: 1,
+    snapshot_hash: fnv1a(snapshotJson),
+    snapshot_json: snapshotJson,
   }
 }];
 `,
@@ -165,31 +175,30 @@ return [{
 
     @node({
         id: 'c325b9d5-28fc-4871-af86-d289c0cdbeac',
-        name: 'Write Knowledge Snapshot',
-        type: 'n8n-nodes-base.googleSheets',
-        version: 4.7,
+        name: 'Write Redis Snapshot',
+        type: 'n8n-nodes-base.redis',
+        version: 1,
         position: [768, 256],
+        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
     })
-    WriteKnowledgeSnapshot = {
-        authentication: 'oAuth2',
-        resource: 'sheet',
-        operation: 'appendOrUpdate',
-        documentId: {
-            mode: 'url',
-            value: '',
-        },
-        sheetName: {
-            mode: 'name',
-            value: 'KnowledgeSnapshot',
-        },
-        dataMode: 'autoMapInputData',
-        columns: {
-            mappingMode: 'autoMapInputData',
-            value: null,
-            matchingColumns: ['snapshot_key'],
-        },
-        columnToMatchOn: 'snapshot_key',
-        options: {},
+    WriteRedisSnapshot = {
+        operation: 'set',
+        key: 'zeo:kb:basic:active',
+        value: '={{ JSON.stringify($json) }}',
+    };
+
+    @node({
+        id: '0be28c5b-7d4d-4bd4-a9b2-1f761c08d3a8',
+        name: 'Write Redis Sync Metadata',
+        type: 'n8n-nodes-base.redis',
+        version: 1,
+        position: [1008, 256],
+        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    })
+    WriteRedisSyncMetadata = {
+        operation: 'set',
+        key: 'zeo:sync:faq:basic:last-success',
+        value: '={{ JSON.stringify({ snapshot_key: $("Normalize Knowledge").first().json.snapshot_key, knowledge_count: $("Normalize Knowledge").first().json.knowledge_count, updated_at: $("Normalize Knowledge").first().json.updated_at, schema_version: $("Normalize Knowledge").first().json.schema_version, snapshot_hash: $("Normalize Knowledge").first().json.snapshot_hash }) }}',
     };
 
     // =====================================================================
@@ -201,6 +210,7 @@ return [{
         this.ManualTrigger.out(0).to(this.ReadFaqRows.in(0));
         this.ScheduleTrigger.out(0).to(this.ReadFaqRows.in(0));
         this.ReadFaqRows.out(0).to(this.NormalizeKnowledge.in(0));
-        this.NormalizeKnowledge.out(0).to(this.WriteKnowledgeSnapshot.in(0));
+        this.NormalizeKnowledge.out(0).to(this.WriteRedisSnapshot.in(0));
+        this.WriteRedisSnapshot.out(0).to(this.WriteRedisSyncMetadata.in(0));
     }
 }

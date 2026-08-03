@@ -12,7 +12,7 @@ Use `npx --yes n8nac` as the primary interface. Use `npx --yes @n8n-as-code/n8n-
 ## Context Root Protocol
 
 - Treat the current context root as the directory containing `n8nac-config.json`, `AGENTS.md`, `.agents/skills`, and the configured `workflowsPath`.
-- Generated context root hint: `/home/david-nguyen/Works/ChatbotN8n`. If this path exists, run workspace commands from there.
+- Generated context root hint: `/Users/hyden/Documents/N8n/ChatbotN8n`. If this path exists, run workspace commands from there.
 - Before any n8n work, first run `npx --yes n8nac update-ai` from the context root, then read `AGENTS.md`. `update-ai` is designed to create or refresh the n8n-as-code block without destroying existing user or agent instructions.
 - Use the exact `n8nac command` and `n8n-manager command` listed in `AGENTS.md`. Those context-root commands override the portable examples in this skill.
 - Run every `npx --yes n8nac env ...`, `npx --yes n8nac workspace ...`, `npx --yes n8nac list`, `pull`, `push`, `validate`, `test`, and `update-ai` command from the context root unless the user explicitly gives another context root.

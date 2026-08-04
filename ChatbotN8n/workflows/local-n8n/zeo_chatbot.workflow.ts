@@ -1,8 +1,8 @@
 import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
-// Workflow : Zeo Messenger Chatbot Basic RAG
-// Nodes   : 14  |  Connections: 13
+// Workflow : Zeo Chatbot
+// Nodes   : 16  |  Connections: 15
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -18,6 +18,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // RouterGuardrail                    if
 // SaveSession                        redis                      [creds]
 // QueueLearningReview                redis                      [creds]
+// PrepareTelegramAlert               code
+// NotifyTelegramOperations           executeWorkflow            [onError→out(1)]
 // NhanKhachAuto                      httpRequest                [creds]
 // NhanKhachFallback                  httpRequest                [creds]
 // StickyNote                         stickyNote
@@ -37,6 +39,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //                      → NhanKhachAuto
 //                   .out(1) → QueueLearningReview
 //                      → NhanKhachFallback
+//                      → PrepareTelegramAlert
+//                        → NotifyTelegramOperations
 //             .out(1) → QueueLearningReview (↩ loop)
 // </workflow-map>
 
@@ -46,12 +50,12 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
     id: 'd7fctbMhVUmhrNG0',
-    name: 'Zeo Messenger Chatbot Basic RAG',
+    name: 'Zeo Chatbot',
     active: false,
     isArchived: false,
     settings: { executionOrder: 'v1', binaryMode: 'separate' },
 })
-export class ZeoMessengerChatbotBasicRagWorkflow {
+export class ZeoChatbotWorkflow {
     // =====================================================================
     // CONFIGURATION DES NOEUDS
     // =====================================================================
@@ -167,9 +171,10 @@ return [{ json: {
     })
     GetSession = {
         operation: 'get',
-        key: '={{ "zeo:session:messenger:" + $json.senderId }}',
         propertyName: 'sessionRaw',
+        key: '={{ "zeo:session:messenger:" + $json.senderId }}',
         keyType: 'string',
+        options: {},
     };
 
     @node({
@@ -183,9 +188,10 @@ return [{ json: {
     })
     GetKnowledgeSnapshot = {
         operation: 'get',
-        key: 'zeo:kb:basic:active',
         propertyName: 'knowledgeSnapshot',
+        key: 'zeo:kb:basic:active',
         keyType: 'string',
+        options: {},
     };
 
     @node({
@@ -506,6 +512,56 @@ return [{ json: {
     };
 
     @node({
+        id: '94597224-c6db-4e43-b941-2d2a1aec3170',
+        name: 'Prepare Telegram Alert',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [1552, 584],
+    })
+    PrepareTelegramAlert = {
+        jsCode: `
+const event = $input.first().json;
+const isUrgent = Boolean(event.isSensitive);
+
+return [{
+  json: {
+    brand: 'ZeO',
+    event_type: isUrgent ? 'URGENT' : 'REVIEW',
+    priority: isUrgent ? 'high' : 'normal',
+    sender_id: event.senderId || '',
+    user_message: event.userMessage || '',
+    bot_reply: event.finalReply || event.fallbackMessage || '',
+    fallback_reason: event.fallbackReason || 'unknown',
+    rag_score: Number(event.ragScore || 0),
+    created_at: new Date().toISOString(),
+  },
+}];
+`,
+    };
+
+    @node({
+        id: '311f36f9-ed4f-4bdf-967e-14cc6d194d64',
+        name: 'Notify Telegram Operations',
+        type: 'n8n-nodes-base.executeWorkflow',
+        version: 1.3,
+        position: [1792, 584],
+        onError: 'continueErrorOutput',
+    })
+    NotifyTelegramOperations = {
+        operation: 'call_workflow',
+        source: 'database',
+        workflowId: 'f2IjxVj9sW3KQRAw',
+        workflowInputs: {
+            mappingMode: 'passthrough',
+            value: {},
+        },
+        mode: 'each',
+        options: {
+            waitForSubWorkflow: false,
+        },
+    };
+
+    @node({
         id: 'f1000001-0000-0000-0000-000000000008',
         name: 'Nhan Khach Auto',
         type: 'n8n-nodes-base.httpRequest',
@@ -549,7 +605,7 @@ return [{ json: {
         name: 'Sticky Note',
         type: 'n8n-nodes-base.stickyNote',
         version: 1,
-        position: [1392, -192],
+        position: [1136, -112],
     })
     StickyNote = {
         height: 160,
@@ -577,5 +633,7 @@ return [{ json: {
         this.RouterGuardrail.out(1).to(this.QueueLearningReview.in(0));
         this.SaveSession.out(0).to(this.NhanKhachAuto.in(0));
         this.QueueLearningReview.out(0).to(this.NhanKhachFallback.in(0));
+        this.QueueLearningReview.out(0).to(this.PrepareTelegramAlert.in(0));
+        this.PrepareTelegramAlert.out(0).to(this.NotifyTelegramOperations.in(0));
     }
 }

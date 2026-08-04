@@ -1,13 +1,13 @@
 import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
-// Workflow : CFC Co Bay Messenger Chatbot Basic RAG
-// Nodes   : 13  |  Connections: 12
+// Workflow : CFC Co Bay Chatbot
+// Nodes   : 15  |  Connections: 15
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
-// MessengerTrigger                   facebookTrigger
+// MessengerTrigger                   facebookTrigger            [creds]
 // LocDauVao                          code
 // GetCfcSession                      redis                      [creds] [alwaysOutput]
 // GetCfcKnowledgeSnapshot            redis                      [creds] [alwaysOutput]
@@ -17,8 +17,10 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // KiemChung                          code
 // RouterGuardrail                    if
 // SaveCfcSession                     redis                      [creds]
-// NhanKhachAuto                      httpRequest
-// NhanKhachFallback                  httpRequest
+// NhanKhachAuto                      httpRequest                [creds]
+// NhanKhachFallback                  httpRequest                [creds]
+// PrepareTelegramAlert               code
+// NotifyTelegramOperations           executeWorkflow            [onError→out(1)]
 // CfcSetupNote                       stickyNote
 //
 // ROUTING MAP
@@ -35,7 +37,10 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //                    → SaveCfcSession
 //                      → NhanKhachAuto
 //                   .out(1) → NhanKhachFallback
+//                   .out(1) → PrepareTelegramAlert
+//                      → NotifyTelegramOperations
 //             .out(1) → NhanKhachFallback (↩ loop)
+//             .out(1) → PrepareTelegramAlert (↩ loop)
 // </workflow-map>
 
 // =====================================================================
@@ -44,12 +49,12 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
     id: 'uJOo6NQO2mJZhUAr',
-    name: 'CFC Co Bay Messenger Chatbot Basic RAG',
+    name: 'CFC Co Bay Chatbot',
     active: false,
     isArchived: false,
-    settings: { executionOrder: 'v1' },
+    settings: { executionOrder: 'v1', binaryMode: 'separate' },
 })
-export class CfcCoBayMessengerChatbotBasicRagWorkflow {
+export class CfcCoBayChatbotWorkflow {
     // =====================================================================
     // CONFIGURATION DES NOEUDS
     // =====================================================================
@@ -61,9 +66,10 @@ export class CfcCoBayMessengerChatbotBasicRagWorkflow {
         type: 'n8n-nodes-base.facebookTrigger',
         version: 1,
         position: [0, 304],
+        credentials: { facebookGraphAppApi: { id: 'f5KemhyXIK0S26xj', name: 'Facebook Graph (App) account' } },
     })
     MessengerTrigger = {
-        appId: 'SET_CFC_META_APP_ID_IN_N8N',
+        appId: '963255793393378',
         object: 'page',
         fields: ['messages'],
         options: {},
@@ -159,9 +165,10 @@ return [{
     })
     GetCfcSession = {
         operation: 'get',
-        key: '={{ "cfc:session:messenger:" + $json.senderId }}',
         propertyName: 'sessionRaw',
+        key: '={{ "cfc:session:messenger:" + $json.senderId }}',
         keyType: 'string',
+        options: {},
     };
 
     @node({
@@ -175,9 +182,10 @@ return [{
     })
     GetCfcKnowledgeSnapshot = {
         operation: 'get',
-        key: 'cfc:kb:basic:active',
         propertyName: 'knowledgeSnapshot',
+        key: 'cfc:kb:basic:active',
         keyType: 'string',
+        options: {},
     };
 
     @node({
@@ -455,6 +463,7 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [2208, 64],
+        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'Facebook Graph account' } },
     })
     NhanKhachAuto = {
         method: 'POST',
@@ -473,6 +482,7 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [1536, 464],
+        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'Facebook Graph account' } },
     })
     NhanKhachFallback = {
         method: 'POST',
@@ -487,6 +497,55 @@ return [{
     };
 
     @node({
+        id: 'e128792b-7337-4200-b73e-6948519fba8b',
+        name: 'Prepare Telegram Alert',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [1776, 584],
+    })
+    PrepareTelegramAlert = {
+        jsCode: `
+const event = $input.first().json;
+
+return [{
+  json: {
+    brand: 'CFC',
+    event_type: event.isSensitive ? 'URGENT' : 'REVIEW',
+    priority: event.isSensitive ? 'high' : 'normal',
+    sender_id: event.senderId || '',
+    user_message: event.userMessage || '',
+    bot_reply: event.finalReply || event.fallbackMessage || '',
+    fallback_reason: event.fallbackReason || 'unknown',
+    rag_score: Number(event.ragScore || 0),
+    created_at: new Date().toISOString(),
+  },
+}];
+`,
+    };
+
+    @node({
+        id: 'c94ba04a-60cb-4fef-9dd4-7f4bea08794d',
+        name: 'Notify Telegram Operations',
+        type: 'n8n-nodes-base.executeWorkflow',
+        version: 1.3,
+        position: [2016, 584],
+        onError: 'continueErrorOutput',
+    })
+    NotifyTelegramOperations = {
+        operation: 'call_workflow',
+        source: 'database',
+        workflowId: 'f2IjxVj9sW3KQRAw',
+        workflowInputs: {
+            mappingMode: 'passthrough',
+            value: {},
+        },
+        mode: 'each',
+        options: {
+            waitForSubWorkflow: false,
+        },
+    };
+
+    @node({
         id: '47a44df8-7039-4efa-b954-c0484555ca4b',
         name: 'CFC Setup Note',
         type: 'n8n-nodes-base.stickyNote',
@@ -494,11 +553,11 @@ return [{
         position: [1392, -192],
     })
     CfcSetupNote = {
+        content:
+            'CFC uses cfc:* Redis keys. Configure the dedicated CFC Facebook App and Page credentials before publishing.',
         height: 160,
         width: 300,
         color: 5,
-        content:
-            'CFC uses cfc:* Redis keys. Configure the dedicated CFC Facebook App and Page credentials before publishing.',
     };
 
     // =====================================================================
@@ -514,10 +573,13 @@ return [{
         this.CfcRagTimKiem.out(0).to(this.RouterCoNguon.in(0));
         this.RouterCoNguon.out(0).to(this.GoiOllamaLocal.in(0));
         this.RouterCoNguon.out(1).to(this.NhanKhachFallback.in(0));
+        this.RouterCoNguon.out(1).to(this.PrepareTelegramAlert.in(0));
         this.GoiOllamaLocal.out(0).to(this.KiemChung.in(0));
         this.KiemChung.out(0).to(this.RouterGuardrail.in(0));
         this.RouterGuardrail.out(0).to(this.SaveCfcSession.in(0));
         this.RouterGuardrail.out(1).to(this.NhanKhachFallback.in(0));
+        this.RouterGuardrail.out(1).to(this.PrepareTelegramAlert.in(0));
         this.SaveCfcSession.out(0).to(this.NhanKhachAuto.in(0));
+        this.PrepareTelegramAlert.out(0).to(this.NotifyTelegramOperations.in(0));
     }
 }

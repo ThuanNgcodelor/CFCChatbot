@@ -8,15 +8,16 @@
 
 Tat ca Redis key cua CFC bat dau bang `cfc:`. Du lieu session va FAQ cua CFC khong dung chung voi ZeO.
 
-## 1. Them FAQ CFC vao Google Sheet
+## 1. Import FAQ CFC vao Google Sheet
 
-Google Sheet dang dung chung tab `FAQ` voi ZeO. Mo file CSV `cfc_faq_google_sheet_to_append.csv`, copy 7 dong du lieu ben duoi header, va dan vao cuoi tab `FAQ`.
+Mo file CSV `cfc_faq_google_sheet_to_append.csv` bang Google Sheets va import thanh mot tab moi trong cung spreadsheet dang dung cho ZeO.
 
-- Khong dan them dong header `active,brand,...`.
-- Giu `brand` la `CFC` cho tat ca dong.
-- Khong sua cac dong ZeO/PANO/Oplus hien co.
+- Trong Google Sheets: **File -> Import -> Upload** -> chon file CSV -> chon **Insert new sheet(s)**.
+- Doi ten tab vua tao thanh chinh xac `CFC_FAQ`.
+- Giu dong header `active,brand,category,intent,question_examples,answer,priority,source_id,updated_at`.
+- Khong sua tab `FAQ` cua ZeO/PANO/Oplus.
 
-Workflow ZeO bo qua `CFC`; workflow CFC chi lay `CFC`, nen hai brand khong bi tron du lieu.
+Workflow CFC chi doc tab `CFC_FAQ`; du lieu hai brand khong bi tron.
 
 ## 2. Warm CFC snapshot
 

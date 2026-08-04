@@ -84,11 +84,8 @@ export class CfcCoBayKnowledgeSyncBasicWorkflow {
         },
         sheetName: {
             __rl: true,
-            value: 'gid=0',
-            mode: 'list',
-            cachedResultName: 'FAQ',
-            cachedResultUrl:
-                'https://docs.google.com/spreadsheets/d/1o4vk2YwTVHbuvJxPedTAELCDeQa7iAszZ1kfDKQx0nk/edit#gid=0',
+            value: 'CFC_FAQ',
+            mode: 'name',
         },
         options: {},
     };

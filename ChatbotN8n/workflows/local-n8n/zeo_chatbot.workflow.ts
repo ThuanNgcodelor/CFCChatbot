@@ -400,7 +400,7 @@ return [{
         sendBody: true,
         specifyBody: 'json',
         jsonBody:
-            '={{ { model: "qwen3:8b", stream: false, think: false, keep_alive: "20m", options: { temperature: 0.2, num_predict: 120 }, prompt: "[SYSTEM] Bạn là nhân viên tư vấn khách hàng của ZeO Vietnam. Chỉ dùng thông tin tham chiếu bên dưới. Không tự bịa thêm thông tin. Trả lời ngắn gọn, tự nhiên, thân thiện và bằng tiếng Việt có dấu.\\n\\n[THÔNG TIN THAM CHIẾU]: " + $json.contextAnswer + "\\n\\n[CÂU HỎI KHÁCH HÀNG]: " + $json.userMessage + "\\n\\n[TRẢ LỜI]:" } }}',
+            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0.2, num_predict: 120 }, prompt: "[SYSTEM] Bạn là nhân viên tư vấn khách hàng của ZeO Vietnam. Chỉ dùng thông tin tham chiếu bên dưới. Không tự bịa thêm thông tin. Trả lời ngắn gọn, tự nhiên, thân thiện và bằng tiếng Việt có dấu.\\n\\n[THÔNG TIN THAM CHIẾU]: " + $json.contextAnswer + "\\n\\n[CÂU HỎI KHÁCH HÀNG]: " + $json.userMessage + "\\n\\n[TRẢ LỜI]:" } }}',
         options: {},
     };
 

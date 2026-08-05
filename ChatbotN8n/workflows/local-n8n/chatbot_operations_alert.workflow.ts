@@ -119,18 +119,56 @@ const eventType = text(event.event_type || 'REVIEW', 40).toUpperCase();
 const priority = text(event.priority || 'normal', 20).toLowerCase();
 const senderId = text(event.sender_id || event.senderId || '', 80);
 const userMessage = text(event.user_message || event.userMessage || '', 500);
+const botReply = text(event.bot_reply || event.botReply || '', 500);
 const reason = text(event.fallback_reason || event.fallbackReason || 'unknown', 120);
 const score = Number(event.rag_score ?? event.ragScore ?? 0);
 const createdAt = text(event.created_at || new Date().toISOString(), 80);
 const dedupHash = hash([brand, eventType, senderId, userMessage.toLowerCase()].join('|'));
 
+const priorityLabel = {
+  high: 'KHẨN',
+  urgent: 'KHẨN',
+  normal: 'BÌNH THƯỜNG',
+  low: 'THẤP',
+}[priority] || priority.toUpperCase();
+
+const reasonLabel = {
+  sensitive_case: 'Yêu cầu nhạy cảm: khiếu nại / hoàn tiền',
+  no_source: 'Không tìm thấy thông tin phù hợp trong FAQ',
+  low_score: 'Độ khớp FAQ thấp',
+  guardrail_failed: 'Phản hồi cần Admin kiểm tra',
+  manual_test: 'Tin nhắn kiểm tra thủ công',
+}[reason] || reason.replace(/_/g, ' ');
+
+function formatVnDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date).replace(',', '');
+}
+
+const eventLabel = eventType === 'URGENT' ? 'KHÁCH CẦN XỬ LÝ' : 'CẦN XEM XÉT';
 const lines = [
-  '[' + brand + ' | ' + eventType + ']',
-  'Priority: ' + priority,
-  'Khach: ' + (userMessage || '(khong co noi dung chu)'),
-  'Ly do: ' + reason,
-  'RAG score: ' + score,
-  'Thoi gian: ' + createdAt,
+  '[' + brand + ' | ' + eventLabel + ']',
+  'Mức độ: ' + priorityLabel,
+  ...(senderId ? ['Khách: ...' + senderId.slice(-4)] : []),
+  'Thời gian: ' + formatVnDate(createdAt),
+  '',
+  'Nội dung khách gửi',
+  '"' + (userMessage || '(không có nội dung chữ)') + '"',
+  ...(botReply ? ['', 'Bot đã phản hồi', '"' + botReply + '"'] : []),
+  '',
+  'Lý do chuyển Admin',
+  reasonLabel,
+  '',
+  'Độ khớp FAQ: ' + score,
 ];
 
 return [{
@@ -175,9 +213,15 @@ return [{
     })
     SkipRecentDuplicate = {
         jsCode: `
-const item = $input.first();
-if (item.json.dedupRaw) return [];
-return [item];
+const duplicate = $input.first().json.dedupRaw;
+
+if (duplicate) {
+  return [];
+}
+
+return [{
+  json: $("Normalize Alert").first().json,
+}];
 `,
     };
 
@@ -193,7 +237,7 @@ return [item];
     SendTelegramAlert = {
         text: '={{ $json.telegram_text }}',
         chatId: 'SET_TELEGRAM_CHAT_ID_IN_N8N',
-        additionalFields: {},
+        additionalFields: { appendAttribution: false },
     };
 
     @node({

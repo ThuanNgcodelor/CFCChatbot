@@ -7,7 +7,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
-// MessengerTrigger                   facebookTrigger            [creds]
+// MessengerTrigger                   facebookTrigger
 // LocDauVao                          code
 // GetCfcSession                      redis                      [creds] [alwaysOutput]
 // GetCfcKnowledgeSnapshot            redis                      [creds] [alwaysOutput]
@@ -17,8 +17,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // KiemChung                          code
 // RouterGuardrail                    if
 // SaveCfcSession                     redis                      [creds]
-// NhanKhachAuto                      httpRequest                [creds]
-// NhanKhachFallback                  httpRequest                [creds]
+// NhanKhachAuto                      httpRequest
+// NhanKhachFallback                  httpRequest
 // PrepareTelegramAlert               code
 // NotifyTelegramOperations           executeWorkflow            [onError→out(1)]
 // CfcSetupNote                       stickyNote
@@ -66,10 +66,9 @@ export class CfcCoBayChatbotWorkflow {
         type: 'n8n-nodes-base.facebookTrigger',
         version: 1,
         position: [0, 304],
-        credentials: { facebookGraphAppApi: { id: 'f5KemhyXIK0S26xj', name: 'Facebook Graph (App) account' } },
     })
     MessengerTrigger = {
-        appId: '963255793393378',
+        appId: '946909570780806',
         object: 'page',
         fields: ['messages'],
         options: {},
@@ -135,7 +134,9 @@ function normalizeForSearch(value) {
 }
 
 const sensitiveWords = ['hoan tien', 'doi tra', 'khieu nai', 'lua dao', 'san pham loi', 'hang gia'];
-const outOfScopeWords = ['bot giat', 'zeo', 'pano', 'oplus'];
+const outOfScopeWords = ['bot giat', 'nuoc rua chen', 'nuoc lau san', 'tay toilet', 'javen', 'lau kinh', 'zeo', 'pano', 'oplus', 'may do oxy', 'thiet bi y te', 'san pham suc khoe'];
+const greetingWords = ['xin chao', 'chao', 'hello', 'hi', 'alo', 'shop oi', 'admin oi', 'ad oi'];
+const productDiscoveryWords = ['ban gi', 'co gi', 'san pham gi', 'co san pham nao', 'tu van san pham', 'phan bon gi', 'co phan gi', 'mua gi'];
 const normalizedText = normalizeForSearch(text);
 const emptyInput = !text || !text.trim();
 
@@ -149,6 +150,8 @@ return [{
     inputKind: emptyInput ? (hasAttachment ? 'attachment' : 'empty') : 'text',
     isSensitive: sensitiveWords.some(word => normalizedText.includes(word)),
     isOutOfScope: outOfScopeWords.some(word => normalizedText.includes(word)),
+    isGreeting: greetingWords.some(word => normalizedText === word || normalizedText.startsWith(word + ' ') || normalizedText.includes(' ' + word)),
+    isProductDiscovery: productDiscoveryWords.some(word => normalizedText.includes(word)),
   },
 }];
 `,
@@ -292,7 +295,13 @@ for (const entry of knowledgeItems) {
 scored.sort((a, b) => b.score - a.score);
 const topItems = scored.slice(0, 3);
 const bestScore = topItems[0]?.score || 0;
-const hasContext = !input.emptyInput && !input.isSensitive && !input.isOutOfScope && bestScore >= 12;
+const productLineItem = knowledgeItems.find(item => item.intent === 'product_lines');
+const directAnswer = input.isGreeting
+  ? 'Dạ Cò Bay chào bạn ạ. Bên mình hỗ trợ tư vấn phân bón Cò Bay như NPK, phân hữu cơ, mua hàng, giao hàng, đại lý và địa chỉ công ty nha.'
+  : (input.isProductDiscovery && productLineItem ? productLineItem.answer : '');
+const directIntent = input.isGreeting ? 'greeting' : (input.isProductDiscovery && productLineItem ? productLineItem.intent : '');
+const hasDirectContext = Boolean(directAnswer) && !input.emptyInput && !input.isSensitive && !input.isOutOfScope;
+const hasContext = hasDirectContext || (!input.emptyInput && !input.isSensitive && !input.isOutOfScope && bestScore >= 12);
 
 let fallbackReason = 'low_confidence';
 let fallbackMessage = 'Dạ, thông tin này mình chưa có. Bạn để lại số điện thoại và khu vực, admin Cò Bay sẽ hỗ trợ bạn sớm nhất nha.';
@@ -304,7 +313,7 @@ if (input.emptyInput) {
   fallbackMessage = 'Dạ, mình đã ghi nhận thông tin. Admin Cò Bay sẽ kiểm tra và phản hồi bạn sớm nhất nhé.';
 } else if (input.isOutOfScope) {
   fallbackReason = 'out_of_scope';
-  fallbackMessage = 'Dạ, mình đang hỗ trợ thông tin sản phẩm Cò Bay. Bạn cần tư vấn về sản phẩm hoặc dịch vụ nào ạ?';
+  fallbackMessage = 'Dạ, hiện mình chỉ hỗ trợ thông tin về phân bón Cò Bay như NPK, phân hữu cơ, mua hàng, giao hàng, đại lý và địa chỉ công ty nha.';
 } else if (!snapshot) {
   fallbackReason = 'knowledge_snapshot_missing';
 }
@@ -319,8 +328,8 @@ return [{
     senderId: input.senderId,
     userMessage: input.text,
     hasContext,
-    contextAnswer: hasContext ? topItems[0].answer : '',
-    matchedIntent: hasContext ? topItems[0].intent : '',
+    contextAnswer: hasContext ? (directAnswer || topItems[0].answer) : '',
+    matchedIntent: hasContext ? (directIntent || topItems[0].intent) : '',
     fallbackReason,
     fallbackMessage,
     ragScore: bestScore,
@@ -373,7 +382,7 @@ return [{
         sendBody: true,
         specifyBody: 'json',
         jsonBody:
-            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0.2, num_predict: 120 }, prompt: "[SYSTEM] Bạn là nhân viên tư vấn khách hàng của Cò Bay (CFC). Chỉ dùng thông tin tham chiếu bên dưới. Không tự bịa thêm thông tin. Trả lời ngắn gọn, tự nhiên, thân thiện và bằng tiếng Việt có dấu.\\n\\n[THÔNG TIN THAM CHIẾU]: " + $json.contextAnswer + "\\n\\n[CÂU HỎI KHÁCH HÀNG]: " + $json.userMessage + "\\n\\n[TRẢ LỜI]:" } }}',
+            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0.1, num_predict: 120 }, prompt: "[SYSTEM] Bạn là nhân viên tư vấn khách hàng của Cò Bay (CFC). Chỉ được dùng đúng THÔNG TIN THAM CHIẾU. Không tự thêm giá, công dụng, liều lượng, cây trồng, chương trình khuyến mãi, hotline hoặc sản phẩm nếu không có trong tham chiếu. CFC Cò Bay trong dữ liệu này chỉ có thông tin cơ bản về phân bón NPK, phân hữu cơ, mua hàng, giao hàng, đại lý, giờ mở cửa và địa chỉ. Nếu tham chiếu không đủ để trả lời, hãy nói chưa có thông tin và xin số điện thoại/khu vực để admin hỗ trợ. Trả lời ngắn gọn, tự nhiên, thân thiện và bằng tiếng Việt có dấu.\\n\\n[THÔNG TIN THAM CHIẾU]: " + $json.contextAnswer + "\\n\\n[CÂU HỎI KHÁCH HÀNG]: " + $json.userMessage + "\\n\\n[TRẢ LỜI]:" } }}',
         options: {},
     };
 
@@ -393,7 +402,8 @@ const tooShort = aiText.length < 5;
 const tooLong = aiText.length > 1000;
 const hasRefusal = /khong biet|xin loi|i don|i cannot|i don't know|thong tin tham chieu|system prompt/i.test(aiText);
 const mentionsOtherBrand = /zeo|pano|oplus|bot giat/i.test(aiText);
-const passed = !tooShort && !tooLong && !hasRefusal && !mentionsOtherBrand;
+const hallucinatedScope = /nước rửa chén|nuoc rua chen|nước lau sàn|nuoc lau san|javen|toilet|lau kính|lau kinh|máy đo oxy|may do oxy|thiết bị y tế|thiet bi y te|sản phẩm sức khỏe|san pham suc khoe|thuốc trừ sâu|thuoc tru sau|liều lượng|lieu luong|giá bán|gia ban|bao nhiêu tiền|bao nhieu tien/i.test(aiText);
+const passed = !tooShort && !tooLong && !hasRefusal && !mentionsOtherBrand && !hallucinatedScope;
 
 return [{
   json: {
@@ -403,7 +413,7 @@ return [{
     passed,
     ragScore: ragData.ragScore,
     matchedIntent: ragData.matchedIntent,
-    fallbackReason: passed ? '' : 'ollama_guardrail_failed',
+    fallbackReason: passed ? '' : (hallucinatedScope ? 'ollama_hallucinated_scope' : 'ollama_guardrail_failed'),
     fallbackMessage: ragData.fallbackMessage,
   },
 }];
@@ -463,7 +473,6 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [2208, 64],
-        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'Facebook Graph account' } },
     })
     NhanKhachAuto = {
         method: 'POST',
@@ -482,7 +491,6 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [1536, 464],
-        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'Facebook Graph account' } },
     })
     NhanKhachFallback = {
         method: 'POST',

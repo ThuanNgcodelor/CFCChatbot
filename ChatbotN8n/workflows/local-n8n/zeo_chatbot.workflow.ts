@@ -7,7 +7,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
-// MessengerTrigger                   facebookTrigger            [creds]
+// MessengerTrigger                   facebookTrigger
 // LocDauVao                          code
 // GetSession                         redis                      [creds] [alwaysOutput]
 // GetKnowledgeSnapshot               redis                      [creds] [alwaysOutput]
@@ -20,8 +20,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // QueueLearningReview                redis                      [creds]
 // PrepareTelegramAlert               code
 // NotifyTelegramOperations           executeWorkflow            [onError→out(1)]
-// NhanKhachAuto                      httpRequest                [creds]
-// NhanKhachFallback                  httpRequest                [creds]
+// NhanKhachAuto                      httpRequest
+// NhanKhachFallback                  httpRequest
 // StickyNote                         stickyNote
 //
 // ROUTING MAP
@@ -67,10 +67,9 @@ export class ZeoChatbotWorkflow {
         type: 'n8n-nodes-base.facebookTrigger',
         version: 1,
         position: [0, 304],
-        credentials: { facebookGraphAppApi: { id: 'f5KemhyXIK0S26xj', name: 'Facebook Graph (App) account' } },
     })
     MessengerTrigger = {
-        appId: '27651600977802449',
+        appId: '701126356010152',
         object: 'page',
         fields: ['messages'],
         options: {},
@@ -142,9 +141,13 @@ function normalizeForSearch(str) {
 
 const sensitiveWords = ['hoan tien', 'doi tra', 'khieu nai', 'lua dao', 'san pham loi', 'hang gia'];
 const outOfScopeWords = ['phan bon', 'co bay', 'npk', 'phan huu co'];
+const vagueProductWords = ['buon', 'do buon', 'cho vui', 'mua gi', 'ban gi', 'co gi hay', 'goi y san pham', 'tu van san pham', 'khong biet mua gi'];
+const unsupportedProductWords = ['may do oxy', 'do oxy', 'zeo mini', 'thiet bi y te', 'cham soc ca nhan', 'san pham suc khoe', 'phu kien suc khoe'];
 const lower = normalizeForSearch(text);
 const isSensitive = sensitiveWords.some(w => lower.includes(w));
 const isOutOfScope = outOfScopeWords.some(w => lower.includes(w));
+const isVagueProductRequest = vagueProductWords.some(w => lower.includes(w));
+const isUnsupportedProductQuestion = unsupportedProductWords.some(w => lower.includes(w));
 const emptyInput = !text || !text.trim();
 
 return [{ json: {
@@ -156,6 +159,8 @@ return [{ json: {
   inputKind: emptyInput ? (hasAttachment ? 'attachment' : 'empty') : 'text',
   isSensitive,
   isOutOfScope,
+  isVagueProductRequest,
+  isUnsupportedProductQuestion,
 } }];
 `,
     };
@@ -266,6 +271,8 @@ const rawText     = $('Loc Dau Vao').first().json.text || '';
 const senderId    = $('Loc Dau Vao').first().json.senderId;
 const isSensitive = $('Loc Dau Vao').first().json.isSensitive;
 const isOutOfScope = $('Loc Dau Vao').first().json.isOutOfScope;
+const isVagueProductRequest = $('Loc Dau Vao').first().json.isVagueProductRequest;
+const isUnsupportedProductQuestion = $('Loc Dau Vao').first().json.isUnsupportedProductQuestion;
 const emptyInput = $('Loc Dau Vao').first().json.emptyInput;
 const normalizedFromInput = $('Loc Dau Vao').first().json.normalizedText;
 const session = parseJson($('Get Session').first().json.sessionRaw, {});
@@ -319,13 +326,19 @@ for (const entry of knowledgeItems) {
 scored.sort((a, b) => b.score - a.score);
 const topItems = scored.slice(0, 3);
 const bestScore = topItems[0]?.score || 0;
-const hasContext = !emptyInput && !isSensitive && !isOutOfScope && bestScore >= 12;
+const hasContext = !emptyInput && !isSensitive && !isOutOfScope && !isVagueProductRequest && !isUnsupportedProductQuestion && bestScore >= 12;
 
 let fallbackReason = 'low_confidence';
 let fallbackMessage = 'Cảm ơn bạn đã nhắn tin. Admin sẽ phản hồi bạn sớm nhất nhé!';
 if (emptyInput) {
   fallbackReason = 'empty_or_unsupported_message';
   fallbackMessage = 'Bạn gửi giúp mình nội dung cần hỗ trợ bằng tin nhắn chữ nhé.';
+} else if (isUnsupportedProductQuestion) {
+  fallbackReason = 'unsupported_product_scope';
+  fallbackMessage = 'Dạ hiện tại theo thông tin của shop, ZeO tập trung vào các sản phẩm tẩy rửa gia dụng như bột giặt, nước rửa chén, nước lau sàn, Javen, tẩy toilet, lau kính và xịt tẩy đa năng. Bên mình chưa có thông tin về thiết bị y tế hay sản phẩm sức khỏe nha bạn.';
+} else if (isVagueProductRequest) {
+  fallbackReason = 'product_scope_clarification';
+  fallbackMessage = 'Dạ ZeO bên mình hiện có các sản phẩm tẩy rửa gia dụng như bột giặt, nước rửa chén, nước lau sàn, tẩy toilet, Javen, lau kính và xịt tẩy đa năng. Nếu bạn muốn quần áo thơm sạch thì mình gợi ý bột giặt ZeO; nếu cần dọn nhà thì có nước lau sàn hoặc xịt tẩy đa năng nha.';
 } else if (isSensitive) {
   fallbackReason = 'sensitive_case';
   fallbackMessage = 'Dạ, mình đã ghi nhận thông tin. Admin sẽ kiểm tra và phản hồi bạn sớm nhất nhé.';
@@ -348,6 +361,8 @@ return [{
     hasContext,
     isSensitive,
     isOutOfScope,
+    isVagueProductRequest,
+    isUnsupportedProductQuestion,
     emptyInput,
     sessionLastIntent: session.last_intent || '',
     context: hasContext ? context : '',
@@ -406,7 +421,7 @@ return [{
         sendBody: true,
         specifyBody: 'json',
         jsonBody:
-            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0.2, num_predict: 120 }, prompt: "[SYSTEM] Bạn là nhân viên tư vấn khách hàng của ZeO Vietnam. Chỉ dùng thông tin tham chiếu bên dưới. Không tự bịa thêm thông tin. Trả lời ngắn gọn, tự nhiên, thân thiện và bằng tiếng Việt có dấu.\\n\\n[THÔNG TIN THAM CHIẾU]: " + $json.contextAnswer + "\\n\\n[CÂU HỎI KHÁCH HÀNG]: " + $json.userMessage + "\\n\\n[TRẢ LỜI]:" } }}',
+            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0.1, num_predict: 120 }, prompt: "[SYSTEM] Bạn là nhân viên tư vấn khách hàng của ZeO Vietnam. Chỉ được dùng thông tin trong THÔNG TIN THAM CHIẾU. Không được tự thêm sản phẩm, công dụng, chứng nhận, giá, hotline hoặc tên sản phẩm nếu không có trong tham chiếu. Nếu tham chiếu không đủ để trả lời, hãy nói chưa có thông tin và chuyển admin hỗ trợ. ZeO/PANO/Oplus trong dữ liệu này thuộc nhóm sản phẩm tẩy rửa gia dụng, không phải thiết bị y tế hay sản phẩm sức khỏe. Trả lời ngắn gọn, tự nhiên, thân thiện và bằng tiếng Việt có dấu.\\n\\n[THÔNG TIN THAM CHIẾU]: " + $json.contextAnswer + "\\n\\n[CÂU HỎI KHÁCH HÀNG]: " + $json.userMessage + "\\n\\n[TRẢ LỜI]:" } }}',
         options: {},
     };
 
@@ -429,7 +444,8 @@ const aiText = (ollamaResult?.response || '').trim();
 const tooShort = aiText.length < 5;
 const hasRefusal = /khong biet|xin loi|i don|i cannot|i don't know|thong tin tham chieu|system prompt/i.test(aiText);
 const tooLong = aiText.length > 1000;
-const passed = !tooShort && !tooLong && !hasRefusal;
+const hallucinatedScope = /máy đo oxy|may do oxy|zeo mini|thiết bị y tế|thiet bi y te|chăm sóc cá nhân|cham soc ca nhan|sản phẩm sức khỏe|san pham suc khoe|phụ kiện sức khỏe|phu kien suc khoe/i.test(aiText);
+const passed = !tooShort && !tooLong && !hasRefusal && !hallucinatedScope;
 
 // Giot han 1000 ky tu neu qua dai
 const finalReply = passed ? aiText.substring(0, 1000) : null;
@@ -442,7 +458,7 @@ return [{ json: {
   isSensitive: ragData.isSensitive,
   ragScore: ragData.ragScore,
   matchedIntent: ragData.matchedIntent,
-  fallbackReason: passed ? '' : 'ollama_guardrail_failed',
+  fallbackReason: passed ? '' : (hallucinatedScope ? 'ollama_hallucinated_scope' : 'ollama_guardrail_failed'),
   fallbackMessage: ragData.fallbackMessage,
 }}];
 `,
@@ -567,7 +583,6 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [2208, 64],
-        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'Facebook Graph account' } },
     })
     NhanKhachAuto = {
         method: 'POST',
@@ -586,7 +601,6 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [1536, 464],
-        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'Facebook Graph account' } },
     })
     NhanKhachFallback = {
         method: 'POST',

@@ -38,7 +38,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
     name: 'Chatbot Operations Alert',
     active: false,
     isArchived: false,
-    settings: { executionOrder: 'v1', callerPolicy: 'workflowsFromSameOwner' },
+    settings: { executionOrder: 'v1', callerPolicy: 'workflowsFromSameOwner', binaryMode: 'separate' },
 })
 export class ChatbotOperationsAlertWorkflow {
     // =====================================================================
@@ -126,17 +126,25 @@ const createdAt = text(event.created_at || new Date().toISOString(), 80);
 const dedupHash = hash([brand, eventType, senderId, userMessage.toLowerCase()].join('|'));
 
 const priorityLabel = {
-  high: 'KHẨN',
-  urgent: 'KHẨN',
-  normal: 'BÌNH THƯỜNG',
-  low: 'THẤP',
+  high: 'Cần xử lý sớm',
+  urgent: 'Cần xử lý sớm',
+  normal: 'Cần xem lại',
+  low: 'Theo dõi',
 }[priority] || priority.toUpperCase();
 
 const reasonLabel = {
   sensitive_case: 'Yêu cầu nhạy cảm: khiếu nại / hoàn tiền',
-  no_source: 'Không tìm thấy thông tin phù hợp trong FAQ',
-  low_score: 'Độ khớp FAQ thấp',
-  guardrail_failed: 'Phản hồi cần Admin kiểm tra',
+  low_confidence: 'Bot chưa tìm thấy câu trả lời đủ chắc trong dữ liệu',
+  no_source: 'Chưa có thông tin phù hợp trong FAQ',
+  low_score: 'Câu hỏi khớp FAQ thấp',
+  guardrail_failed: 'Câu trả lời cần admin kiểm tra',
+  ollama_guardrail_failed: 'Câu trả lời AI không đạt kiểm tra an toàn',
+  ollama_hallucinated_scope: 'AI có dấu hiệu trả lời vượt ngoài dữ liệu',
+  empty_or_unsupported_message: 'Khách gửi nội dung trống hoặc không phải tin nhắn chữ',
+  unsupported_product_scope: 'Khách hỏi sản phẩm ngoài phạm vi ZeO',
+  product_scope_clarification: 'Khách hỏi chung, cần tư vấn chọn sản phẩm',
+  out_of_scope: 'Khách hỏi ngoài phạm vi hỗ trợ hiện tại',
+  knowledge_snapshot_missing: 'Chưa đọc được dữ liệu FAQ/RAG',
   manual_test: 'Tin nhắn kiểm tra thủ công',
 }[reason] || reason.replace(/_/g, ' ');
 
@@ -154,21 +162,21 @@ function formatVnDate(value) {
   }).format(date).replace(',', '');
 }
 
-const eventLabel = eventType === 'URGENT' ? 'KHÁCH CẦN XỬ LÝ' : 'CẦN XEM XÉT';
+const eventLabel = eventType === 'URGENT' ? 'CẢNH BÁO KHẨN' : 'CẦN ADMIN XEM LẠI';
 const lines = [
-  '[' + brand + ' | ' + eventLabel + ']',
+  brand + ' - ' + eventLabel,
   'Mức độ: ' + priorityLabel,
-  ...(senderId ? ['Khách: ...' + senderId.slice(-4)] : []),
   'Thời gian: ' + formatVnDate(createdAt),
+  ...(senderId ? ['Mã khách: ...' + senderId.slice(-4)] : []),
   '',
-  'Nội dung khách gửi',
-  '"' + (userMessage || '(không có nội dung chữ)') + '"',
-  ...(botReply ? ['', 'Bot đã phản hồi', '"' + botReply + '"'] : []),
+  'Khách hỏi:',
+  userMessage || '(không có nội dung chữ)',
+  ...(botReply ? ['', 'Bot đã trả lời:', botReply] : []),
   '',
-  'Lý do chuyển Admin',
+  'Lý do chuyển admin:',
   reasonLabel,
   '',
-  'Độ khớp FAQ: ' + score,
+  'Độ khớp dữ liệu: ' + score + '/100',
 ];
 
 return [{
@@ -237,7 +245,9 @@ return [{
     SendTelegramAlert = {
         text: '={{ $json.telegram_text }}',
         chatId: 'SET_TELEGRAM_CHAT_ID_IN_N8N',
-        additionalFields: { appendAttribution: false },
+        additionalFields: {
+            appendAttribution: false,
+        },
     };
 
     @node({

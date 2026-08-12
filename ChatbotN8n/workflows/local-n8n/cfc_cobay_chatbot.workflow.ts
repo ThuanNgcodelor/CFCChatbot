@@ -7,7 +7,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
-// MessengerTrigger                   facebookTrigger
+// MessengerTrigger                   facebookTrigger            [creds]
 // LocDauVao                          code
 // GetCfcSession                      redis                      [creds] [alwaysOutput]
 // GetCfcKnowledgeSnapshot            redis                      [creds] [alwaysOutput]
@@ -17,8 +17,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // KiemChung                          code
 // RouterGuardrail                    if
 // SaveCfcSession                     redis                      [creds]
-// NhanKhachAuto                      httpRequest
-// NhanKhachFallback                  httpRequest
+// NhanKhachAuto                      httpRequest                [creds]
+// NhanKhachFallback                  httpRequest                [creds]
 // PrepareTelegramAlert               code
 // NotifyTelegramOperations           executeWorkflow            [onError→out(1)]
 // CfcSetupNote                       stickyNote
@@ -66,6 +66,7 @@ export class CfcCoBayChatbotWorkflow {
         type: 'n8n-nodes-base.facebookTrigger',
         version: 1,
         position: [0, 304],
+        credentials: { facebookGraphAppApi: { id: 'H7jFvG3kDaEFuBjD', name: 'CFC Cò Bay' } },
     })
     MessengerTrigger = {
         appId: '946909570780806',
@@ -139,6 +140,14 @@ const greetingWords = ['xin chao', 'chao', 'hello', 'hi', 'alo', 'shop oi', 'adm
 const productDiscoveryWords = ['ban gi', 'co gi', 'san pham gi', 'co san pham nao', 'tu van san pham', 'phan bon gi', 'co phan gi', 'mua gi'];
 const normalizedText = normalizeForSearch(text);
 const emptyInput = !text || !text.trim();
+const phoneDigits = text.replace(/\\D/g, '');
+const hasPhoneNumber = /(0\\d[\\d\\s.\\-]{7,12}\\d|\\+?84[\\d\\s.\\-]{8,12}\\d)/.test(text) || /^\\d{9,11}$/.test(phoneDigits);
+const areaWords = ['tinh', 'thanh pho', 'tp', 'huyen', 'xa', 'phuong', 'thi xa', 'khu vuc', 'mien', 'can tho', 'thai binh', 'kien giang', 'tra noc'];
+const hasAreaInfo = areaWords.some(word => normalizedText.includes(word)) ||
+  /(^|\\s)(minh o|em o|toi o|khach hang cu o|ben minh o|o tinh|o huyen|khu vuc)\\s+[a-z]/.test(normalizedText);
+const dealerRequestWords = ['nha phan phoi', 'dai ly', 'phan phoi', 'ban le', 'mua de ban', 'mua ban le', 'lien he mua', 'mua o dau', 'mua de ban le'];
+const isDealerLocationRequest = dealerRequestWords.some(word => normalizedText.includes(word)) ||
+  ((normalizedText.includes('mua') || normalizedText.includes('lien he')) && hasAreaInfo);
 
 return [{
   json: {
@@ -152,6 +161,9 @@ return [{
     isOutOfScope: outOfScopeWords.some(word => normalizedText.includes(word)),
     isGreeting: greetingWords.some(word => normalizedText === word || normalizedText.startsWith(word + ' ') || normalizedText.includes(' ' + word)),
     isProductDiscovery: productDiscoveryWords.some(word => normalizedText.includes(word)),
+    hasPhoneNumber,
+    hasAreaInfo,
+    isDealerLocationRequest,
   },
 }];
 `,
@@ -251,6 +263,7 @@ function parseSnapshot(value) {
 }
 
 const input = $('Loc Dau Vao').first().json;
+const session = parseJson($('Get CFC Session').first().json.sessionRaw, {});
 const snapshot = $input.first().json.knowledgeSnapshot;
 const knowledgeItems = parseSnapshot(snapshot)
   .map(item => ({
@@ -301,13 +314,25 @@ const directAnswer = input.isGreeting
   : (input.isProductDiscovery && productLineItem ? productLineItem.answer : '');
 const directIntent = input.isGreeting ? 'greeting' : (input.isProductDiscovery && productLineItem ? productLineItem.intent : '');
 const hasDirectContext = Boolean(directAnswer) && !input.emptyInput && !input.isSensitive && !input.isOutOfScope;
-const hasContext = hasDirectContext || (!input.emptyInput && !input.isSensitive && !input.isOutOfScope && bestScore >= 12);
+const previousText = normalizeForSearch([session.last_user_message, session.last_bot_reply, session.last_intent].filter(Boolean).join(' '));
+const waitingForContact = ['so dien thoai', 'khu vuc', 'nhan vien', 'lien he', 'dai ly', 'phan phoi'].some(word => previousText.includes(word));
+const looksLikeAreaReply = /(^|\\s)(minh o|em o|toi o|khach hang cu o|ben minh o|o tinh|o huyen|khu vuc)\\s+[a-z]/.test(input.normalizedText || '');
+const isLeadInfo = Boolean(input.hasPhoneNumber || (input.hasAreaInfo && (waitingForContact || looksLikeAreaReply)));
+const hasContext = hasDirectContext || (!isLeadInfo && !input.isDealerLocationRequest && !input.emptyInput && !input.isSensitive && !input.isOutOfScope && bestScore >= 12);
 
 let fallbackReason = 'low_confidence';
 let fallbackMessage = 'Dạ, thông tin này mình chưa có. Bạn để lại số điện thoại và khu vực, admin Cò Bay sẽ hỗ trợ bạn sớm nhất nha.';
 if (input.emptyInput) {
   fallbackReason = 'empty_or_unsupported_message';
   fallbackMessage = 'Bạn gửi giúp mình nội dung cần hỗ trợ bằng tin nhắn chữ nhé.';
+} else if (isLeadInfo) {
+  fallbackReason = input.hasPhoneNumber && input.hasAreaInfo ? 'lead_contact_received' : (input.hasPhoneNumber ? 'lead_phone_received' : 'lead_area_received');
+  fallbackMessage = input.hasPhoneNumber
+    ? 'Dạ Cò Bay đã nhận được thông tin của bạn. Admin hoặc nhân viên khu vực sẽ liên hệ hỗ trợ bạn sớm nhất nha.'
+    : 'Dạ Cò Bay đã nhận được khu vực của bạn. Bạn gửi thêm số điện thoại để admin hoặc nhân viên khu vực liên hệ hỗ trợ sớm nhất nha.';
+} else if (input.isDealerLocationRequest) {
+  fallbackReason = 'dealer_location_request';
+  fallbackMessage = 'Dạ bạn gửi giúp Cò Bay số điện thoại và khu vực cụ thể, admin sẽ chuyển nhân viên hoặc nhà phân phối khu vực liên hệ hỗ trợ mua hàng sớm nhất nha.';
 } else if (input.isSensitive) {
   fallbackReason = 'sensitive_case';
   fallbackMessage = 'Dạ, mình đã ghi nhận thông tin. Admin Cò Bay sẽ kiểm tra và phản hồi bạn sớm nhất nhé.';
@@ -333,6 +358,8 @@ return [{
     fallbackReason,
     fallbackMessage,
     ragScore: bestScore,
+    isLeadInfo,
+    isDealerLocationRequest: Boolean(input.isDealerLocationRequest),
   },
 }];
 `,
@@ -473,6 +500,7 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [2208, 64],
+        credentials: { facebookGraphApi: { id: 'cKx1OHWWIdDjOUuM', name: 'Cò bay' } },
     })
     NhanKhachAuto = {
         method: 'POST',
@@ -491,6 +519,7 @@ return [{
         type: 'n8n-nodes-base.httpRequest',
         version: 4.1,
         position: [1536, 464],
+        credentials: { facebookGraphApi: { id: 'cKx1OHWWIdDjOUuM', name: 'Cò bay' } },
     })
     NhanKhachFallback = {
         method: 'POST',
@@ -509,7 +538,7 @@ return [{
         name: 'Prepare Telegram Alert',
         type: 'n8n-nodes-base.code',
         version: 2,
-        position: [1776, 584],
+        position: [1776, 592],
     })
     PrepareTelegramAlert = {
         jsCode: `
@@ -536,12 +565,10 @@ return [{
         name: 'Notify Telegram Operations',
         type: 'n8n-nodes-base.executeWorkflow',
         version: 1.3,
-        position: [2016, 584],
+        position: [2016, 592],
         onError: 'continueErrorOutput',
     })
     NotifyTelegramOperations = {
-        operation: 'call_workflow',
-        source: 'database',
         workflowId: 'f2IjxVj9sW3KQRAw',
         workflowInputs: {
             mappingMode: 'passthrough',

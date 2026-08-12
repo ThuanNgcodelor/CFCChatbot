@@ -405,11 +405,11 @@ return [{
     })
     GoiOllamaLocal = {
         method: 'POST',
-        url: 'http://127.0.0.1:11434/api/generate',
+        url: 'http://127.0.0.1:11434/api/chat',
         sendBody: true,
         specifyBody: 'json',
         jsonBody:
-            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0.1, num_predict: 120 }, prompt: "[SYSTEM] Bạn là nhân viên tư vấn khách hàng của Cò Bay (CFC). Chỉ được dùng đúng THÔNG TIN THAM CHIẾU. Không tự thêm giá, công dụng, liều lượng, cây trồng, chương trình khuyến mãi, hotline hoặc sản phẩm nếu không có trong tham chiếu. CFC Cò Bay trong dữ liệu này chỉ có thông tin cơ bản về phân bón NPK, phân hữu cơ, mua hàng, giao hàng, đại lý, giờ mở cửa và địa chỉ. Nếu tham chiếu không đủ để trả lời, hãy nói chưa có thông tin và xin số điện thoại/khu vực để admin hỗ trợ. Trả lời ngắn gọn, tự nhiên, thân thiện và bằng tiếng Việt có dấu.\\n\\n[THÔNG TIN THAM CHIẾU]: " + $json.contextAnswer + "\\n\\n[CÂU HỎI KHÁCH HÀNG]: " + $json.userMessage + "\\n\\n[TRẢ LỜI]:" } }}',
+            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.3, num_predict: 120 }, messages: [ { role: "system", content: "Bạn là nhân viên tư vấn khách hàng của Cò Bay (CFC). BẮT BUỘC chỉ trả lời bằng tiếng Việt có dấu. Tuyệt đối không dùng tiếng Trung, tiếng Anh hoặc bất kỳ ngôn ngữ nào khác. Không tự giới thiệu là AI, Qwen, Alibaba, trợ lý ảo hoặc mô hình ngôn ngữ. Chỉ được dùng đúng THÔNG TIN THAM CHIẾU. Không tự thêm giá, công dụng, liều lượng, cây trồng, chương trình khuyến mãi, hotline hoặc sản phẩm nếu không có trong tham chiếu. CFC Cò Bay trong dữ liệu này chỉ có thông tin cơ bản về phân bón NPK, phân hữu cơ, mua hàng, giao hàng, đại lý, giờ mở cửa và địa chỉ. Nếu tham chiếu không đủ để trả lời, hãy nói chưa có thông tin và xin số điện thoại/khu vực để admin hỗ trợ. Trả lời ngắn gọn, tự nhiên, thân thiện." }, { role: "user", content: "THÔNG TIN THAM CHIẾU:\\n" + $json.contextAnswer + "\\n\\nCÂU HỎI KHÁCH HÀNG:\\n" + $json.userMessage + "\\n\\nHãy trả lời một tin nhắn Messenger ngắn bằng tiếng Việt có dấu:" } ] } }}',
         options: {},
     };
 
@@ -424,13 +424,25 @@ return [{
         jsCode: `
 const ollamaResult = $input.first().json;
 const ragData = $('CFC RAG Tim Kiem').first().json;
-const aiText = (ollamaResult?.response || '').trim();
+const aiText = (ollamaResult?.message?.content || ollamaResult?.response || '').trim();
 const tooShort = aiText.length < 5;
 const tooLong = aiText.length > 1000;
+const hasForeignScript = /[㐀-鿿぀-ヿ가-힯Ѐ-ӿ؀-ۿ฀-๿຀-໿ក-៿ऀ-ॿ]/.test(aiText);
+const hasVietnameseSignal = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\\bdạ\\b|\\bạ\\b|\\bnha\\b|\\bnhé\\b|\\bbạn\\b|\\bmình\\b|cảm ơn|thông tin|hỗ trợ|admin/i.test(aiText);
 const hasRefusal = /khong biet|xin loi|i don|i cannot|i don't know|thong tin tham chieu|system prompt/i.test(aiText);
+const hasEnglishLeak = /(i am|i'm|you are|please|sorry|hello|thank you|as an ai|i cannot|i don't|provide|contact us|customer service)/i.test(aiText);
+const hasModelLeak = /qwen|alibaba|aliyun|tongyi|通义|阿里|阿里云|助手|人工智能|中文|language model|large language|chatbot|system prompt|developer message/i.test(aiText);
+const hasPromptLeak = /[system]|[thông tin tham chiếu]|[câu hỏi khách hàng]|[trả lời]|thông tin tham chiếu:/i.test(aiText);
 const mentionsOtherBrand = /zeo|pano|oplus|bot giat/i.test(aiText);
 const hallucinatedScope = /nước rửa chén|nuoc rua chen|nước lau sàn|nuoc lau san|javen|toilet|lau kính|lau kinh|máy đo oxy|may do oxy|thiết bị y tế|thiet bi y te|sản phẩm sức khỏe|san pham suc khoe|thuốc trừ sâu|thuoc tru sau|liều lượng|lieu luong|giá bán|gia ban|bao nhiêu tiền|bao nhieu tien/i.test(aiText);
-const passed = !tooShort && !tooLong && !hasRefusal && !mentionsOtherBrand && !hallucinatedScope;
+const nonVietnameseOutput = hasForeignScript || hasEnglishLeak || hasModelLeak || hasPromptLeak || !hasVietnameseSignal;
+const passed = !tooShort && !tooLong && !hasRefusal && !mentionsOtherBrand && !hallucinatedScope && !nonVietnameseOutput;
+
+let guardrailReason = 'ollama_guardrail_failed';
+if (hallucinatedScope || mentionsOtherBrand) guardrailReason = 'ollama_hallucinated_scope';
+else if (hasForeignScript || hasEnglishLeak || !hasVietnameseSignal) guardrailReason = 'non_vietnamese_output';
+else if (hasModelLeak) guardrailReason = 'model_identity_leak';
+else if (hasPromptLeak) guardrailReason = 'prompt_leak';
 
 return [{
   json: {
@@ -440,7 +452,7 @@ return [{
     passed,
     ragScore: ragData.ragScore,
     matchedIntent: ragData.matchedIntent,
-    fallbackReason: passed ? '' : (hallucinatedScope ? 'ollama_hallucinated_scope' : 'ollama_guardrail_failed'),
+    fallbackReason: passed ? '' : guardrailReason,
     fallbackMessage: ragData.fallbackMessage,
   },
 }];

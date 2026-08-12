@@ -22,20 +22,9 @@ git status --short
 ```bash
 cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
 
-WF="workflows/local-n8n/zeo_chatbot.workflow.ts"
-ID="d7fctbMhVUmhrNG0"
-PATCH="/tmp/zeo_chatbot.patch"
-
-git diff -- "$WF" > "$PATCH"
-npx --yes n8nac pull "$ID"
-
-if [ -s "$PATCH" ]; then
-  git apply --3way "$PATCH"
-fi
-
-git diff -- "$WF" | rg -n "credentials|facebookGraph|telegram|chatId|webhookId|appId|verify|Verify|SET_TELEGRAM" || true
-npx --yes n8nac skills validate "$WF"
-npx --yes n8nac push "$WF" --verify
+npx --yes n8nac resolve d7fctbMhVUmhrNG0 --mode keep-current
+npx --yes n8nac skills validate workflows/local-n8n/zeo_chatbot.workflow.ts
+npx --yes n8nac push workflows/local-n8n/zeo_chatbot.workflow.ts --verify
 ```
 
 ## 3. Push CFC Co Bay Chatbot, giu config UI
@@ -43,20 +32,9 @@ npx --yes n8nac push "$WF" --verify
 ```bash
 cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
 
-WF="workflows/local-n8n/cfc_cobay_chatbot.workflow.ts"
-ID="uJOo6NQO2mJZhUAr"
-PATCH="/tmp/cfc_cobay_chatbot.patch"
-
-git diff -- "$WF" > "$PATCH"
-npx --yes n8nac pull "$ID"
-
-if [ -s "$PATCH" ]; then
-  git apply --3way "$PATCH"
-fi
-
-git diff -- "$WF" | rg -n "credentials|facebookGraph|telegram|chatId|webhookId|appId|verify|Verify|SET_TELEGRAM" || true
-npx --yes n8nac skills validate "$WF"
-npx --yes n8nac push "$WF" --verify
+npx --yes n8nac resolve uJOo6NQO2mJZhUAr --mode keep-current
+npx --yes n8nac skills validate workflows/local-n8n/cfc_cobay_chatbot.workflow.ts
+npx --yes n8nac push workflows/local-n8n/cfc_cobay_chatbot.workflow.ts --verify
 ```
 
 ## 4. Push Telegram Operations Alert, giu config UI

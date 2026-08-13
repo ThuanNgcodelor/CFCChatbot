@@ -1,7 +1,7 @@
 import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
-// Workflow : Zeo Knowledge Sync Basic
+// Workflow : Zeo Knowledge
 // Nodes   : 6  |  Connections: 5
 //
 // NODE INDEX
@@ -31,12 +31,12 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
     id: 'DhrLUsDsldhxtTdX',
-    name: 'Zeo Knowledge Sync Basic',
+    name: 'Zeo Knowledge',
     active: false,
     isArchived: false,
     settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate' },
 })
-export class ZeoKnowledgeSyncBasicWorkflow {
+export class ZeoKnowledgeWorkflow {
     // =====================================================================
     // CONFIGURATION DES NOEUDS
     // =====================================================================
@@ -62,7 +62,6 @@ export class ZeoKnowledgeSyncBasicWorkflow {
             interval: [
                 {
                     field: 'minutes',
-                    minutesInterval: 30,
                 },
             ],
         },
@@ -126,16 +125,55 @@ function brandKey(value) {
 }
 
 function normalizeRow(row, index) {
+  const intent = normalizeText(row.intent || '');
+  const category = normalizeText(row.category || 'faq');
+  const answer = normalizeText(row.answer || '')
+    .replace(/^Theo Brand Bible,[ ]*/i, '')
+    .replace(/[ ]+Theo Brand Bible,[ ]*/gi, ' ')
+    .replace(/^Theo tài liệu hiện tại,[ ]*/i, '')
+    .replace(/[ ]+Theo tài liệu hiện tại,[ ]*/gi, ' ')
+    .replace(/Slogan được ghi cho ZeO trong Brand Bible là/gi, 'Slogan của ZeO là')
+    .replace(/[ ]+trong Brand Bible[ ]+/gi, ' ')
+    .replace(/[ ]+/g, ' ')
+    .trim();
+  const internalIntents = new Set([
+    'new_customer_welcome_template',
+    'post_purchase_followup_template',
+    'loyal_customer_thank_template',
+    'promotion_announcement_template',
+    'tone_of_voice_guidelines',
+    'tone_of_voice_restrictions',
+    'tiktok_reels_content_style',
+    'ecommerce_product_description_style',
+    'facebook_zalo_content_style',
+    'email_zalo_business_style',
+    'review_response_guidelines',
+    'complaint_handling_principles',
+    'complaint_severity_levels',
+    'complaint_one_star_review',
+    'pano_brand_colors',
+    'brand_typography',
+    'brand_key_selling_points',
+    'product_recommendation_by_need',
+  ]);
+  const hasTemplatePlaceholder = /{{[^}]+}}|[[A-Z_]{2,}]|<[^>]+>/.test(answer);
+  const explicitAudience = normalizeText(row.audience || '').toLowerCase();
+  const audience = explicitAudience || (internalIntents.has(intent) || hasTemplatePlaceholder ? 'internal' : 'customer');
+  const explicitMode = normalizeText(row.answer_mode || '').toLowerCase();
+  const answerMode = explicitMode || 'direct';
   return {
     active: asBool(row.active ?? true),
     brand: normalizeBrand(row.brand),
-    category: normalizeText(row.category || 'faq'),
-    intent: normalizeText(row.intent || ''),
+    category,
+    intent,
     question_examples: splitExamples(row.question_examples),
-    answer: normalizeText(row.answer || ''),
+    answer,
     priority: Number(row.priority || 0),
     source_id: normalizeText(row.source_id || 'zeo_faq_google_sheet'),
     updated_at: normalizeText(row.updated_at || new Date().toISOString().slice(0, 10)),
+    audience,
+    answer_mode: answerMode,
+    risk_level: normalizeText(row.risk_level || (['policy', 'support'].includes(category) ? 'medium' : 'low')).toLowerCase(),
     row_index: index + 1,
   };
 }
@@ -150,14 +188,28 @@ function fnv1a(value) {
 }
 
 const allowedBrands = new Set(['zeo', 'pano', 'oplus', 'zeo/oplus', 'zeo/pano', 'zeo/pano/oplus']);
-const knowledgeItems = $input.all()
-  .map((item, index) => normalizeRow(item.json, index))
+const normalizedRows = $input.all().map((item, index) => normalizeRow(item.json, index));
+const knowledgeItems = normalizedRows
   .filter(item => item.active)
   .filter(item => allowedBrands.has(brandKey(item.brand)))
-  .filter(item => item.answer && item.intent);
+  .filter(item => item.answer && item.intent)
+  .filter(item => item.audience === 'customer');
+
+const duplicateIntents = [...new Set(knowledgeItems.map(item => item.intent).filter((intent, index, all) => all.indexOf(intent) !== index))];
+const invalidExampleRows = knowledgeItems.filter(item => item.question_examples.length < 1).map(item => item.row_index);
+if (knowledgeItems.length < 10) {
+  throw new Error('Từ chối ghi Redis: ZeO chỉ còn ' + knowledgeItems.length + ' mục hợp lệ (tối thiểu 10). Snapshot cũ vẫn được giữ nguyên.');
+}
+if (duplicateIntents.length) {
+  throw new Error('Từ chối ghi Redis: intent bị trùng: ' + duplicateIntents.join(', '));
+}
+if (invalidExampleRows.length) {
+  throw new Error('Từ chối ghi Redis: thiếu question_examples tại dòng ' + invalidExampleRows.join(', '));
+}
 
 knowledgeItems.sort((a, b) => b.priority - a.priority || a.intent.localeCompare(b.intent));
 const snapshotJson = JSON.stringify(knowledgeItems);
+const excludedInternalCount = normalizedRows.filter(item => item.active && item.audience === 'internal').length;
 
 return [{
   json: {
@@ -165,8 +217,9 @@ return [{
     brand_scope: 'ZeO/PANO/Oplus',
     knowledge_count: knowledgeItems.length,
     updated_at: new Date().toISOString(),
-    schema_version: 1,
+    schema_version: 2,
     snapshot_hash: fnv1a(snapshotJson),
+    excluded_internal_count: excludedInternalCount,
     snapshot_json: snapshotJson,
   }
 }];
@@ -198,7 +251,7 @@ return [{
     WriteRedisSyncMetadata = {
         operation: 'set',
         key: 'zeo:sync:faq:basic:last-success',
-        value: '={{ JSON.stringify({ snapshot_key: $("Normalize Knowledge").first().json.snapshot_key, knowledge_count: $("Normalize Knowledge").first().json.knowledge_count, updated_at: $("Normalize Knowledge").first().json.updated_at, schema_version: $("Normalize Knowledge").first().json.schema_version, snapshot_hash: $("Normalize Knowledge").first().json.snapshot_hash }) }}',
+        value: '={{ JSON.stringify({ snapshot_key: $("Normalize Knowledge").first().json.snapshot_key, knowledge_count: $("Normalize Knowledge").first().json.knowledge_count, excluded_internal_count: $("Normalize Knowledge").first().json.excluded_internal_count, updated_at: $("Normalize Knowledge").first().json.updated_at, schema_version: $("Normalize Knowledge").first().json.schema_version, snapshot_hash: $("Normalize Knowledge").first().json.snapshot_hash }) }}',
     };
 
     // =====================================================================

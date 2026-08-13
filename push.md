@@ -1,84 +1,98 @@
-# Push workflow an toan, giu config tren n8n UI
+# Push workflow an toàn, giữ cấu hình trên n8n UI
 
-Dung file nay khi muon day code workflow len n8n ma van giu cac config da gan truc tiep tren UI nhu credential, App credential, Page credential, Telegram chat ID, verify token, webhook subscription.
+Các workflow đã được pull từ n8n trước khi sửa nên file local hiện có App ID, credential ID, Page credential, project và workflow ID mới nhất tại thời điểm chỉnh sửa. File giữ nguyên trạng thái `active` theo bản remote để khi bạn push không vô tình unpublish workflow đang chạy.
 
-Luu y quan trong:
-- Luon dung repo that: `/Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n`
-- Khong dung `/Users/hyden/Documents/N8n/ChatbotN8n` vi thu muc do khong phai repo workflow that.
-- Neu muon giu config UI, KHONG tu dong chay `resolve --mode keep-current`.
-- `keep-current` = lay file local ghi de UI. Neu local thieu credential/config thi UI se mat config.
-- Cach an toan la: luu patch code local -> pull ban moi nhat tu n8n UI -> apply lai patch code -> validate -> push.
+## Nguyên tắc
 
-## 1. Kiem tra trang thai chung
+- Repo đúng: `/Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n`.
+- Không dùng thư mục `/Users/hyden/Documents/N8n/ChatbotN8n`; đó chỉ là bản kiểm thử tạm.
+- Không mở và sửa cùng một workflow trên n8n UI trong lúc chuẩn bị push.
+- `keep-current` nghĩa là **bản local ghi đè bản UI**.
+- `keep-incoming` nghĩa là **lấy bản UI và bỏ thay đổi local**.
+- Không dùng lại quy trình `git diff > patch` rồi `git apply --3way` khi index đang khác; đây là nguyên nhân lỗi `does not match index` trước đây.
+
+## 1. Kiểm tra trước khi push
 
 ```bash
 cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
-npx --yes n8nac list
+
 git status --short
-```
+git diff --check
 
-## 2. Push ZeO Chatbot, giu config UI
-
-```bash
-cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
-
-npx --yes n8nac resolve d7fctbMhVUmhrNG0 --mode keep-current
+npx --yes n8nac skills validate workflows/local-n8n/zeo_knowledge_sync_basic.workflow.ts
+npx --yes n8nac skills validate workflows/local-n8n/cfc_knowledge_sync_basic.workflow.ts
 npx --yes n8nac skills validate workflows/local-n8n/zeo_chatbot.workflow.ts
-npx --yes n8nac push workflows/local-n8n/zeo_chatbot.workflow.ts --verify
+npx --yes n8nac skills validate workflows/local-n8n/cfc_cobay_chatbot.workflow.ts
 ```
 
-## 3. Push CFC Co Bay Chatbot, giu config UI
+## 2. Đẩy Knowledge trước
 
 ```bash
 cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
 
-npx --yes n8nac resolve uJOo6NQO2mJZhUAr --mode keep-current
-npx --yes n8nac skills validate workflows/local-n8n/cfc_cobay_chatbot.workflow.ts
+npx --yes n8nac push workflows/local-n8n/zeo_knowledge_sync_basic.workflow.ts --verify
+npx --yes n8nac push workflows/local-n8n/cfc_knowledge_sync_basic.workflow.ts --verify
+```
+
+Nếu CLI báo conflict nhưng từ lúc Codex hoàn tất bạn **không sửa hai workflow này trên UI**, giữ bản local đã kiểm thử:
+
+```bash
+npx --yes n8nac resolve DhrLUsDsldhxtTdX --mode keep-current
+npx --yes n8nac resolve 92I5floRW5MElgu5 --mode keep-current
+```
+
+Sau đó chạy lại hai lệnh `push --verify` ở trên.
+
+Tiếp theo, vào n8n chạy tay `Zeo Knowledge` và `CFC Co Bay Knowledge` một lần. Chỉ tiếp tục khi cả hai execution thành công.
+
+## 3. Kiểm tra Redis đã warm
+
+```bash
+cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/infra/redis
+docker compose exec redis redis-cli -a "$REDIS_PASSWORD"
+```
+
+Trong `redis-cli`:
+
+```text
+GET zeo:sync:faq:basic:last-success
+GET cfc:sync:faq:basic:last-success
+STRLEN zeo:kb:basic:active
+STRLEN cfc:kb:basic:active
+```
+
+Kỳ vọng `knowledge_count` hiện tại: ZeO `47`, CFC `7`. Không cần `FLUSHALL`.
+
+## 4. Đẩy hai Chatbot
+
+```bash
+cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
+
+npx --yes n8nac push workflows/local-n8n/zeo_chatbot.workflow.ts --verify
 npx --yes n8nac push workflows/local-n8n/cfc_cobay_chatbot.workflow.ts --verify
 ```
 
-## 4. Push Telegram Operations Alert, giu config UI
+Nếu CLI báo conflict nhưng từ lúc Codex hoàn tất bạn **không sửa hai chatbot trên UI**, giữ bản local đã có credential:
 
 ```bash
-cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
-
-WF="workflows/local-n8n/chatbot_operations_alert.workflow.ts"
-ID="f2IjxVj9sW3KQRAw"
-PATCH="/tmp/chatbot_operations_alert.patch"
-
-git diff -- "$WF" > "$PATCH"
-npx --yes n8nac pull "$ID"
-
-if [ -s "$PATCH" ]; then
-  git apply --3way "$PATCH"
-fi
-
-git diff -- "$WF" | rg -n "credentials|facebookGraph|telegram|chatId|webhookId|appId|verify|Verify|SET_TELEGRAM" || true
-npx --yes n8nac skills validate "$WF"
-npx --yes n8nac push "$WF" --verify
+npx --yes n8nac resolve d7fctbMhVUmhrNG0 --mode keep-current
+npx --yes n8nac resolve uJOo6NQO2mJZhUAr --mode keep-current
 ```
 
-## 5. Neu van bi conflict
+Sau đó chạy lại hai lệnh `push --verify`.
 
-Neu push bao conflict, uu tien chay lai dung block an toan ben tren cho workflow do.
+## 5. Khi đã sửa workflow trên UI sau lần Codex hoàn tất
 
-Chi dung lenh nay khi ban CHAC CHAN muon giu ban tren UI va bo qua local:
+Không dùng `keep-current` ngay. Dừng lại và pull/merge lại thay đổi UI trước; nếu không, credential hoặc node vừa cấu hình trên UI có thể bị ghi đè.
 
-```bash
-npx --yes n8nac resolve <WORKFLOW_ID> --mode keep-incoming
-```
+Không dùng `keep-incoming` nếu còn muốn giữ phần code local, vì lệnh đó bỏ thay đổi local của workflow tương ứng.
 
-Chi dung lenh nay khi ban CHAC CHAN muon local ghi de UI, ke ca credential/config UI:
+## 6. Sau khi push
 
-```bash
-npx --yes n8nac resolve <WORKFLOW_ID> --mode keep-current
-```
+1. Mở từng workflow và kiểm tra credential không có cảnh báo đỏ.
+2. Chạy tay hai Knowledge workflow, kiểm tra Redis như bước 3.
+3. Publish hai chatbot.
+4. Test bằng tài khoản Facebook cá nhân, không dùng chính Page để nhắn.
+5. Xem `Executions` để xác nhận đúng workflow nhận đúng Page.
 
-## 6. Kiem tra sau khi push
-
-```bash
-cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
-npx --yes n8nac verify d7fctbMhVUmhrNG0
-npx --yes n8nac verify uJOo6NQO2mJZhUAr
-npx --yes n8nac verify f2IjxVj9sW3KQRAw
-```
+Telegram Operations Alert không thay đổi trong đợt này nên không cần push lại.

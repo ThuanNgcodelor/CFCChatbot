@@ -1,7 +1,7 @@
 import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
-// Workflow : CFC Co Bay Knowledge Sync Basic
+// Workflow : CFC Co Bay Knowledge
 // Nodes   : 6  |  Connections: 5
 //
 // NODE INDEX
@@ -31,12 +31,12 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
     id: '92I5floRW5MElgu5',
-    name: 'CFC Co Bay Knowledge Sync Basic',
+    name: 'CFC Co Bay Knowledge',
     active: false,
     isArchived: false,
-    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1' },
+    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate' },
 })
-export class CfcCoBayKnowledgeSyncBasicWorkflow {
+export class CfcCoBayKnowledgeWorkflow {
     // =====================================================================
     // CONFIGURATION DES NOEUDS
     // =====================================================================
@@ -62,7 +62,6 @@ export class CfcCoBayKnowledgeSyncBasicWorkflow {
             interval: [
                 {
                     field: 'minutes',
-                    minutesInterval: 15,
                 },
             ],
         },
@@ -79,13 +78,16 @@ export class CfcCoBayKnowledgeSyncBasicWorkflow {
     ReadCfcFaqRows = {
         documentId: {
             __rl: true,
-            value: 'https://docs.google.com/spreadsheets/d/1o4vk2YwTVHbuvJxPedTAELCDeQa7iAszZ1kfDKQx0nk/edit?gid=0#gid=0',
+            value: 'https://docs.google.com/spreadsheets/d/1EBiuH3TVVSwLQE1loQ2bYijlaJPHGGFB9rAXM3xP9Tw/edit?gid=0#gid=0',
             mode: 'url',
         },
         sheetName: {
             __rl: true,
-            value: 'CFC_FAQ',
-            mode: 'name',
+            value: 'gid=0',
+            mode: 'list',
+            cachedResultName: 'FAQ',
+            cachedResultUrl:
+                'https://docs.google.com/spreadsheets/d/1EBiuH3TVVSwLQE1loQ2bYijlaJPHGGFB9rAXM3xP9Tw/edit#gid=0',
         },
         options: {},
     };
@@ -127,7 +129,7 @@ function fnv1a(value) {
 }
 
 const cfcBrandKeys = new Set(['cfc', 'co bay', 'cò bay', 'cfc/co bay', 'cfc/cò bay']);
-const knowledgeItems = $input.all()
+const normalizedRows = $input.all()
   .map((item, index) => ({
     active: asBool(item.json.active ?? true),
     brand: text(item.json.brand || 'CFC'),
@@ -138,14 +140,32 @@ const knowledgeItems = $input.all()
     priority: Number(item.json.priority || 0),
     source_id: text(item.json.source_id || 'cfc_faq_google_sheet'),
     updated_at: text(item.json.updated_at || new Date().toISOString().slice(0, 10)),
+    audience: text(item.json.audience || 'customer').toLowerCase(),
+    answer_mode: text(item.json.answer_mode || 'direct').toLowerCase(),
+    risk_level: text(item.json.risk_level || (['support', 'policy'].includes(text(item.json.category)) ? 'medium' : 'low')).toLowerCase(),
     row_index: index + 1,
-  }))
+  }));
+const knowledgeItems = normalizedRows
   .filter(item => item.active)
   .filter(item => cfcBrandKeys.has(brandKey(item.brand)))
-  .filter(item => item.intent && item.answer);
+  .filter(item => item.intent && item.answer)
+  .filter(item => item.audience === 'customer');
+
+const duplicateIntents = [...new Set(knowledgeItems.map(item => item.intent).filter((intent, index, all) => all.indexOf(intent) !== index))];
+const invalidExampleRows = knowledgeItems.filter(item => item.question_examples.length < 1).map(item => item.row_index);
+if (knowledgeItems.length < 5) {
+  throw new Error('Từ chối ghi Redis: CFC chỉ còn ' + knowledgeItems.length + ' mục hợp lệ (tối thiểu 5). Snapshot cũ vẫn được giữ nguyên.');
+}
+if (duplicateIntents.length) {
+  throw new Error('Từ chối ghi Redis: intent bị trùng: ' + duplicateIntents.join(', '));
+}
+if (invalidExampleRows.length) {
+  throw new Error('Từ chối ghi Redis: thiếu question_examples tại dòng ' + invalidExampleRows.join(', '));
+}
 
 knowledgeItems.sort((a, b) => b.priority - a.priority || a.intent.localeCompare(b.intent));
 const snapshotJson = JSON.stringify(knowledgeItems);
+const excludedInternalCount = normalizedRows.filter(item => item.active && item.audience === 'internal').length;
 
 return [{
   json: {
@@ -153,8 +173,9 @@ return [{
     brand_scope: 'CFC/Co Bay',
     knowledge_count: knowledgeItems.length,
     updated_at: new Date().toISOString(),
-    schema_version: 1,
+    schema_version: 2,
     snapshot_hash: fnv1a(snapshotJson),
+    excluded_internal_count: excludedInternalCount,
     snapshot_json: snapshotJson,
   },
 }];
@@ -186,7 +207,7 @@ return [{
     WriteCfcRedisSyncMetadata = {
         operation: 'set',
         key: 'cfc:sync:faq:basic:last-success',
-        value: '={{ JSON.stringify({ snapshot_key: $("Normalize CFC Knowledge").first().json.snapshot_key, knowledge_count: $("Normalize CFC Knowledge").first().json.knowledge_count, updated_at: $("Normalize CFC Knowledge").first().json.updated_at, schema_version: $("Normalize CFC Knowledge").first().json.schema_version, snapshot_hash: $("Normalize CFC Knowledge").first().json.snapshot_hash }) }}',
+        value: '={{ JSON.stringify({ snapshot_key: $("Normalize CFC Knowledge").first().json.snapshot_key, knowledge_count: $("Normalize CFC Knowledge").first().json.knowledge_count, excluded_internal_count: $("Normalize CFC Knowledge").first().json.excluded_internal_count, updated_at: $("Normalize CFC Knowledge").first().json.updated_at, schema_version: $("Normalize CFC Knowledge").first().json.schema_version, snapshot_hash: $("Normalize CFC Knowledge").first().json.snapshot_hash }) }}',
     };
 
     // =====================================================================

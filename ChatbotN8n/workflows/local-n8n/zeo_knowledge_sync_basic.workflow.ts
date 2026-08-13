@@ -115,6 +115,11 @@ function splitExamples(value) {
   return String(value || '').split(';').map(normalizeText).filter(Boolean);
 }
 
+function splitTags(value) {
+  if (Array.isArray(value)) return value.map(String).map(normalizeText).filter(Boolean);
+  return String(value || '').split(/[|;,]/).map(normalizeText).filter(Boolean);
+}
+
 function normalizeBrand(value) {
   const brand = normalizeText(value || 'ZeO');
   return brand || 'ZeO';
@@ -174,6 +179,9 @@ function normalizeRow(row, index) {
     audience,
     answer_mode: answerMode,
     risk_level: normalizeText(row.risk_level || (['policy', 'support'].includes(category) ? 'medium' : 'low')).toLowerCase(),
+    learning_tags: splitTags(row.learning_tags),
+    profile_slots: splitTags(row.profile_slots),
+    escalation_policy: normalizeText(row.escalation_policy || ''),
     row_index: index + 1,
   };
 }

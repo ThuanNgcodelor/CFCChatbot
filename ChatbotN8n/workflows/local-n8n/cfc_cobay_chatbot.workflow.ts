@@ -2,13 +2,15 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : CFC Co Bay Chatbot
-// Nodes   : 15  |  Connections: 17
+// Nodes   : 18  |  Connections: 23
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
 // MessengerTrigger                   facebookTrigger            [creds]
 // LocDauVao                          code
+// GetCfcCustomerProfile              redis                      [onError→regular] [creds] [alwaysOutput]
+// MergeCfcCustomerProfile            code
 // GetCfcSession                      redis                      [onError→regular] [creds] [alwaysOutput]
 // GetCfcKnowledgeSnapshot            redis                      [onError→regular] [creds] [alwaysOutput]
 // CfcRagTimKiem                      code
@@ -16,6 +18,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // GoiOllamaLocal                     httpRequest                [onError→out(1)]
 // KiemChung                          code
 // RouterGuardrail                    if
+// SaveCfcCustomerProfile             redis                      [onError→regular] [creds]
 // SaveCfcSession                     redis                      [onError→regular] [creds]
 // NhanKhachAuto                      httpRequest                [creds]
 // NhanKhachFallback                  httpRequest                [creds]
@@ -27,22 +30,28 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // ──────────────────────────────────────────────────────────────────
 // MessengerTrigger
 //    → LocDauVao
-//      → GetCfcSession
-//        → GetCfcKnowledgeSnapshot
-//          → CfcRagTimKiem
-//            → RouterCoNguon
-//              → SaveCfcSession
-//                → NhanKhachAuto
-//             .out(1) → GoiOllamaLocal
-//                → KiemChung
-//                  → RouterGuardrail
-//                    → SaveCfcSession (↩ loop)
-//                   .out(1) → SaveCfcSession (↩ loop)
-//                   .out(1) → PrepareTelegramAlert
-//                      → NotifyTelegramOperations
-//                → KiemChung (↩ loop)
-//             .out(2) → SaveCfcSession (↩ loop)
-//             .out(2) → PrepareTelegramAlert (↩ loop)
+//      → GetCfcCustomerProfile
+//        → MergeCfcCustomerProfile
+//          → GetCfcSession
+//            → GetCfcKnowledgeSnapshot
+//              → CfcRagTimKiem
+//                → RouterCoNguon
+//                  → SaveCfcCustomerProfile
+//                  → SaveCfcSession
+//                    → NhanKhachAuto
+//                 .out(1) → GoiOllamaLocal
+//                    → KiemChung
+//                      → RouterGuardrail
+//                        → SaveCfcCustomerProfile (↩ loop)
+//                        → SaveCfcSession (↩ loop)
+//                       .out(1) → SaveCfcCustomerProfile (↩ loop)
+//                       .out(1) → SaveCfcSession (↩ loop)
+//                       .out(1) → PrepareTelegramAlert
+//                          → NotifyTelegramOperations
+//                    → KiemChung (↩ loop)
+//                 .out(2) → SaveCfcCustomerProfile (↩ loop)
+//                 .out(2) → SaveCfcSession (↩ loop)
+//                 .out(2) → PrepareTelegramAlert (↩ loop)
 // </workflow-map>
 
 // =====================================================================
@@ -52,7 +61,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 @workflow({
     id: 'uJOo6NQO2mJZhUAr',
     name: 'CFC Co Bay Chatbot',
-    active: true,
+    active: false,
     isArchived: false,
     settings: { executionOrder: 'v1', binaryMode: 'separate' },
 })
@@ -129,6 +138,7 @@ function normalizeForSearch(value) {
     .filter(Boolean)
     .map(token => aliases[token] || token)
     .join(' ')
+    .replace(/\\b(o|tai)\\s+dua\\b/g, '$1 dau')
     .replace(/\\s+/g, ' ')
     .trim();
 }
@@ -142,9 +152,12 @@ const tokenCount = normalizedText ? normalizedText.split(' ').length : 0;
 const phoneDigits = text.replace(/\\D/g, '');
 const contextualPhone = /(so dien thoai|dien thoai|so cua toi|goi toi|lien he)/.test(normalizedText) && /^\\d{8,12}$/.test(phoneDigits);
 const hasPhoneNumber = /(0\\d[\\d\\s.\\-]{7,12}\\d|\\+?84[\\d\\s.\\-]{8,12}\\d)/.test(text) || /^\\d{9,11}$/.test(phoneDigits) || contextualPhone;
-const areaWords = ['tinh', 'thanh pho', 'tp', 'huyen', 'xa', 'phuong', 'thi xa', 'khu vuc', 'mien', 'can tho', 'thai binh', 'kien giang', 'tra noc'];
-const hasAreaInfo = areaWords.some(word => normalizedText.includes(word)) ||
-  /(^|\\s)(minh o|em o|toi o|khach hang cu o|ben minh o|o tinh|o huyen|khu vuc)\\s+[a-z]/.test(normalizedText);
+const areaWords = ['tinh', 'thanh pho', 'tp', 'huyen', 'quan', 'q', 'xa', 'phuong', 'thi xa', 'khu vuc', 'mien', 'can tho', 'thai binh', 'kien giang', 'tra noc', 'tphcm', 'ho chi minh'];
+const isAreaQuestion = /(^|\\s)(o dau|tai dau|cho nao|dia chi.*o dau|mua o dau|ban o dau)(\\s|$)/.test(normalizedText);
+const hasAreaInfo = !isAreaQuestion && (
+  areaWords.some(word => normalizedText.includes(word)) ||
+  /(^|\\s)(minh o|em o|toi o|anh o|chi o|khach hang cu o|ben minh o|o tinh|o huyen|o quan|khu vuc)\\s+[a-z0-9]/.test(normalizedText)
+);
 const dealerRequestWords = ['nha phan phoi', 'dai ly', 'phan phoi', 'ban le', 'mua de ban', 'mua ban le', 'lien he mua', 'mua o dau', 'mua de ban le'];
 const isDealerLocationRequest = dealerRequestWords.some(word => normalizedText.includes(word)) ||
   ((normalizedText.includes('mua') || normalizedText.includes('lien he')) && hasAreaInfo);
@@ -176,6 +189,7 @@ return [{
     isPromptInjection,
     isProductDiscovery: productDiscoveryWords.some(word => normalizedText.includes(word)),
     hasPhoneNumber,
+    phoneNumber: hasPhoneNumber ? phoneDigits : '',
     hasAreaInfo,
     isDealerLocationRequest,
   },
@@ -184,11 +198,71 @@ return [{
     };
 
     @node({
+        id: '097d8f8d-f22d-4d85-931e-7859c2412376',
+        name: 'Get CFC Customer Profile',
+        type: 'n8n-nodes-base.redis',
+        version: 1,
+        position: [448, 304],
+        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+        onError: 'continueRegularOutput',
+        alwaysOutputData: true,
+    })
+    GetCfcCustomerProfile = {
+        operation: 'get',
+        propertyName: 'customerProfileRaw',
+        key: '={{ "cfc:customer:messenger:" + $json.senderId }}',
+        keyType: 'string',
+        options: {},
+    };
+
+    @node({
+        id: '8106ee22-8bf8-4586-aa0e-23e2addb041f',
+        name: 'Merge CFC Customer Profile',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [656, 304],
+    })
+    MergeCfcCustomerProfile = {
+        jsCode: `
+function parseJson(value, fallback) {
+  if (!value) return fallback;
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+const input = $('Loc Dau Vao').first().json;
+const existingProfile = parseJson($input.first().json.customerProfileRaw, {});
+const now = new Date().toISOString();
+const profile = {
+  brand: 'CFC',
+  channel: 'messenger',
+  sender_id: input.senderId || existingProfile.sender_id || '',
+  fb_name: existingProfile.fb_name || '',
+  phone: existingProfile.phone || existingProfile.customer_phone || '',
+  area: existingProfile.area || existingProfile.customer_location || '',
+  last_need: existingProfile.last_need || '',
+  last_intent: existingProfile.last_intent || '',
+  lead_stage: existingProfile.lead_stage || 'new',
+  pending_slots: Array.isArray(existingProfile.pending_slots) ? existingProfile.pending_slots : ['phone', 'area'],
+  conversation_summary: existingProfile.conversation_summary || '',
+  first_seen_at: existingProfile.first_seen_at || now,
+  last_seen_at: now,
+};
+
+return [{ json: {
+  ...input,
+  customerProfileRaw: JSON.stringify(profile),
+  customerProfile: profile,
+} }];
+`,
+    };
+
+    @node({
         id: '67f7cabe-99bd-4b73-9acd-438022a97e99',
         name: 'Get CFC Session',
         type: 'n8n-nodes-base.redis',
         version: 1,
-        position: [448, 304],
+        position: [880, 304],
         credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
         onError: 'continueRegularOutput',
         alwaysOutputData: true,
@@ -206,7 +280,7 @@ return [{
         name: 'Get CFC Knowledge Snapshot',
         type: 'n8n-nodes-base.redis',
         version: 1,
-        position: [656, 304],
+        position: [1088, 304],
         credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
         onError: 'continueRegularOutput',
         alwaysOutputData: true,
@@ -224,7 +298,7 @@ return [{
         name: 'CFC RAG Tim Kiem',
         type: 'n8n-nodes-base.code',
         version: 2,
-        position: [880, 304],
+        position: [1312, 304],
     })
     CfcRagTimKiem = {
         jsCode: `
@@ -247,7 +321,8 @@ function normalizeForSearch(value) {
     bn: 'ban', mn: 'minh', ship: 'giao hang', cty: 'cong ty',
     sdt: 'so dien thoai', dt: 'dien thoai', npp: 'nha phan phoi',
   };
-  return normalize(value).split(/\\s+/).filter(Boolean).map(token => aliases[token] || token).join(' ');
+  return normalize(value).split(/\\s+/).filter(Boolean).map(token => aliases[token] || token).join(' ')
+    .replace(/\\b(o|tai)\\s+dua\\b/g, '$1 dau');
 }
 
 const STOP_WORDS = new Set([
@@ -307,6 +382,8 @@ function scoreEntry(query, entry) {
 
 const input = $('Loc Dau Vao').first().json;
 const session = parseJson($('Get CFC Session').first().json.sessionRaw, {});
+const profileInput = $('Merge CFC Customer Profile').first().json;
+const customerProfile = parseJson(profileInput.customerProfileRaw || profileInput.customerProfile, {});
 const snapshotRaw = $input.first().json.knowledgeSnapshot;
 const snapshot = parseSnapshotEnvelope(snapshotRaw);
 const knowledgeItems = snapshot.items
@@ -321,8 +398,31 @@ const knowledgeItems = snapshot.items
     priority: Number(item.priority || 0),
     audience: String(item.audience || 'customer').trim().toLowerCase(),
     answer_mode: String(item.answer_mode || '').trim().toLowerCase(),
+    risk_level: String(item.risk_level || 'low').trim().toLowerCase(),
   }))
   .filter(item => item.active && item.answer && item.intent && item.audience !== 'internal');
+
+function findByIntent(...intents) {
+  const wanted = new Set(intents.map(item => normalizeForSearch(item)));
+  return knowledgeItems.find(item => wanted.has(normalizeForSearch(item.intent))) || null;
+}
+
+function findByKnowledgeTerms(...terms) {
+  const normalizedTerms = terms.map(normalizeForSearch).filter(Boolean);
+  return knowledgeItems.find(item => {
+    const haystack = normalizeForSearch([item.intent, item.category, item.question_examples.join(' '), item.answer].join(' '));
+    return normalizedTerms.every(term => haystack.includes(term));
+  }) || null;
+}
+
+function answerModeFor(entry) {
+  return entry?.answer_mode === 'rewrite' ? 'rewrite' : 'direct';
+}
+
+function canAnswerMedium(entry) {
+  if (!entry) return false;
+  return entry.risk_level === 'low' || ['product', 'shipping', 'faq', 'company', 'operations'].includes(entry.category);
+}
 
 const allowedBrands = new Set(['cfc', 'co bay', 'cfc/co bay', 'cfc co bay']);
 const currentQuestion = normalizeForSearch(input.normalizedText || input.text);
@@ -357,10 +457,62 @@ const confidence = contextResolved || best?.exact || (bestScore >= 76 && scoreMa
   ? 'high'
   : (bestScore >= 48 && scoreMargin >= 8 && (best?.matched || 0) >= 2 ? 'medium' : 'low');
 const productLineItem = knowledgeItems.find(item => item.intent === 'product_lines');
-const previousText = normalizeForSearch([session.last_user_message, session.last_bot_reply, session.last_intent].filter(Boolean).join(' '));
+const previousText = normalizeForSearch([session.last_user_message, session.last_bot_reply, session.last_intent, customerProfile.last_need, customerProfile.conversation_summary].filter(Boolean).join(' '));
 const waitingForContact = ['so dien thoai', 'khu vuc', 'nhan vien', 'lien he', 'dai ly', 'phan phoi'].some(word => previousText.includes(word));
-const looksLikeAreaReply = /(^|\\s)(minh o|em o|toi o|khach hang cu o|ben minh o|o tinh|o huyen|khu vuc)\\s+[a-z]/.test(input.normalizedText || '');
-const isLeadInfo = Boolean(input.hasPhoneNumber || (input.hasAreaInfo && (waitingForContact || looksLikeAreaReply || input.isDealerLocationRequest)));
+const normalizedInputText = normalizeForSearch(input.text);
+const isAreaQuestion = /(^|\\s)(o dau|tai dau|cho nao|dia chi.*o dau|mua o dau|ban o dau)(\\s|$)/.test(normalizedInputText);
+const looksLikeAreaReply = !isAreaQuestion && /(^|\\s)(minh o|em o|toi o|khach hang cu o|ben minh o|o tinh|o huyen|khu vuc)\\s+[a-z]/.test(input.normalizedText || '');
+const profilePhone = String(customerProfile.phone || session.customer_phone || '').trim();
+const profileArea = String(customerProfile.area || session.customer_location || '').trim();
+const inputPhone = String(input.phoneNumber || '').trim();
+const inputArea = input.hasAreaInfo ? input.text : '';
+const knownPhone = inputPhone || profilePhone;
+const knownArea = inputArea || profileArea;
+const hasFullContact = Boolean(knownPhone && knownArea);
+const isLeadInfo = Boolean(input.hasPhoneNumber || (input.hasAreaInfo && (waitingForContact || looksLikeAreaReply || input.isDealerLocationRequest || profilePhone)));
+function contactFallbackReason() {
+  if (knownPhone && knownArea) return 'lead_contact_ready';
+  if (knownPhone) return 'lead_phone_received';
+  if (knownArea) return 'lead_area_received';
+  return 'lead_contact_received';
+}
+function contactReply(prefix) {
+  if (knownPhone && knownArea) {
+    return 'Dạ, Cò Bay đã có số điện thoại và khu vực của bạn. Admin hoặc nhân viên khu vực sẽ liên hệ hỗ trợ bạn sớm nhất nha.';
+  }
+  if (knownPhone) {
+    return (prefix || 'Dạ, Cò Bay đã nhận được số điện thoại của bạn.') + ' Bạn gửi thêm khu vực/tỉnh thành để admin hoặc nhân viên khu vực hỗ trợ đúng nơi nha.';
+  }
+  if (knownArea) {
+    return (prefix || 'Dạ Cò Bay đã nhận được khu vực của bạn.') + ' Bạn gửi thêm số điện thoại để admin hoặc nhân viên khu vực liên hệ hỗ trợ sớm nhất nha.';
+  }
+  return 'Dạ, bạn gửi giúp Cò Bay số điện thoại và khu vực cụ thể. Admin sẽ chuyển nhân viên hoặc nhà phân phối khu vực liên hệ hỗ trợ sớm nhất nha.';
+}
+function shouldEscalateReadyLead(intent) {
+  if (!hasFullContact) return false;
+  const text = normalizeForSearch(input.text);
+  const wantsHuman = /(nhan vien|goi|lien he|tu van|admin|dai ly|nha phan phoi|phan phoi|nhap si|ban le|mua phan bon|mua hang)/.test(text);
+  return wantsHuman || ['wholesale_dealer', 'support_general', 'buy_online'].includes(intent);
+}
+const asksSavedArea = /(^|\\s)(toi|minh|em|anh|chi|oi)\\s+(o|tai)\\s+dau(\\s|$)/.test(normalizedInputText)
+  || /(con nho|nho).*(toi|minh|em|anh|chi).*(o dau|khu vuc|dia chi)/.test(normalizedInputText)
+  || /(khu vuc|dia chi).*(toi|minh|em).*(la gi|o dau|da luu)/.test(normalizedInputText);
+const asksSavedPhone = /(sdt|so dien thoai|dien thoai).*(cua )?(toi|minh|em|anh|chi)/.test(normalizedInputText)
+  || /(cho|xin|gui).*(lai )?(sdt|so dien thoai|dien thoai)/.test(normalizedInputText)
+  || /(con nho|nho).*(toi|minh|em|anh|chi).*(sdt|so dien thoai|dien thoai)/.test(normalizedInputText)
+  || /(da luu|co luu).*(sdt|so dien thoai|dien thoai)/.test(normalizedInputText);
+const isCompanyOverviewQuestion = /(gioi thieu|thong tin).*(cong ty|cfc|co bay)|((cong ty|cfc|co bay).*(la gi|lam gi|ve gi|gioi thieu))/.test(normalizedInputText);
+const isCompanyAddressQuestion = /(dia chi|cong ty|cfc|co bay|nha may).*(o dau|tai dau|cho nao|tra noc)|((o dau|tai dau|cho nao).*(cong ty|cfc|co bay|nha may))/.test(normalizedInputText);
+let forcedEntry = null;
+if (isCompanyOverviewQuestion) {
+  forcedEntry = findByIntent('company_overview')
+    || findByKnowledgeTerms('gioi thieu', 'cong ty')
+    || findByKnowledgeTerms('cfc', 'phan bon');
+} else if (isCompanyAddressQuestion) {
+  forcedEntry = findByIntent('address')
+    || findByKnowledgeTerms('dia chi', 'cong ty')
+    || findByKnowledgeTerms('tra noc');
+}
 const isDuplicate = Boolean(input.messageId && session.last_message_id && input.messageId === session.last_message_id);
 const shouldIgnore = Boolean(input.isEcho || !input.senderId || isDuplicate);
 
@@ -400,6 +552,19 @@ if (shouldIgnore) {
   fallbackReason = '';
   matchedIntent = session.last_intent || 'acknowledgement';
   finalReply = 'Dạ vâng ạ. Khi cần hỗ trợ thêm, bạn cứ nhắn Cò Bay nhé.';
+} else if (asksSavedArea || asksSavedPhone) {
+  responseMode = 'direct';
+  fallbackReason = '';
+  matchedIntent = 'customer_profile_lookup';
+  if (asksSavedArea && asksSavedPhone && knownArea && knownPhone) {
+    finalReply = 'Dạ, Cò Bay đang lưu khu vực của bạn là: ' + knownArea + ', số điện thoại là: ' + knownPhone + '.';
+  } else if (asksSavedArea && knownArea) {
+    finalReply = 'Dạ, thông tin khu vực Cò Bay đang lưu của bạn là: ' + knownArea + '.';
+  } else if (asksSavedPhone && knownPhone) {
+    finalReply = 'Dạ, số điện thoại Cò Bay đang lưu của bạn là: ' + knownPhone + '.';
+  } else {
+    finalReply = 'Dạ, hiện Cò Bay chưa có đủ thông tin này trong hồ sơ chat. Bạn gửi lại giúp mình để Cò Bay lưu và hỗ trợ đúng hơn nha.';
+  }
 } else if (input.isPromptInjection) {
   responseMode = 'review';
   fallbackReason = 'prompt_injection';
@@ -410,14 +575,12 @@ if (shouldIgnore) {
   finalReply = 'Dạ, hiện Cò Bay hỗ trợ bằng tiếng Việt. Bạn gửi lại nội dung bằng tiếng Việt giúp mình nhé.';
 } else if (isLeadInfo) {
   responseMode = 'review';
-  fallbackReason = input.hasPhoneNumber && input.hasAreaInfo ? 'lead_contact_received' : (input.hasPhoneNumber ? 'lead_phone_received' : 'lead_area_received');
-  finalReply = input.hasPhoneNumber
-    ? 'Dạ, Cò Bay đã nhận được số điện thoại và thông tin bạn gửi. Admin hoặc nhân viên khu vực sẽ liên hệ hỗ trợ bạn sớm nhất nha.'
-    : 'Dạ Cò Bay đã nhận được khu vực của bạn. Bạn gửi thêm số điện thoại để admin hoặc nhân viên khu vực liên hệ hỗ trợ sớm nhất nha.';
+  fallbackReason = contactFallbackReason();
+  finalReply = contactReply(input.hasPhoneNumber ? 'Dạ, Cò Bay đã nhận được số điện thoại bạn gửi.' : 'Dạ Cò Bay đã nhận được khu vực của bạn.');
 } else if (input.isDealerLocationRequest) {
   responseMode = 'review';
-  fallbackReason = 'dealer_location_request';
-  finalReply = 'Dạ, bạn gửi giúp Cò Bay số điện thoại và khu vực cụ thể. Admin sẽ chuyển nhân viên hoặc nhà phân phối khu vực liên hệ hỗ trợ mua hàng sớm nhất nha.';
+  fallbackReason = hasFullContact ? 'lead_contact_ready' : 'dealer_location_request';
+  finalReply = contactReply();
 } else if (input.isSensitive) {
   responseMode = 'review';
   fallbackReason = 'sensitive_case';
@@ -426,8 +589,21 @@ if (shouldIgnore) {
   responseMode = 'review';
   fallbackReason = 'out_of_scope';
   finalReply = 'Dạ, mình đang hỗ trợ thông tin về phân bón và dịch vụ của Cò Bay. Bạn cho mình biết nhu cầu liên quan đến Cò Bay nhé.';
+} else if (forcedEntry || isCompanyOverviewQuestion || isCompanyAddressQuestion) {
+  fallbackReason = '';
+  const fallbackIntent = isCompanyAddressQuestion ? 'address' : 'company_overview';
+  const fallbackCategory = isCompanyAddressQuestion ? 'operations' : 'company';
+  const fallbackAnswer = isCompanyAddressQuestion
+    ? 'Dạ địa chỉ Công ty ở Trục chính KCN Trà Nóc 1, phường Thới An Đông, thành phố Cần Thơ ạ.'
+    : 'Dạ, Cò Bay là thương hiệu phân bón của CFC, hiện cung cấp các dòng phân bón như NPK và phân hữu cơ. Công ty ở Trục chính KCN Trà Nóc 1, phường Thới An Đông, thành phố Cần Thơ ạ.';
+  matchedIntent = forcedEntry?.intent || fallbackIntent;
+  matchedSourceId = forcedEntry?.source_id || '';
+  matchedCategory = forcedEntry?.category || fallbackCategory;
+  canonicalAnswer = forcedEntry?.answer || '';
+  finalReply = forcedEntry?.answer || fallbackAnswer;
+  responseMode = forcedEntry ? answerModeFor(forcedEntry) : 'direct';
 } else if (input.isProductDiscovery && productLineItem) {
-  responseMode = 'direct';
+  responseMode = answerModeFor(productLineItem);
   fallbackReason = '';
   matchedIntent = productLineItem.intent;
   matchedSourceId = productLineItem.source_id;
@@ -446,13 +622,34 @@ if (shouldIgnore) {
   matchedCategory = best.category;
   responseMode = best.answer_mode === 'rewrite' ? 'rewrite' : 'direct';
   fallbackReason = '';
+  if (shouldEscalateReadyLead(matchedIntent)) {
+    responseMode = 'review';
+    fallbackReason = 'lead_contact_ready';
+    finalReply = contactReply();
+  } else if (['wholesale_dealer', 'support_general', 'buy_online'].includes(matchedIntent) && (knownPhone || knownArea)) {
+    finalReply = contactReply('Dạ, Cò Bay đã nhận được một phần thông tin của bạn.');
+  }
 } else if (confidence === 'medium' && best) {
-  responseMode = 'direct';
-  fallbackReason = 'clarification_needed';
   matchedIntent = best.intent;
   matchedSourceId = best.source_id;
   matchedCategory = best.category;
-  finalReply = 'Dạ, bạn đang muốn hỏi về ' + (best.question_examples[0] || best.intent.replace(/_/g, ' ')) + ' đúng không ạ?';
+  if (canAnswerMedium(best)) {
+    responseMode = answerModeFor(best);
+    fallbackReason = '';
+    canonicalAnswer = best.answer;
+    finalReply = best.answer;
+  } else {
+    responseMode = 'direct';
+    fallbackReason = 'clarification_needed';
+    finalReply = 'Dạ, bạn đang muốn hỏi về ' + (best.question_examples[0] || best.intent.replace(/_/g, ' ')) + ' đúng không ạ?';
+  }
+  if (shouldEscalateReadyLead(matchedIntent)) {
+    responseMode = 'review';
+    fallbackReason = 'lead_contact_ready';
+    finalReply = contactReply();
+  } else if (['wholesale_dealer', 'support_general', 'buy_online'].includes(matchedIntent) && (knownPhone || knownArea)) {
+    finalReply = contactReply('Dạ, Cò Bay đã nhận được một phần thông tin của bạn.');
+  }
 }
 
 const routeIndex = responseMode === 'direct' ? 0 : responseMode === 'rewrite' ? 1 : responseMode === 'review' ? 2 : 3;
@@ -464,6 +661,28 @@ const history = shouldIgnore || !input.text
       { role: 'user', text: historyUserText },
       { role: 'assistant', text: finalReply, intent: matchedIntent, source_id: matchedSourceId },
     ].slice(-8);
+const pendingSlots = [];
+if (!knownPhone) pendingSlots.push('phone');
+if (!knownArea) pendingSlots.push('area');
+const leadStage = hasFullContact
+  ? (responseMode === 'review' ? 'qualified' : (customerProfile.lead_stage || 'qualified'))
+  : ((knownPhone || knownArea) ? 'collecting_contact' : (customerProfile.lead_stage || 'new'));
+const customerProfileState = {
+  ...customerProfile,
+  brand: 'CFC',
+  channel: 'messenger',
+  sender_id: input.senderId || customerProfile.sender_id || '',
+  phone: knownPhone,
+  area: knownArea,
+  last_need: matchedIntent || customerProfile.last_need || session.last_intent || '',
+  last_intent: matchedIntent || customerProfile.last_intent || '',
+  lead_stage: leadStage,
+  pending_slots: pendingSlots,
+  last_user_message: input.text,
+  last_bot_reply: finalReply,
+  first_seen_at: customerProfile.first_seen_at || new Date().toISOString(),
+  last_seen_at: new Date().toISOString(),
+};
 const sessionState = {
   ...session,
   current_brand: 'CFC',
@@ -475,9 +694,11 @@ const sessionState = {
   last_user_message: input.text,
   last_bot_reply: finalReply,
   last_message_id: input.messageId || session.last_message_id || '',
-  customer_phone: input.hasPhoneNumber ? input.text.replace(/\\D/g, '') : (session.customer_phone || ''),
-  customer_location: isLeadInfo && input.hasAreaInfo ? input.text : (session.customer_location || ''),
+  customer_phone: knownPhone,
+  customer_location: knownArea,
   pending_question: fallbackReason === 'clarification_needed' || responseMode === 'review' ? input.text : '',
+  lead_stage: leadStage,
+  pending_slots: pendingSlots,
   has_greeted: Boolean(session.has_greeted || input.isGreeting),
   history,
   updated_at: new Date().toISOString(),
@@ -523,6 +744,7 @@ return [{
     isLeadInfo,
     isDealerLocationRequest: Boolean(input.isDealerLocationRequest),
     shouldIgnore,
+    customerProfileState,
     sessionState,
   },
 }];
@@ -587,14 +809,14 @@ const normalizeFacts = value => String(value || '')
   .replace(/đ/g, 'd')
   .replace(/Đ/g, 'D')
   .toLowerCase()
-  .replace(/[^a-z0-9s]/g, ' ')
-  .replace(/s+/g, ' ')
+  .replace(/[^a-z0-9\\s]/g, ' ')
+  .replace(/\\s+/g, ' ')
   .trim();
 const styleWords = new Set('da ban minh ben shop hien tai co la va de duoc se som nhat nhe nha vui long cam on thong tin ho tro xin chao a voi cho neu can khi them giup'.split(' '));
 const canonicalTokens = new Set(normalizeFacts(canonicalAnswer).split(' ').filter(token => token.length >= 3));
 const unsupportedFacts = [...new Set(normalizeFacts(aiText).split(' ')
   .filter(token => token.length >= 3 && !canonicalTokens.has(token) && !styleWords.has(token)))];
-const canonicalNumbers = canonicalAnswer.match(/d[d.,:/-]*/g) || [];
+const canonicalNumbers = canonicalAnswer.match(/\\d[\\d.,:/-]*/g) || [];
 const missingCanonicalNumber = canonicalNumbers.some(number => !aiText.includes(number));
 const changedFacts = unsupportedFacts.length > 0 || missingCanonicalNumber;
 const passed = !tooShort && !tooLong && !hasForeignScript && !hasEnglishLeak && !hasModelLeak && !hasPromptLeak && !mentionsOtherBrand && !hallucinatedScope && !changedFacts;
@@ -657,6 +879,22 @@ return [{
             combinator: 'and',
         },
         options: {},
+    };
+
+    @node({
+        id: '73ae8e5d-2b9d-450d-9870-974d41452f3a',
+        name: 'Save CFC Customer Profile',
+        type: 'n8n-nodes-base.redis',
+        version: 1,
+        position: [1984, -96],
+        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+        onError: 'continueRegularOutput',
+    })
+    SaveCfcCustomerProfile = {
+        operation: 'set',
+        key: '={{ "cfc:customer:messenger:" + $json.senderId }}',
+        value: '={{ JSON.stringify($json.customerProfileState || {}) }}',
+        expire: false,
     };
 
     @node({
@@ -783,18 +1021,24 @@ return [{
     @links()
     defineRouting() {
         this.MessengerTrigger.out(0).to(this.LocDauVao.in(0));
-        this.LocDauVao.out(0).to(this.GetCfcSession.in(0));
+        this.LocDauVao.out(0).to(this.GetCfcCustomerProfile.in(0));
+        this.GetCfcCustomerProfile.out(0).to(this.MergeCfcCustomerProfile.in(0));
+        this.MergeCfcCustomerProfile.out(0).to(this.GetCfcSession.in(0));
         this.GetCfcSession.out(0).to(this.GetCfcKnowledgeSnapshot.in(0));
         this.GetCfcKnowledgeSnapshot.out(0).to(this.CfcRagTimKiem.in(0));
         this.CfcRagTimKiem.out(0).to(this.RouterCoNguon.in(0));
+        this.RouterCoNguon.out(0).to(this.SaveCfcCustomerProfile.in(0));
         this.RouterCoNguon.out(0).to(this.SaveCfcSession.in(0));
         this.RouterCoNguon.out(1).to(this.GoiOllamaLocal.in(0));
+        this.RouterCoNguon.out(2).to(this.SaveCfcCustomerProfile.in(0));
         this.RouterCoNguon.out(2).to(this.SaveCfcSession.in(0));
         this.RouterCoNguon.out(2).to(this.PrepareTelegramAlert.in(0));
         this.GoiOllamaLocal.out(0).to(this.KiemChung.in(0));
         this.GoiOllamaLocal.error().to(this.KiemChung.in(0));
         this.KiemChung.out(0).to(this.RouterGuardrail.in(0));
+        this.RouterGuardrail.out(0).to(this.SaveCfcCustomerProfile.in(0));
         this.RouterGuardrail.out(0).to(this.SaveCfcSession.in(0));
+        this.RouterGuardrail.out(1).to(this.SaveCfcCustomerProfile.in(0));
         this.RouterGuardrail.out(1).to(this.SaveCfcSession.in(0));
         this.RouterGuardrail.out(1).to(this.PrepareTelegramAlert.in(0));
         this.SaveCfcSession.out(0).to(this.NhanKhachAuto.in(0));

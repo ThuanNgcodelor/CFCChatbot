@@ -115,6 +115,11 @@ function examples(value) {
   return String(value || '').split(';').map(text).filter(Boolean);
 }
 
+function tags(value) {
+  if (Array.isArray(value)) return value.map(text).filter(Boolean);
+  return String(value || '').split(/[|;,]/).map(text).filter(Boolean);
+}
+
 function brandKey(value) {
   return text(value).toLowerCase().replace(/\\s*\\/\\s*/g, '/');
 }
@@ -143,6 +148,9 @@ const normalizedRows = $input.all()
     audience: text(item.json.audience || 'customer').toLowerCase(),
     answer_mode: text(item.json.answer_mode || 'direct').toLowerCase(),
     risk_level: text(item.json.risk_level || (['support', 'policy'].includes(text(item.json.category)) ? 'medium' : 'low')).toLowerCase(),
+    learning_tags: tags(item.json.learning_tags),
+    profile_slots: tags(item.json.profile_slots),
+    escalation_policy: text(item.json.escalation_policy || ''),
     row_index: index + 1,
   }));
 const knowledgeItems = normalizedRows

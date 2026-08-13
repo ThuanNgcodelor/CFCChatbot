@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : Zeo Chatbot
-// Nodes   : 19  |  Connections: 24
+// Nodes   : 21  |  Connections: 27
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -12,6 +12,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // GetCustomerProfile                 redis                      [onError→regular] [creds] [alwaysOutput]
 // MergeCustomerProfile               code
 // GetSession                         redis                      [onError→regular] [creds] [alwaysOutput]
+// GoiOllamaNluLocal                  httpRequest                [onError→out(1)]
+// DialogueManager                    code
 // GetKnowledgeSnapshot               redis                      [onError→regular] [creds] [alwaysOutput]
 // RagTimKiem                         code
 // RouterCoNguon                      switch
@@ -34,26 +36,29 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //      → GetCustomerProfile
 //        → MergeCustomerProfile
 //          → GetSession
-//            → GetKnowledgeSnapshot
-//              → RagTimKiem
-//                → RouterCoNguon
-//                  → SaveCustomerProfile
-//                  → SaveSession
-//                    → NhanKhachAuto
-//                 .out(1) → GoiOllamaLocal
-//                    → KiemChung
-//                      → RouterGuardrail
-//                        → SaveCustomerProfile (↩ loop)
-//                        → SaveSession (↩ loop)
-//                       .out(1) → SaveCustomerProfile (↩ loop)
-//                       .out(1) → SaveSession (↩ loop)
-//                       .out(1) → QueueLearningReview
-//                          → PrepareTelegramAlert
-//                            → NotifyTelegramOperations
-//                    → KiemChung (↩ loop)
-//                 .out(2) → SaveCustomerProfile (↩ loop)
-//                 .out(2) → SaveSession (↩ loop)
-//                 .out(2) → QueueLearningReview (↩ loop)
+//            → GoiOllamaNluLocal
+//              → DialogueManager
+//                → GetKnowledgeSnapshot
+//                  → RagTimKiem
+//                    → RouterCoNguon
+//                      → SaveCustomerProfile
+//                      → SaveSession
+//                        → NhanKhachAuto
+//                     .out(1) → GoiOllamaLocal
+//                        → KiemChung
+//                          → RouterGuardrail
+//                            → SaveCustomerProfile (↩ loop)
+//                            → SaveSession (↩ loop)
+//                           .out(1) → SaveCustomerProfile (↩ loop)
+//                           .out(1) → SaveSession (↩ loop)
+//                           .out(1) → QueueLearningReview
+//                              → PrepareTelegramAlert
+//                                → NotifyTelegramOperations
+//                        → KiemChung (↩ loop)
+//                     .out(2) → SaveCustomerProfile (↩ loop)
+//                     .out(2) → SaveSession (↩ loop)
+//                     .out(2) → QueueLearningReview (↩ loop)
+//              → DialogueManager (↩ loop)
 // </workflow-map>
 
 // =====================================================================
@@ -155,10 +160,14 @@ const lower = normalizeForSearch(text);
 const tokenCount = lower ? lower.split(' ').length : 0;
 const phoneMatch = text.match(/(?:\\+?84|0)[\\d\\s.\\-]{8,14}\\d/);
 const hasPhoneNumber = Boolean(phoneMatch);
-const areaWords = ['tinh', 'thanh pho', 'tp', 'huyen', 'quan', 'q', 'xa', 'phuong', 'thi xa', 'khu vuc', 'mien', 'can tho', 'binh duong', 'tphcm', 'ho chi minh', 'thu duc'];
+const lowerTokens = lower.split(' ').filter(Boolean);
+const areaPhraseWords = ['thanh pho', 'thi xa', 'khu vuc', 'can tho', 'binh duong', 'ho chi minh', 'thu duc'];
+const areaSingleWords = new Set(['tinh', 'tp', 'huyen', 'quan', 'q', 'xa', 'phuong', 'mien', 'tphcm']);
 const isAreaQuestion = /(^|\\s)(o dau|tai dau|cho nao|dia chi.*o dau|mua o dau|ban o dau)(\\s|$)/.test(lower);
+const hasAreaKeyword = areaPhraseWords.some(word => lower.includes(word))
+  || lowerTokens.some(token => areaSingleWords.has(token));
 const hasAreaInfo = !isAreaQuestion && (
-  areaWords.some(word => lower.includes(word)) ||
+  hasAreaKeyword ||
   /(^|\\s)(minh o|em o|toi o|anh o|chi o|ben minh o|o tinh|o huyen|o quan|khu vuc)\\s+[a-z0-9]/.test(lower)
 );
 const isSensitive = sensitiveWords.some(w => lower.includes(w));
@@ -175,7 +184,7 @@ const isGoodbye = tokenCount <= 7 && /^(tam biet|bye|goodbye|hen gap lai|chao nh
 const isAcknowledgement = tokenCount <= 4 && /^(ok|oke|okay|da|vang|uh|um|roi|duoc|biet roi|hieu roi)(\\s|$)/.test(lower);
 const isEmotional = /(^|\\s)(buon|met|chan|stress|ap luc)(\\s|$)/.test(lower);
 const isFollowUp = tokenCount <= 7 && /^(con |vay |the |loai do|san pham do|cai do|cai nay|no |dung sao|co thom|gia sao)/.test(lower);
-const isBotComplaint = /(tra loi gi ky|tra loi ky|tra loi xam|xam xam|sao ngu|cang dot|may dot|m dot|bot ngu|khong hieu|noi gi vay|sao tra loi|cach dong|xuong dong|hoi mot dang tra loi mot neo|tra loi chan|chua on|khong on|session.*chua on|khong co session|mat ngu canh|context sai|khong nho ngu canh)/.test(lower);
+const isBotComplaint = /(do ngu|ngu ngu|sao ngu|bot ngu|may ngu|m ngu|cang dot|may dot|m dot|vl|vcl|vai lon|tra loi gi ky|tra loi ky|tra loi xam|xam xam|khong hieu|noi gi vay|sao tra loi|tra loi gi v|tra loi gi vay|toi chui|chui ban|lien quan gi|khong lien quan|cach dong|xuong dong|hoi mot dang tra loi mot neo|tra loi chan|chan ghe|hai ghe|hai vl|chua on|khong on|session.*chua on|khong co session|mat ngu canh|context sai|khong nho ngu canh)/.test(lower);
 const isCatalogQuestion = /(san pham gi|san pham nao|co san pham|co nhung gi|ban nhung gi|ban gi|co gi ban|danh muc san pham|cac san pham|mat hang gi|hang gi)/.test(lower);
 const isWebsiteQuestion = /(website|web site|trang web|link web|link website|link cong ty|duong dan|xin link|gui.*link|zeo vn|zeo\\.vn)/.test(lower);
 const isShortCodQuestion = /(^|\\s)cod($|\\s)/.test(lower) || /(thanh toan khi nhan|giao hang thu tien|nhan hang tra tien|thu tien mat|tra tien mat)/.test(lower);
@@ -312,6 +321,162 @@ return [{ json: {
     };
 
     @node({
+        id: 'f1000001-0000-0000-0000-000000000010',
+        name: 'Goi Ollama NLU Local',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4,
+        position: [672, 416],
+        onError: 'continueErrorOutput',
+    })
+    GoiOllamaNluLocal = {
+        method: 'POST',
+        url: 'http://127.0.0.1:11434/api/chat',
+        sendBody: true,
+        specifyBody: 'json',
+        jsonBody:
+            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.1, num_predict: 220 }, messages: [ { role: "system", content: "Bạn là bộ phân loại NLU cho CSKH ZeO. Chỉ trả về JSON hợp lệ, không markdown. Không trả lời khách. Schema: {intent,speech_act,sentiment,topic,entities,order_items,memory_updates,needs_human,confidence,use_rag}. intent ưu tiên một trong: bot_answer_complaint,greeting,thanks,goodbye,acknowledgement,order_request,wholesale_inquiry,general_support_request,product_consultation_request,customer_profile_lookup,contact_next_step,price_request,distributor_availability,product_faq,policy_faq,company_faq,unknown. Nếu khách chửi bot, nói bot trả sai, nói không liên quan, chán vì câu trước, chọn bot_answer_complaint và use_rag=false. Nếu là câu hỏi sản phẩm/chính sách/công ty thì use_rag=true. Không bịa dữ kiện." }, { role: "user", content: JSON.stringify({ message: $("Loc Dau Vao").first().json.text, normalized_message: $("Loc Dau Vao").first().json.normalizedText, flags: $("Loc Dau Vao").first().json, customer_profile: $("Merge Customer Profile").first().json.customerProfile, session_raw: $("Get Session").first().json.sessionRaw || "{}" }) } ] } }}',
+        options: {},
+    };
+
+    @node({
+        id: 'f1000001-0000-0000-0000-000000000011',
+        name: 'Dialogue Manager',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [896, 416],
+    })
+    DialogueManager = {
+        jsCode: `
+function normalize(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\\u0300-\\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .replace(/[^a-z0-9\\s]/g, ' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+}
+
+function parseJson(value, fallback) {
+  if (!value) return fallback;
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+function parseNlu(payload) {
+  const raw = payload?.message?.content || payload?.response || payload?.text || '';
+  if (!raw || typeof raw !== 'string') return {};
+  const cleaned = raw.replace(/^\\s*\`\`\`(?:json)?/i, '').replace(/\`\`\`\\s*$/i, '').trim();
+  const direct = parseJson(cleaned, null);
+  if (direct && typeof direct === 'object') return direct;
+  const match = cleaned.match(/\\{[\\s\\S]*\\}/);
+  return match ? parseJson(match[0], {}) : {};
+}
+
+const input = $('Loc Dau Vao').first().json;
+const session = parseJson($('Get Session').first().json.sessionRaw, {});
+const profileInput = $('Merge Customer Profile').first().json;
+const customerProfile = parseJson(profileInput.customerProfileRaw || profileInput.customerProfile, {});
+const nluPayload = $input.first().json || {};
+const nlu = parseNlu(nluPayload);
+const lower = normalize(input.text);
+const previousText = normalize([session.last_user_message, session.last_bot_reply, customerProfile.last_need, customerProfile.conversation_summary].filter(Boolean).join(' '));
+
+const explicitBotComplaint = /(do ngu|ngu ngu|sao ngu|bot ngu|may ngu|m ngu|cang dot|may dot|m dot|vl|vcl|vai lon|tra loi gi ky|tra loi ky|tra loi xam|xam xam|khong hieu|noi gi vay|sao tra loi|tra loi gi v|tra loi gi vay|toi chui|chui ban|lien quan gi|khong lien quan|hoi mot dang tra loi mot neo|tra loi chan|chan ghe|hai ghe|hai vl|chua on|khong on|session.*chua on|khong co session|mat ngu canh|context sai|khong nho ngu canh)/.test(lower);
+const shortFrustrationAfterBot = /^(chan|chan ghe|met ghe|haiz|hai|that vong|bo tay|nan ghe)$/.test(lower) && Boolean(session.last_bot_reply);
+const nluIntent = String(nlu.intent || '').trim();
+const nluConfidence = Number(nlu.confidence || 0);
+const nluComplaint = nluIntent === 'bot_answer_complaint' && nluConfidence >= 0.55;
+const isBotComplaint = Boolean(input.isBotComplaint || explicitBotComplaint || shortFrustrationAfterBot || nluComplaint);
+
+let intent = nluIntent || '';
+let replyType = 'knowledge_lookup';
+let useRag = true;
+let responseMode = '';
+let fallbackReason = '';
+let finalReply = '';
+let needsHuman = Boolean(nlu.needs_human);
+
+if (isBotComplaint) {
+  intent = 'bot_answer_complaint';
+  replyType = 'repair_wrong_answer';
+  useRag = false;
+  responseMode = 'review';
+  fallbackReason = 'bot_answer_complaint';
+  needsHuman = true;
+  finalReply = 'Dạ xin lỗi bạn, câu trả lời vừa rồi chưa đúng ý. Bạn muốn mình hỗ trợ lại về mua hàng, sản phẩm, đơn hàng hay đăng ký đại lý ạ?';
+} else if (input.isThanks) {
+  intent = 'thanks';
+  replyType = 'acknowledge';
+  useRag = false;
+  responseMode = 'direct';
+  finalReply = 'Dạ, ZeO cảm ơn bạn ạ. Khi cần thêm thông tin, bạn cứ nhắn mình nhé.';
+} else if (input.isGreeting) {
+  intent = 'greeting';
+  replyType = 'greeting';
+  useRag = false;
+  responseMode = 'direct';
+  finalReply = 'Dạ ZeO chào bạn ạ. Bạn cần mình hỗ trợ thông tin sản phẩm, mua hàng, giao hàng hay chính sách nào ạ?';
+} else if (input.isAcknowledgement) {
+  intent = session.last_intent || 'acknowledgement';
+  replyType = 'acknowledge';
+  useRag = false;
+  responseMode = 'direct';
+  finalReply = 'Dạ vâng ạ. Khi cần hỗ trợ thêm, bạn cứ nhắn ZeO nhé.';
+} else if (input.isOrderQuantityRequest || nluIntent === 'order_request') {
+  intent = 'order_request';
+  replyType = 'confirm_order';
+  useRag = false;
+  responseMode = 'review';
+  fallbackReason = 'order_request';
+  needsHuman = true;
+} else if (/(wholesale_inquiry|price_request|distributor_availability|contact_next_step|customer_profile_lookup)/.test(nluIntent)) {
+  intent = nluIntent;
+  replyType = nluIntent;
+  useRag = false;
+}
+
+const responsePlan = {
+  reply_type: replyType,
+  intent,
+  use_rag: useRag,
+  response_mode: responseMode,
+  fallback_reason: fallbackReason,
+  needs_human: needsHuman,
+  final_reply: finalReply,
+  ask_one_question: replyType === 'repair_wrong_answer',
+  grounded_by: useRag ? 'rag' : 'dialogue_manager',
+};
+
+return [{
+  json: {
+    ...input,
+    isBotComplaint,
+    nlu: {
+      intent,
+      speech_act: nlu.speech_act || (isBotComplaint ? 'complaint' : ''),
+      sentiment: nlu.sentiment || (isBotComplaint ? 'frustrated' : ''),
+      topic: nlu.topic || '',
+      entities: nlu.entities || {},
+      order_items: Array.isArray(nlu.order_items) ? nlu.order_items : [],
+      memory_updates: nlu.memory_updates || {},
+      needs_human: needsHuman,
+      confidence: nluConfidence || (isBotComplaint ? 0.95 : 0),
+      raw: nlu,
+      nlu_error: Boolean(nluPayload.error),
+    },
+    dialogue: responsePlan,
+    responsePlan,
+    customerProfile,
+    previousText,
+  },
+}];
+`,
+    };
+
+    @node({
         id: '126f8f96-9c0f-4f45-b397-71ddf19a80bb',
         name: 'Get Knowledge Snapshot',
         type: 'n8n-nodes-base.redis',
@@ -365,8 +530,9 @@ function normalizeForSearch(value) {
 
 const STOP_WORDS = new Set([
   'a', 'ad', 'admin', 'anh', 'ban', 'ben', 'bi', 'chi', 'cho', 'co', 'cua', 'da', 'dau',
-  'duoc', 'em', 'gi', 'khong', 'la', 'minh', 'mot', 'nao', 'nha', 'nhe', 'oi', 'shop',
-  'thi', 'toi', 'tren', 'va', 'vay', 've', 'voi',
+  'do', 'duoc', 'em', 'gi', 'haha', 'hihi', 'khong', 'la', 'lai', 'minh', 'mot', 'nao',
+  'nha', 'nhe', 'ngu', 'oi', 'roi', 'shop', 'thi', 'toi', 'tren', 'va', 'vay', 've',
+  'vl', 'vcl', 'voi',
 ]);
 
 function meaningfulTokens(value) {
@@ -479,7 +645,9 @@ function buildCatalogReply(items) {
     : 'Dạ ZeO có các sản phẩm tẩy rửa gia dụng. Bạn cần bột giặt, nước rửa chén, nước lau sàn hay sản phẩm vệ sinh nhà cửa ạ?';
 }
 
-const input = $('Loc Dau Vao').first().json;
+const input = $('Dialogue Manager').first().json;
+const dialogue = input.dialogue || input.responsePlan || {};
+const nlu = input.nlu || {};
 const session = parseJson($('Get Session').first().json.sessionRaw, {});
 const profileInput = $('Merge Customer Profile').first().json;
 const customerProfile = parseJson(profileInput.customerProfileRaw || profileInput.customerProfile, {});
@@ -609,12 +777,13 @@ const resolvedQuestion = input.isFollowUp && session.last_user_message
 const sessionEntry = input.isFollowUp && session.last_source_id
   ? knowledgeItems.find(item => item.source_id === session.last_source_id && item.intent === session.last_intent)
   : null;
-const scored = knowledgeItems
+const shouldUseRag = dialogue.use_rag !== false;
+const scored = shouldUseRag ? knowledgeItems
   .map(entry => ({ ...entry, ...scoreEntry(resolvedQuestion, entry) }))
   .filter(entry => entry.score > 0)
-  .sort((a, b) => b.score - a.score || b.priority - a.priority);
+  .sort((a, b) => b.score - a.score || b.priority - a.priority) : [];
 let best = scored[0] || null;
-if (sessionEntry && input.isFollowUp && !input.isSensitive && !input.isOutOfScope) {
+if (shouldUseRag && sessionEntry && input.isFollowUp && !input.isSensitive && !input.isOutOfScope) {
   const sessionScore = scoreEntry(resolvedQuestion, sessionEntry);
   if (sessionScore.matched >= 1 && (!best || sessionScore.score >= best.score - 8)) {
     best = { ...sessionEntry, ...sessionScore };
@@ -627,7 +796,9 @@ const confidence = best?.exact || (bestScore >= 58 && scoreMargin >= 5)
   ? 'high'
   : (bestScore >= 28 && (best?.matched || 0) >= 1 && isLowRiskEntry(best) ? 'medium' : 'low');
 let forcedEntry = null;
-if (input.isShortCodQuestion) {
+if (!shouldUseRag) {
+  forcedEntry = null;
+} else if (input.isShortCodQuestion) {
   forcedEntry = findByIntent('nationwide_shipping_no_cod', 'cod_payment')
     || findByIntentIncludes('cod')
     || findByKnowledgeTerms('cod', 'thanh toan khi nhan', 'nhan hang tra tien');
@@ -720,6 +891,17 @@ if (shouldIgnore) {
   } else {
     finalReply = 'Dạ, hiện ZeO chưa có đủ thông tin trong hồ sơ chat này. Bạn gửi lại số điện thoại và khu vực để ZeO lưu và hỗ trợ tiếp nha.';
   }
+} else if (dialogue.intent === 'customer_profile_lookup') {
+  responseMode = 'direct';
+  fallbackReason = '';
+  matchedIntent = 'customer_profile_lookup';
+  if (knownArea && knownPhone) {
+    finalReply = 'Dạ, ZeO đang lưu khu vực của bạn là: ' + knownArea + ', số điện thoại là: ' + knownPhone + '.';
+  } else if (knownArea || knownPhone) {
+    finalReply = 'Dạ, ZeO đang lưu ' + (knownArea ? 'khu vực của bạn là: ' + knownArea : 'số điện thoại của bạn là: ' + knownPhone) + '. Bạn gửi thêm thông tin còn thiếu để ZeO hỗ trợ đúng hơn nha.';
+  } else {
+    finalReply = 'Dạ, hiện ZeO chưa có đủ thông tin này trong hồ sơ chat. Bạn gửi lại giúp mình để ZeO lưu và hỗ trợ đúng hơn nha.';
+  }
 } else if (selectedHotlineBranch02) {
   responseMode = 'direct';
   fallbackReason = '';
@@ -729,12 +911,12 @@ if (shouldIgnore) {
   } else {
     finalReply = 'Dạ, bạn gọi hotline 1900 5307 rồi bấm phím nhánh số 02 để được hỗ trợ mua hàng ZeO nha. Nếu muốn admin liên hệ lại, bạn gửi thêm số điện thoại và khu vực/tỉnh thành giúp mình.';
   }
-} else if (asksContactNextStep) {
+} else if (asksContactNextStep || dialogue.intent === 'contact_next_step') {
   responseMode = 'direct';
   fallbackReason = '';
   matchedIntent = 'contact_next_step';
   finalReply = contactReadyReply(session.last_intent || customerProfile.last_need || '');
-} else if (input.isOrderQuantityRequest) {
+} else if (input.isOrderQuantityRequest || dialogue.intent === 'order_request') {
   responseMode = 'review';
   matchedIntent = 'order_request';
   fallbackReason = hasFullContact ? 'order_contact_ready' : 'order_contact_missing';
@@ -743,7 +925,7 @@ if (shouldIgnore) {
   } else {
     finalReply = 'Dạ, ZeO đã ghi nhận bạn muốn: ' + input.text + '. Bạn gửi thêm số điện thoại và khu vực/tỉnh thành để admin kiểm tra đúng sản phẩm, giá và hỗ trợ chốt đơn nha.';
   }
-} else if (isPriceQuestion) {
+} else if (isPriceQuestion || dialogue.intent === 'price_request') {
   responseMode = 'review';
   fallbackReason = 'price_unverified';
   matchedIntent = 'price_request';
@@ -752,7 +934,7 @@ if (shouldIgnore) {
   } else {
     finalReply = 'Dạ, hiện dữ liệu chat chưa có bảng giá chi tiết để mình báo chính xác. Bạn gửi giúp mình số điện thoại và khu vực/tỉnh thành, admin ZeO sẽ kiểm tra giá sản phẩm phù hợp và liên hệ hỗ trợ nha.';
   }
-} else if (isDistributorAvailabilityQuestion) {
+} else if (isDistributorAvailabilityQuestion || dialogue.intent === 'distributor_availability') {
   responseMode = 'review';
   fallbackReason = 'distributor_availability_check';
   matchedIntent = 'distributor_availability';
@@ -772,11 +954,11 @@ if (shouldIgnore) {
   responseMode = 'review';
   fallbackReason = 'warranty_support_unverified';
   finalReply = 'Dạ, dữ liệu hiện tại chưa có chính sách bảo hành riêng. Nếu sản phẩm bị lỗi hoặc cần đổi trả, bạn gửi giúp mình tình trạng sản phẩm, hình ảnh và thông tin đơn hàng để admin ZeO kiểm tra hỗ trợ đúng chính sách nhé.';
-} else if (input.isBotComplaint) {
+} else if (input.isBotComplaint || dialogue.intent === 'bot_answer_complaint') {
   responseMode = 'review';
   fallbackReason = 'bot_answer_complaint';
-  matchedIntent = session.last_intent || '';
-  finalReply = 'Dạ xin lỗi bạn, câu trả lời trước chưa đúng ý. Bạn nhắn lại giúp mình câu hỏi chính hoặc tên sản phẩm cần hỗ trợ, mình sẽ kiểm tra theo dữ liệu ZeO kỹ hơn nhé.';
+  matchedIntent = 'bot_answer_complaint';
+  finalReply = dialogue.final_reply || 'Dạ xin lỗi bạn, câu trả lời trước chưa đúng ý. Bạn nhắn lại giúp mình câu hỏi chính hoặc tên sản phẩm cần hỗ trợ, mình sẽ kiểm tra theo dữ liệu ZeO kỹ hơn nhé.';
 } else if (input.mentionsAba && input.isShortDetergentQuestion) {
   responseMode = 'review';
   fallbackReason = 'competitor_product_question';
@@ -911,6 +1093,54 @@ if (shouldIgnore) {
   }
 }
 
+function compactText(value, maxLength) {
+  const text = String(value || '').replace(/\\s+/g, ' ').trim();
+  if (text.length <= maxLength) return text;
+  return text.slice(text.length - maxLength).trim();
+}
+
+function buildConversationSummary(previous, intent, replyType, message, reply) {
+  const parts = [];
+  const prev = compactText(previous, 420);
+  if (prev) parts.push(prev);
+  const facts = [];
+  if (knownPhone) facts.push('SĐT ' + knownPhone);
+  if (knownArea) facts.push('khu vực ' + knownArea);
+  if (intent) facts.push('intent ' + intent);
+  if (replyType) facts.push('reply_type ' + replyType);
+  const latest = 'Lượt gần nhất: khách nói "' + compactText(message, 120) + '"; bot trả "' + compactText(reply, 160) + '".';
+  parts.push((facts.length ? '[' + facts.join(', ') + '] ' : '') + latest);
+  return compactText(parts.join(' '), 700);
+}
+
+const replyType = dialogue.reply_type || (
+  matchedIntent === 'order_request' ? 'confirm_order'
+  : matchedIntent === 'bot_answer_complaint' ? 'repair_wrong_answer'
+  : responseMode === 'review' ? 'handoff_admin'
+  : responseMode === 'rewrite' ? 'compose_from_knowledge'
+  : 'direct_answer'
+);
+const responsePlanState = {
+  ...(dialogue || {}),
+  reply_type: replyType,
+  intent: matchedIntent || dialogue.intent || '',
+  use_rag: shouldUseRag,
+  response_mode: responseMode,
+  fallback_reason: fallbackReason,
+  matched_source_id: matchedSourceId,
+  rag_score: bestScore,
+  score_margin: scoreMargin,
+};
+const conversationSummary = buildConversationSummary(
+  customerProfile.conversation_summary || session.conversation_summary || '',
+  matchedIntent || dialogue.intent || '',
+  replyType,
+  input.text,
+  finalReply
+);
+const memoryIntent = ['bot_answer_complaint', 'thanks', 'greeting', 'goodbye', 'acknowledgement'].includes(matchedIntent)
+  ? (customerProfile.last_need || session.last_intent || '')
+  : (matchedIntent || customerProfile.last_need || session.last_intent || '');
 const routeIndex = responseMode === 'direct' ? 0 : responseMode === 'rewrite' ? 1 : responseMode === 'review' ? 2 : 3;
 const pendingSlots = [];
 if (!knownPhone) pendingSlots.push('phone');
@@ -925,12 +1155,16 @@ const customerProfileState = {
   sender_id: input.senderId || customerProfile.sender_id || '',
   phone: knownPhone,
   area: knownArea,
-  last_need: matchedIntent || customerProfile.last_need || session.last_intent || '',
+  last_need: memoryIntent,
   last_intent: matchedIntent || customerProfile.last_intent || '',
   lead_stage: leadStage,
   pending_slots: pendingSlots,
   last_user_message: input.text,
   last_bot_reply: finalReply,
+  last_reply_type: replyType,
+  conversation_summary: conversationSummary,
+  response_plan: responsePlanState,
+  nlu,
   first_seen_at: customerProfile.first_seen_at || new Date().toISOString(),
   last_seen_at: new Date().toISOString(),
 };
@@ -945,6 +1179,12 @@ const sessionState = {
   customer_location: knownArea,
   lead_stage: leadStage,
   pending_slots: pendingSlots,
+  last_reply_type: replyType,
+  use_rag: shouldUseRag,
+  response_plan: responsePlanState,
+  nlu,
+  order_items: Array.isArray(nlu.order_items) ? nlu.order_items : [],
+  conversation_summary: conversationSummary,
   updated_at: new Date().toISOString(),
 };
 
@@ -955,6 +1195,11 @@ return [{ json: {
   responseMode,
   routeIndex,
   confidence,
+  normalizedMessage: input.normalizedText || normalizedInputText,
+  replyType,
+  useRag: shouldUseRag,
+  responsePlan: responsePlanState,
+  nlu,
   ragScore: bestScore,
   scoreMargin,
   matchedIntent,
@@ -1049,10 +1294,22 @@ else if (hasPromptLeak) guardrailReason = 'prompt_leak';
 else if (changedFacts) guardrailReason = 'ollama_changed_canonical_facts';
 
 const finalReply = passed ? aiText.substring(0, 1000) : canonicalAnswer;
+const previousReply = String(ragData.finalReply || '').trim();
+const previousSummary = String(ragData.sessionState?.conversation_summary || ragData.customerProfileState?.conversation_summary || '');
+const updatedSummary = previousReply
+  ? previousSummary.replace(previousReply, finalReply).slice(-700)
+  : previousSummary;
 const sessionState = {
   ...(ragData.sessionState || {}),
   last_bot_reply: finalReply,
+  conversation_summary: updatedSummary,
   updated_at: new Date().toISOString(),
+};
+const customerProfileState = {
+  ...(ragData.customerProfileState || {}),
+  last_bot_reply: finalReply,
+  conversation_summary: updatedSummary,
+  last_seen_at: new Date().toISOString(),
 };
 
 return [{ json: {
@@ -1062,6 +1319,7 @@ return [{ json: {
   fallbackReason: passed ? '' : guardrailReason,
   fallbackMessage: finalReply,
   sessionState,
+  customerProfileState,
 }}];
 `,
     };
@@ -1142,7 +1400,7 @@ return [{ json: {
         operation: 'push',
         list: 'zeo:learning:queue',
         messageData:
-            '={{ JSON.stringify({ status: "pending", channel: "messenger", sender_id: $json.senderId, message_id: $("Loc Dau Vao").first().json.messageId, user_message: $json.userMessage, fallback_reason: $json.fallbackReason, rag_score: $json.ragScore, created_at: $now.toISO() }) }}',
+            '={{ JSON.stringify({ status: "pending", channel: "messenger", sender_id: $json.senderId, message_id: $("Loc Dau Vao").first().json.messageId, user_message: $json.userMessage, normalized_message: $json.normalizedMessage, fallback_reason: $json.fallbackReason, matched_intent: $json.matchedIntent, matched_source_id: $json.matchedSourceId, reply_type: $json.replyType, response_mode: $json.responseMode, use_rag: $json.useRag, rag_score: $json.ragScore, score_margin: $json.scoreMargin, nlu: $json.nlu, response_plan: $json.responsePlan, session_summary: $json.sessionState?.conversation_summary, customer_profile: { phone: $json.customerProfileState?.phone, area: $json.customerProfileState?.area, lead_stage: $json.customerProfileState?.lead_stage, last_need: $json.customerProfileState?.last_need }, bot_reply: $json.finalReply, created_at: $now.toISO() }) }}',
         tail: true,
     };
 
@@ -1256,7 +1514,10 @@ return [{
         this.LocDauVao.out(0).to(this.GetCustomerProfile.in(0));
         this.GetCustomerProfile.out(0).to(this.MergeCustomerProfile.in(0));
         this.MergeCustomerProfile.out(0).to(this.GetSession.in(0));
-        this.GetSession.out(0).to(this.GetKnowledgeSnapshot.in(0));
+        this.GetSession.out(0).to(this.GoiOllamaNluLocal.in(0));
+        this.GoiOllamaNluLocal.out(0).to(this.DialogueManager.in(0));
+        this.GoiOllamaNluLocal.error().to(this.DialogueManager.in(0));
+        this.DialogueManager.out(0).to(this.GetKnowledgeSnapshot.in(0));
         this.GetKnowledgeSnapshot.out(0).to(this.RagTimKiem.in(0));
         this.RagTimKiem.out(0).to(this.RouterCoNguon.in(0));
         this.RouterCoNguon.out(0).to(this.SaveCustomerProfile.in(0));

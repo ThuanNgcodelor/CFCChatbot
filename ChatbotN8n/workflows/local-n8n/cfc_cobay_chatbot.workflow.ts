@@ -173,6 +173,7 @@ const isGreeting = tokenCount <= 5 && /^(xin chao|chao|hello|hi|alo|shop oi|admi
 const isThanks = tokenCount <= 7 && /^(cam on|thanks|thank you|da cam on|ok cam on)(\\s|$)/.test(normalizedText);
 const isGoodbye = tokenCount <= 6 && /^(tam biet|bye|goodbye|hen gap lai|chao nhe)(\\s|$)/.test(normalizedText);
 const isAcknowledgement = tokenCount <= 4 && /^(ok|oke|okay|da|vang|uh|um|roi|duoc|biet roi|hieu roi)(\\s|$)/.test(normalizedText);
+const isStatusCheck = tokenCount <= 6 && /^(sao roi|sao roi ad|sao roi admin|the nao roi|toi hoi sao roi|co thong tin chua|co tin gi chua|xu ly toi dau|toi dau roi)(\\s|$)/.test(normalizedText);
 const isFollowUp = tokenCount <= 9 && /^(con |vay |the |loai do|san pham do|cai do|cai nay|no |dung sao|su dung sao|pha sao|pha nhu nao|co mui|co nhung mui|co huong|co nhung huong|gia sao|chai lon|loai lon|ship |giao hang )/.test(normalizedText);
 const isBotComplaint = /(do ngu|ngu ngu|sao ngu|bot ngu|may ngu|m ngu|tra loi gi ky|tra loi ky|tra loi xam|xam xam|khong hieu|noi gi vay|sao tra loi|tra loi gi v|tra loi gi vay|toi chui|chui ban|lien quan gi|khong lien quan|hoi mot dang tra loi mot neo|tra loi chan|chan ghe|hai ghe|hai vl|chua on|khong on|session.*chua on|khong co session|mat ngu canh|context sai|khong nho ngu canh)/.test(normalizedText);
 const isCatalogQuestion = /(san pham gi|san pham nao|co san pham|co nhung gi|ban nhung gi|ban gi|co gi ban|danh muc san pham|cac san pham|mat hang gi|hang gi|phan bon gi|co phan gi)/.test(normalizedText);
@@ -198,6 +199,7 @@ return [{
     isThanks,
     isGoodbye,
     isAcknowledgement,
+    isStatusCheck,
     isFollowUp,
     isBotComplaint,
     isCatalogQuestion,
@@ -307,7 +309,7 @@ return [{ json: {
         sendBody: true,
         specifyBody: 'json',
         jsonBody:
-            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.1, num_predict: 220 }, messages: [ { role: "system", content: "Bạn là bộ phân loại NLU cho CSKH Cò Bay/CFC. Chỉ trả về JSON hợp lệ, không markdown. Không trả lời khách. Schema: {intent,speech_act,sentiment,topic,entities,order_items,memory_updates,needs_human,confidence,use_rag}. intent ưu tiên một trong: bot_answer_complaint,greeting,thanks,goodbye,acknowledgement,order_request,wholesale_dealer,support_general,customer_profile_lookup,contact_next_step,price_request,dealer_location_request,product_faq,shipping_faq,company_faq,unknown. Nếu khách chửi bot, nói bot trả sai, nói không liên quan, chán vì câu trước, chọn bot_answer_complaint và use_rag=false. Nếu là câu hỏi sản phẩm phân bón, giao hàng, công ty, địa chỉ thì use_rag=true. Không bịa giá, liều lượng, đại lý, địa chỉ hoặc công dụng ngoài dữ liệu." }, { role: "user", content: JSON.stringify({ message: $("Loc Dau Vao").first().json.text, normalized_message: $("Loc Dau Vao").first().json.normalizedText, flags: $("Loc Dau Vao").first().json, customer_profile: $("Merge CFC Customer Profile").first().json.customerProfile, session_raw: $("Get CFC Session").first().json.sessionRaw || "{}" }) } ] } }}',
+            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.1, num_predict: 220 }, messages: [ { role: "system", content: "Bạn là bộ phân loại NLU cho CSKH Cò Bay/CFC. Chỉ trả về JSON hợp lệ, không markdown. Không trả lời khách. Schema: {intent,speech_act,sentiment,topic,entities,order_items,memory_updates,needs_human,confidence,use_rag}. intent ưu tiên một trong: bot_answer_complaint,greeting,thanks,goodbye,acknowledgement,status_check,order_request,wholesale_dealer,support_general,customer_profile_lookup,contact_next_step,price_request,dealer_location_request,product_faq,shipping_faq,company_faq,unknown. Nếu khách hỏi kiểu sao rồi ad, có thông tin chưa, xử lý tới đâu sau khi đang chờ admin/nhân viên, chọn status_check và use_rag=false. Nếu khách chửi bot, nói bot trả sai, nói không liên quan, chán vì câu trước, chọn bot_answer_complaint và use_rag=false. Nếu là câu hỏi sản phẩm phân bón, giao hàng, công ty, địa chỉ thì use_rag=true. Không bịa giá, liều lượng, đại lý, địa chỉ hoặc công dụng ngoài dữ liệu." }, { role: "user", content: JSON.stringify({ message: $("Loc Dau Vao").first().json.text, normalized_message: $("Loc Dau Vao").first().json.normalizedText, flags: $("Loc Dau Vao").first().json, customer_profile: $("Merge CFC Customer Profile").first().json.customerProfile, session_raw: $("Get CFC Session").first().json.sessionRaw || "{}" }) } ] } }}',
         options: {},
     };
 
@@ -406,6 +408,12 @@ if (isBotComplaint) {
   useRag = false;
   responseMode = 'direct';
   finalReply = 'Dạ vâng ạ. Khi cần hỗ trợ thêm, bạn cứ nhắn Cò Bay nhé.';
+} else if (input.isStatusCheck || nluIntent === 'status_check') {
+  intent = 'status_check';
+  replyType = 'status_check';
+  useRag = false;
+  responseMode = 'direct';
+  finalReply = 'Dạ, mình đang kiểm tra lại thông tin trước đó cho bạn. Nếu bạn đã gửi số điện thoại và khu vực, admin Cò Bay sẽ dựa vào đó để liên hệ hỗ trợ; nếu chưa, bạn gửi thêm giúp mình nha.';
 } else if (contactInfoSignal && previousNeedsContact && !input.isOrderQuantityRequest) {
   intent = 'contact_information_received';
   replyType = 'capture_contact';
@@ -441,7 +449,7 @@ if (isBotComplaint) {
   responseMode = 'review';
   fallbackReason = 'dealer_location_request';
   needsHuman = true;
-} else if (/(wholesale_dealer|support_general|contact_next_step|customer_profile_lookup|price_request)/.test(nluIntent)) {
+} else if (/(wholesale_dealer|support_general|contact_next_step|customer_profile_lookup|price_request|status_check)/.test(nluIntent)) {
   intent = nluIntent;
   replyType = nluIntent;
   useRag = false;
@@ -785,6 +793,17 @@ if (shouldIgnore) {
   fallbackReason = '';
   matchedIntent = session.last_intent || 'acknowledgement';
   finalReply = 'Dạ vâng ạ. Khi cần hỗ trợ thêm, bạn cứ nhắn Cò Bay nhé.';
+} else if (input.isStatusCheck || dialogue.intent === 'status_check') {
+  responseMode = 'direct';
+  fallbackReason = '';
+  matchedIntent = session.last_intent || customerProfile.last_need || 'status_check';
+  if (hasFullContact) {
+    finalReply = 'Dạ, Cò Bay đã có số ' + knownPhone + ' và khu vực ' + knownArea + '. Admin hoặc nhân viên khu vực sẽ kiểm tra lại thông tin và liên hệ hỗ trợ bạn sớm nhất nha.';
+  } else if (knownPhone || knownArea) {
+    finalReply = contactReply('Dạ, mình đang kiểm tra lại thông tin trước đó cho bạn.');
+  } else {
+    finalReply = 'Dạ, bạn đang muốn hỏi tiếp về nội dung nào ạ? Nếu cần admin/nhân viên Cò Bay liên hệ, bạn gửi giúp mình số điện thoại và khu vực/tỉnh thành nha.';
+  }
 } else if (asksSavedArea || asksSavedPhone) {
   responseMode = 'direct';
   fallbackReason = '';

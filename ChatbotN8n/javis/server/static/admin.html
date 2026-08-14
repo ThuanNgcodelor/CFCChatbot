@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CFC AI Admin — ZeO/CFC Chatbot Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f17; --bg2: #13161f; --bg3: #1a1e2e;
+    --border: #232840; --border2: #2e3554;
+    --accent: #6366f1; --accent2: #818cf8;
+    --green: #22c55e; --red: #ef4444; --yellow: #f59e0b; --blue: #38bdf8;
+    --text: #e2e8f0; --text2: #94a3b8; --text3: #64748b;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 220px;
+    background: var(--bg2); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; z-index: 100;
+  }
+  .logo {
+    padding: 24px 20px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo h1 { font-size: 20px; font-weight: 700; color: var(--accent2); letter-spacing: -0.5px; }
+  .logo p { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  nav { padding: 12px 10px; flex: 1; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: var(--radius-sm);
+    cursor: pointer; color: var(--text2); font-size: 13.5px; font-weight: 500;
+    transition: all .15s; margin-bottom: 2px; user-select: none;
+  }
+  .nav-item:hover { background: var(--bg3); color: var(--text); }
+  .nav-item.active { background: rgba(99,102,241,.15); color: var(--accent2); }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+  .nav-badge {
+    margin-left: auto; background: var(--red); color: #fff;
+    font-size: 10px; font-weight: 700; border-radius: 9px;
+    padding: 1px 6px; min-width: 18px; text-align: center;
+    display: none;
+  }
+  .nav-badge.visible { display: block; }
+
+  /* Main */
+  .main { margin-left: 220px; min-height: 100vh; }
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(13,15,23,.85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 28px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .topbar h2 { font-size: 16px; font-weight: 600; color: var(--text); }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .refresh-btn {
+    background: var(--bg3); border: 1px solid var(--border2);
+    color: var(--text2); padding: 6px 14px; border-radius: var(--radius-sm);
+    font-size: 12.5px; cursor: pointer; font-family: inherit; font-weight: 500;
+    transition: all .15s;
+  }
+  .refresh-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .page { padding: 24px 28px; display: none; }
+  .page.active { display: block; }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+  }
+  .card-label { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .6px; }
+  .card-value { font-size: 30px; font-weight: 700; color: var(--text); margin: 6px 0 2px; }
+  .card-sub { font-size: 12px; color: var(--text3); }
+  .card-value.green { color: var(--green); }
+  .card-value.yellow { color: var(--yellow); }
+  .card-value.red { color: var(--red); }
+
+  /* Service status */
+  .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .status-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .status-dot.warn { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+  .status-dot.loading { background: var(--text3); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .status-info { flex: 1; min-width: 0; }
+  .status-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .status-detail { font-size: 11px; color: var(--text3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Section headers */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .section-title { font-size: 14px; font-weight: 600; color: var(--text); }
+  .section-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+
+  /* Tables */
+  .table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); background: var(--bg3); }
+  td { padding: 11px 16px; font-size: 13px; color: var(--text); border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  /* Badges */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; padding: 2px 8px;
+    border-radius: 20px; white-space: nowrap;
+  }
+  .badge-green { background: rgba(34,197,94,.15); color: #4ade80; }
+  .badge-red { background: rgba(239,68,68,.15); color: #f87171; }
+  .badge-yellow { background: rgba(245,158,11,.15); color: #fbbf24; }
+  .badge-blue { background: rgba(56,189,248,.15); color: #38bdf8; }
+  .badge-purple { background: rgba(99,102,241,.15); color: var(--accent2); }
+  .badge-gray { background: rgba(100,116,139,.15); color: var(--text3); }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: var(--radius-sm); font-size: 12.5px;
+    font-weight: 500; cursor: pointer; border: none; font-family: inherit;
+    transition: all .15s; text-decoration: none;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border2); }
+  .btn-ghost:hover { background: var(--bg3); color: var(--text); }
+  .btn-danger { background: rgba(239,68,68,.15); color: #f87171; border: 1px solid rgba(239,68,68,.3); }
+  .btn-danger:hover { background: rgba(239,68,68,.25); }
+  .btn-success { background: rgba(34,197,94,.15); color: #4ade80; border: 1px solid rgba(34,197,94,.3); }
+  .btn-success:hover { background: rgba(34,197,94,.25); }
+  .btn-sm { padding: 4px 10px; font-size: 11.5px; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Brand filter tabs */
+  .filter-tabs { display: flex; gap: 6px; background: var(--bg3); border-radius: var(--radius-sm); padding: 4px; width: fit-content; margin-bottom: 18px; }
+  .filter-tab { padding: 6px 16px; border-radius: 6px; font-size: 12.5px; font-weight: 500; cursor: pointer; color: var(--text3); transition: all .15s; border: none; background: transparent; font-family: inherit; }
+  .filter-tab.active { background: var(--bg2); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+
+  /* Search box */
+  .search-box {
+    background: var(--bg3); border: 1px solid var(--border2);
+    color: var(--text); padding: 8px 14px; border-radius: var(--radius-sm);
+    font-size: 13px; outline: none; font-family: inherit; width: 260px;
+  }
+  .search-box:focus { border-color: var(--accent); }
+  .search-box::placeholder { color: var(--text3); }
+
+  /* Learning Queue Cards */
+  .lq-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px; margin-bottom: 12px;
+  }
+  .lq-query { font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .lq-answer { font-size: 12.5px; color: var(--text2); line-height: 1.5; margin-bottom: 10px; background: var(--bg3); padding: 10px 12px; border-radius: var(--radius-sm); border-left: 3px solid var(--border2); }
+  .lq-meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .lq-actions { display: flex; gap: 8px; }
+
+  /* Test query */
+  .test-area { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .test-input-row { display: flex; gap: 10px; margin-bottom: 16px; }
+  .test-input {
+    flex: 1; background: var(--bg3); border: 1px solid var(--border2);
+    color: var(--text); padding: 10px 14px; border-radius: var(--radius-sm);
+    font-size: 13.5px; outline: none; font-family: inherit;
+  }
+  .test-input:focus { border-color: var(--accent); }
+  .test-result { background: var(--bg3); border-radius: var(--radius-sm); padding: 16px; font-size: 12.5px; }
+  .test-result pre { white-space: pre-wrap; color: var(--text2); font-family: 'Courier New', monospace; font-size: 12px; }
+  .confidence-bar { height: 6px; background: var(--border); border-radius: 3px; margin: 8px 0; overflow: hidden; }
+  .confidence-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+
+  /* Pagination */
+  .pagination { display: flex; gap: 6px; align-items: center; justify-content: center; margin-top: 16px; }
+  .page-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12.5px; font-family: inherit; }
+  .page-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .page-btn:hover:not(.active) { background: var(--bg2); }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 48px 20px; color: var(--text3); }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty p { font-size: 13.5px; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+    background: var(--bg3); border: 1px solid var(--border2);
+    border-radius: var(--radius); padding: 12px 18px; font-size: 13px;
+    color: var(--text); box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    transform: translateY(100px); opacity: 0; transition: all .3s;
+    max-width: 320px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-left: 3px solid var(--green); }
+  #toast.error { border-left: 3px solid var(--red); }
+
+  /* Loading */
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Session modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200;
+    display: flex; align-items: center; justify-content: center;
+    display: none;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius);
+    width: 90%; max-width: 640px; max-height: 80vh; overflow-y: auto; padding: 24px;
+  }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-close { background: none; border: none; color: var(--text3); font-size: 18px; cursor: pointer; padding: 2px 6px; }
+  .session-field { margin-bottom: 10px; }
+  .session-label { font-size: 10.5px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 3px; }
+  .session-value { font-size: 13px; color: var(--text); background: var(--bg3); padding: 8px 12px; border-radius: var(--radius-sm); }
+  .session-value.code { font-family: monospace; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="logo">
+    <h1>⚡ CFC AI</h1>
+    <p>Chatbot Control Center</p>
+  </div>
+  <nav>
+    <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard', this)">
+      <span class="icon">📊</span> Dashboard
+    </div>
+    <div class="nav-item" data-page="n8n" onclick="switchPage('n8n', this)">
+      <span class="icon">🔁</span> n8n Control
+    </div>
+    <div class="nav-item" data-page="customers" onclick="switchPage('customers', this)">
+      <span class="icon">💬</span> Hội thoại
+    </div>
+    <div class="nav-item" data-page="learning" onclick="switchPage('learning', this)">
+      <span class="icon">🧠</span> Learning Queue
+      <span class="nav-badge" id="lq-badge">0</span>
+    </div>
+    <div class="nav-item" data-page="test" onclick="switchPage('test', this)">
+      <span class="icon">🔬</span> Test Bot
+    </div>
+    <div class="nav-item" data-page="settings" onclick="switchPage('settings', this)">
+      <span class="icon">⚙️</span> Cài đặt & API
+    </div>
+  </nav>
+</div>
+
+<!-- Main content -->
+<div class="main">
+  <div class="topbar">
+    <h2 id="page-title">Dashboard</h2>
+    <div class="topbar-right">
+      <span id="last-updated" style="font-size:11.5px;color:var(--text3)"></span>
+      <button class="refresh-btn" onclick="refreshCurrentPage()">↻ Làm mới</button>
+    </div>
+  </div>
+
+  <!-- PAGE: Dashboard -->
+  <div id="page-dashboard" class="page active">
+    <div class="status-grid" id="status-grid">
+      <div class="status-card"><div class="status-dot loading" id="dot-redis"></div><div class="status-info"><div class="status-name">Redis</div><div class="status-detail" id="detail-redis">Đang kiểm tra...</div></div></div>
+      <div class="status-card"><div class="status-dot loading" id="dot-ollama"></div><div class="status-info"><div class="status-name">Ollama</div><div class="status-detail" id="detail-ollama">Đang kiểm tra...</div></div></div>
+      <div class="status-card"><div class="status-dot loading" id="dot-n8n"></div><div class="status-info"><div class="status-name">n8n</div><div class="status-detail" id="detail-n8n">Đang kiểm tra...</div></div></div>
+      <div class="status-card"><div class="status-dot ok" id="dot-api"></div><div class="status-info"><div class="status-name">Python API</div><div class="status-detail">Đang chạy 🟢</div></div></div>
+    </div>
+
+    <div class="card-grid" id="stats-cards">
+      <div class="card"><div class="card-label">Tổng khách</div><div class="card-value" id="stat-total">—</div><div class="card-sub">ZeO + CFC</div></div>
+      <div class="card"><div class="card-label">ZeO</div><div class="card-value green" id="stat-zeo">—</div><div class="card-sub">khách hàng</div></div>
+      <div class="card"><div class="card-label">CFC Cò Bay</div><div class="card-value blue" id="stat-cfc">—</div><div class="card-sub">khách hàng</div></div>
+      <div class="card"><div class="card-label">Learning Queue</div><div class="card-value yellow" id="stat-lq">—</div><div class="card-sub">cần review</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div class="section-header"><div><div class="section-title">Top Intents — ZeO</div></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Intent</th><th>Số lần</th></tr></thead><tbody id="intents-zeo"></tbody></table></div>
+      </div>
+      <div>
+        <div class="section-header"><div><div class="section-title">Top Intents — CFC</div></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Intent</th><th>Số lần</th></tr></thead><tbody id="intents-cfc"></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE: n8n Control -->
+  <div id="page-n8n" class="page">
+    <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="loadN8nWorkflows()">↻ Tải danh sách</button>
+      <button class="btn btn-ghost" onclick="triggerSync('all')">⚡ Sync KB ngay (All)</button>
+      <button class="btn btn-ghost" onclick="triggerSync('zeo')">Sync ZeO</button>
+      <button class="btn btn-ghost" onclick="triggerSync('cfc')">Sync CFC</button>
+    </div>
+
+    <div class="section-header" style="margin-bottom:14px">
+      <div class="section-title">Danh sách Workflows</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tên Workflow</th><th>ID</th><th>Trạng thái</th><th>Cập nhật</th><th></th></tr></thead>
+        <tbody id="workflows-table"></tbody>
+      </table>
+    </div>
+
+    <div class="section-header" style="margin-top:24px;margin-bottom:14px">
+      <div class="section-title">Lịch sử Executions</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadExecutions()">↻ Làm mới</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Workflow</th><th>Trạng thái</th><th>Bắt đầu</th><th>Kết thúc</th></tr></thead>
+        <tbody id="executions-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- PAGE: Customers -->
+  <div id="page-customers" class="page">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+      <div class="filter-tabs">
+        <button class="filter-tab active" onclick="setCustomerBrand('all',this)">Tất cả</button>
+        <button class="filter-tab" onclick="setCustomerBrand('zeo',this)">ZeO</button>
+        <button class="filter-tab" onclick="setCustomerBrand('cfc',this)">CFC</button>
+      </div>
+      <input class="search-box" placeholder="🔍 Tìm SĐT, tên..." id="customer-search" oninput="filterCustomers()" />
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Brand</th><th>Sender ID</th><th>Tên</th><th>SĐT</th><th>Khu vực</th>
+            <th>Lead Stage</th><th>Intent cuối</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="customers-table"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="customer-pagination"></div>
+  </div>
+
+  <!-- PAGE: Learning Queue -->
+  <div id="page-learning" class="page">
+    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">
+      <div class="filter-tabs">
+        <button class="filter-tab active" onclick="setLQBrand('all',this)">Tất cả</button>
+        <button class="filter-tab" onclick="setLQBrand('zeo',this)">ZeO</button>
+        <button class="filter-tab" onclick="setLQBrand('cfc',this)">CFC</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="loadLearningQueue()">↻ Làm mới</button>
+    </div>
+    <div id="lq-container"></div>
+  </div>
+
+  <!-- PAGE: Test Bot -->
+  <div id="page-test" class="page">
+    <div class="test-area">
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:14px">🔬 Thử câu hỏi — xem bot sẽ trả lời gì</div>
+      <div class="test-input-row">
+        <input class="test-input" id="test-query" placeholder="Nhập câu hỏi bằng tiếng Việt (có dấu hoặc không dấu)..." onkeydown="if(e.key==='Enter')runTest()" />
+        <div class="filter-tabs" style="margin-bottom:0">
+          <button class="filter-tab active" onclick="setTestBrand('zeo',this)">ZeO</button>
+          <button class="filter-tab" onclick="setTestBrand('cfc',this)">CFC</button>
+        </div>
+        <button class="btn btn-primary" onclick="runTest()" id="test-btn">▶ Test</button>
+      </div>
+      <div id="test-result" style="display:none" class="test-result">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div>
+            <span style="font-size:12px;color:var(--text3)">Intent phát hiện:</span>
+            <span style="font-size:14px;font-weight:700;color:var(--accent2);margin-left:8px" id="res-intent">—</span>
+          </div>
+          <span class="badge" id="res-confidence-badge">—</span>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:11px;color:var(--text3)">Score</span>
+            <span style="font-size:11px;font-weight:600" id="res-score">—</span>
+          </div>
+          <div class="confidence-bar"><div class="confidence-fill" id="res-bar" style="width:0%;background:var(--green)"></div></div>
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Câu trả lời gợi ý</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.6;background:var(--bg);padding:12px;border-radius:8px;border:1px solid var(--border)" id="res-answer">—</div>
+        </div>
+        <div>
+          <div style="font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Top 5 kết quả</div>
+          <div id="res-top5"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- PAGE: Settings -->
+  <div id="page-settings" class="page">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(360px, 1fr));gap:20px">
+      
+      <!-- n8n Card -->
+      <div class="card" style="padding:22px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <span style="font-size:18px">🔁</span>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--text)">n8n Configuration</div>
+            <div style="font-size:11.5px;color:var(--text3)">Kết nối quản trị n8n instance</div>
+          </div>
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">n8n Instance URL</label>
+          <input class="test-input" style="width:100%" id="set-n8n-url" placeholder="https://n8n.dinhduongcantho.io.vn" />
+        </div>
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">n8n API Key (X-N8N-API-KEY)</label>
+          <div style="display:flex;gap:8px">
+            <input class="test-input" style="flex:1" type="password" id="set-n8n-api-key" placeholder="Nhập n8n API Key tại đây..." />
+            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-n8n-api-key')">👁</button>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:5px">Lấy API Key tại: n8n Settings > n8n API > Create API Key</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="testN8n()">🧪 Thử kết nối n8n</button>
+      </div>
+
+      <!-- Redis Card -->
+      <div class="card" style="padding:22px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <span style="font-size:18px">⚡</span>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--text)">Redis & Vector Store</div>
+            <div style="font-size:11.5px;color:var(--text3)">Cơ sở dữ liệu RediSearch & Session</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:14px">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Host</label>
+            <input class="test-input" style="width:100%" id="set-redis-host" placeholder="127.0.0.1" />
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Port</label>
+            <input class="test-input" style="width:100%" type="number" id="set-redis-port" placeholder="6379" />
+          </div>
+        </div>
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Redis Password</label>
+          <div style="display:flex;gap:8px">
+            <input class="test-input" style="flex:1" type="password" id="set-redis-pass" placeholder="Tự động nạp từ .env hoặc nhập vào đây..." />
+            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-redis-pass')">👁</button>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="testRedis()">🧪 Thử kết nối Redis</button>
+      </div>
+
+      <!-- Ollama Card -->
+      <div class="card" style="padding:22px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <span style="font-size:18px">🦙</span>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--text)">Ollama AI Settings</div>
+            <div style="font-size:11.5px;color:var(--text3)">Mô hình Embedding & Viết lại câu</div>
+          </div>
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Ollama Base URL</label>
+          <input class="test-input" style="width:100%" id="set-ollama-url" placeholder="http://127.0.0.1:11434" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Embedding Model</label>
+            <input class="test-input" style="width:100%" id="set-ollama-embed" placeholder="bge-m3" />
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Fallback Model</label>
+            <input class="test-input" style="width:100%" id="set-ollama-fallback" placeholder="qwen2.5:7b-instruct" />
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="testOllama()">🧪 Thử kết nối Ollama</button>
+      </div>
+
+      <!-- RAG Thresholds Card -->
+      <div class="card" style="padding:22px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <span style="font-size:18px">🎯</span>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--text)">RAG & Ngưỡng Điểm Ngữ Nghĩa</div>
+            <div style="font-size:11.5px;color:var(--text3)">Độ nhạy khi nhận diện intent câu hỏi</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Ngưỡng Cao</label>
+            <input class="test-input" style="width:100%" type="number" step="0.01" id="set-rag-high" placeholder="0.78" />
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Ngưỡng Trung</label>
+            <input class="test-input" style="width:100%" type="number" step="0.01" id="set-rag-med" placeholder="0.55" />
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Top K</label>
+            <input class="test-input" style="width:100%" type="number" id="set-rag-topk" placeholder="5" />
+          </div>
+        </div>
+        <div style="font-size:11.5px;color:var(--text3);line-height:1.5">
+          • Điểm &ge; Ngưỡng cao: Bot tự tin trả lời trực tiếp.<br>
+          • Điểm &ge; Ngưỡng trung: Bot trả lời kèm viết lại (Rewrite) hoặc chuyển xem xét.
+        </div>
+      </div>
+
+    </div>
+
+    <div style="margin-top:24px;display:flex;gap:12px;align-items:center">
+      <button class="btn btn-primary" style="padding:10px 24px;font-size:14px" onclick="saveSettings()">💾 Lưu Tất Cả Cài Đặt</button>
+      <button class="btn btn-ghost" onclick="loadSettings()">↺ Hủy thay đổi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Session Modal -->
+<div class="modal-overlay" id="session-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">Session khách hàng</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<!-- Edit Customer Modal -->
+<div class="modal-overlay" id="edit-customer-modal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <div class="modal-title" id="edit-modal-title">✏️ Chỉnh sửa thông tin khách hàng</div>
+      <button class="modal-close" onclick="closeEditModal()">✕</button>
+    </div>
+    <form onsubmit="event.preventDefault(); saveEditCustomer();">
+      <input type="hidden" id="edit-cust-brand" />
+      <input type="hidden" id="edit-cust-sender-id" />
+      
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Tên Khách Hàng</label>
+        <input class="test-input" style="width:100%" id="edit-cust-name" placeholder="VD: Nguyễn Văn A..." />
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Số Điện Thoại (SĐT)</label>
+        <input class="test-input" style="width:100%" id="edit-cust-phone" placeholder="VD: 0388509046..." />
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Bạn có thể xóa phần thừa/số nhà bị dính vào SĐT tại đây</div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Khu Vực / Địa Chỉ</label>
+        <input class="test-input" style="width:100%" id="edit-cust-area" placeholder="VD: 597/39A Rạch Giá Kiên Giang..." />
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Trạng Thái Lead</label>
+          <select class="test-input" style="width:100%;height:38px;background:var(--bg3);color:var(--text)" id="edit-cust-stage">
+            <option value="new">Mới (new)</option>
+            <option value="collecting_contact">Đang thu thập (collecting)</option>
+            <option value="lead_ready">Lead sẵn (lead_ready)</option>
+            <option value="resolved">Đã xử lý (resolved)</option>
+            <option value="escalated">Chuyển admin (escalated)</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Intent Cuối</label>
+          <input class="test-input" style="width:100%" id="edit-cust-intent" placeholder="VD: wholesale_inquiry..." />
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button type="button" class="btn btn-ghost" onclick="closeEditModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">💾 Lưu Thay Đổi</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = '';
+let currentPage = 'dashboard';
+let customerBrand = 'all';
+let lqBrand = 'all';
+let testBrand = 'zeo';
+let customerPage = 1;
+let allCustomers = [];
+
+// ─── Utilities ───
+function toast(msg, type='success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(window._toast);
+  window._toast = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+function setLastUpdated() {
+  document.getElementById('last-updated').textContent =
+    'Cập nhật: ' + new Date().toLocaleTimeString('vi-VN');
+}
+
+function togglePass(id) {
+  const el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+async function fetchJSON(url, opts={}) {
+  const resp = await fetch(API + url, opts);
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+function stageBadge(stage) {
+  const map = {
+    new: ['badge-gray','Mới'],
+    collecting_contact: ['badge-yellow','Đang thu thập'],
+    lead_ready: ['badge-green','Lead sẵn'],
+    escalated: ['badge-red','Đã chuyển'],
+    resolved: ['badge-blue','Đã xử lý'],
+  };
+  const [cls, label] = map[stage] || ['badge-gray', stage || '?'];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function timeSince(isoStr) {
+  if (!isoStr) return '—';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const min = Math.floor(diff/60000);
+  if (min < 60) return `${min} phút trước`;
+  const hr = Math.floor(min/60);
+  if (hr < 24) return `${hr} giờ trước`;
+  return Math.floor(hr/24) + ' ngày trước';
+}
+
+// ─── Navigation ───
+function switchPage(page, el) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if(el) el.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  const titles = {dashboard:'Dashboard', n8n:'n8n Control', customers:'Hội thoại khách hàng', learning:'Learning Queue', test:'Test Bot', settings:'Cài đặt & API Keys'};
+  document.getElementById('page-title').textContent = titles[page] || page;
+  currentPage = page;
+  loadPage(page);
+}
+
+function loadPage(page) {
+  if (page==='dashboard') { loadStatus(); loadStats(); }
+  else if (page==='n8n') { loadN8nWorkflows(); loadExecutions(); }
+  else if (page==='customers') loadCustomers();
+  else if (page==='learning') loadLearningQueue();
+  else if (page==='settings') loadSettings();
+}
+
+function refreshCurrentPage() { loadPage(currentPage); setLastUpdated(); }
+
+// ─── MODULE 1: Status & Stats ───
+async function loadStatus() {
+  try {
+    const s = await fetchJSON('/admin/status');
+    const svc = s.services;
+    setServiceStatus('redis', svc.redis);
+    setServiceStatus('ollama', svc.ollama);
+    setServiceStatus('n8n', svc.n8n);
+  } catch(e) { console.error(e); }
+}
+
+function setServiceStatus(name, svc) {
+  const dot = document.getElementById('dot-'+name);
+  const detail = document.getElementById('detail-'+name);
+  if (!dot || !detail) return;
+  if (!svc) { dot.className='status-dot error'; detail.textContent='Lỗi'; return; }
+  if (svc.status==='ok') {
+    dot.className='status-dot ok';
+    if(name==='redis') detail.textContent = `v${svc.version} · uptime ${Math.floor(svc.uptime_seconds/3600)}h`;
+    else if(name==='ollama') detail.textContent = `${svc.models?.length||0} models · bge-m3: ${svc.embed_ready?'✅':'⚠️'}`;
+    else if(name==='n8n') detail.textContent = `${svc.active_workflows}/${svc.total_workflows} active`;
+  } else if (svc.status==='no_api_key') {
+    dot.className='status-dot warn';
+    detail.textContent='Thiếu API key n8n';
+  } else {
+    dot.className='status-dot error';
+    detail.textContent = svc.detail?.substring(0,50) || 'Lỗi';
+  }
+}
+
+async function loadStats() {
+  try {
+    const s = await fetchJSON('/admin/stats/today');
+    document.getElementById('stat-total').textContent = s.total_customers;
+    document.getElementById('stat-zeo').textContent = s.zeo?.customers || 0;
+    document.getElementById('stat-cfc').textContent = s.cfc?.customers || 0;
+    const lq = (s.zeo?.learning_queue_count||0) + (s.cfc?.learning_queue_count||0);
+    document.getElementById('stat-lq').textContent = lq;
+    document.getElementById('lq-badge').textContent = lq;
+    document.getElementById('lq-badge').className = lq > 0 ? 'nav-badge visible' : 'nav-badge';
+    renderIntents('zeo', s.zeo?.top_intents||{});
+    renderIntents('cfc', s.cfc?.top_intents||{});
+    setLastUpdated();
+  } catch(e) { console.error(e); }
+}
+
+function renderIntents(brand, intents) {
+  const tbody = document.getElementById('intents-'+brand);
+  const entries = Object.entries(intents);
+  if (!entries.length) { tbody.innerHTML = `<tr><td colspan="2" style="text-align:center;color:var(--text3)">Chưa có dữ liệu</td></tr>`; return; }
+  const max = entries[0]?.[1] || 1;
+  tbody.innerHTML = entries.map(([intent, count]) => `
+    <tr>
+      <td style="max-width:200px">
+        <div style="font-size:12px;font-weight:500;margin-bottom:4px">${intent}</div>
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${Math.round(count/max*100)}%;background:var(--accent);border-radius:2px"></div>
+        </div>
+      </td>
+      <td style="font-weight:600;text-align:right">${count}</td>
+    </tr>`).join('');
+}
+
+// ─── MODULE 2: n8n ───
+async function loadN8nWorkflows() {
+  const tbody = document.getElementById('workflows-table');
+  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center"><span class="spinner"></span></td></tr>`;
+  try {
+    const d = await fetchJSON('/admin/n8n/workflows');
+    if (d.error) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red)">${d.error}</td></tr>`; return; }
+    tbody.innerHTML = d.workflows.map(w => `
+      <tr>
+        <td style="font-weight:500">${w.name}</td>
+        <td style="font-family:monospace;font-size:11px;color:var(--text3)">${w.id}</td>
+        <td><span class="badge ${w.active?'badge-green':'badge-gray'}">${w.active?'✅ Active':'⏸ Inactive'}</span></td>
+        <td style="font-size:11.5px;color:var(--text3)">${w.updatedAt ? new Date(w.updatedAt).toLocaleDateString('vi-VN') : '—'}</td>
+        <td>
+          <button class="btn btn-ghost btn-sm" onclick="toggleWorkflow('${w.id}','${w.name}',${w.active})">
+            ${w.active ? '⏸ Tắt' : '▶ Bật'}
+          </button>
+        </td>
+      </tr>`).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--text3)">Không có workflow</td></tr>`;
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red)">Lỗi kết nối n8n. Hãy thêm API key vào settings.json</td></tr>`;
+  }
+}
+
+async function toggleWorkflow(id, name, isActive) {
+  if (!confirm(`${isActive?'Tắt':'Bật'} workflow "${name}"?`)) return;
+  try {
+    await fetchJSON(`/admin/n8n/workflows/${id}/toggle`, {method:'POST'});
+    toast(`${isActive?'Đã tắt':'Đã bật'} "${name}"`, 'success');
+    loadN8nWorkflows();
+  } catch(e) { toast('Lỗi: ' + e.message, 'error'); }
+}
+
+async function loadExecutions() {
+  const tbody = document.getElementById('executions-table');
+  tbody.innerHTML = `<tr><td colspan="4" style="text-align:center"><span class="spinner"></span></td></tr>`;
+  try {
+    const d = await fetchJSON('/admin/n8n/executions?limit=20');
+    if (!d.executions?.length) { tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text3)">Chưa có execution nào</td></tr>`; return; }
+    tbody.innerHTML = d.executions.map(e => {
+      const statusMap = {success:'badge-green',error:'badge-red',running:'badge-blue',waiting:'badge-yellow'};
+      return `<tr>
+        <td style="font-weight:500">${e.workflowName}</td>
+        <td><span class="badge ${statusMap[e.status]||'badge-gray'}">${e.status}</span></td>
+        <td style="font-size:11.5px;color:var(--text3)">${e.startedAt ? new Date(e.startedAt).toLocaleString('vi-VN') : '—'}</td>
+        <td style="font-size:11.5px;color:var(--text3)">${e.stoppedAt ? new Date(e.stoppedAt).toLocaleString('vi-VN') : '—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="4" style="color:var(--red)">Lỗi kết nối n8n</td></tr>`;
+  }
+}
+
+async function triggerSync(brand) {
+  toast(`Đang sync KB (${brand})...`, 'success');
+  try {
+    const r = await fetchJSON(`/admin/n8n/sync-knowledge?brand=${brand}`, {method:'POST'});
+    const synced = brand === 'all'
+      ? `ZeO: ${r.zeo?.synced||0}, CFC: ${r.cfc?.synced||0}`
+      : `${r.synced} items`;
+    toast(`✅ Sync xong! ${synced} FAQ đã vector hóa`, 'success');
+  } catch(e) { toast('Lỗi sync: ' + e.message, 'error'); }
+}
+
+// ─── MODULE 3: Customers ───
+async function loadCustomers() {
+  allCustomers = [];
+  const tbody = document.getElementById('customers-table');
+  tbody.innerHTML = `<tr><td colspan="8" style="text-align:center"><span class="spinner"></span></td></tr>`;
+  try {
+    const d = await fetchJSON(`/admin/customers?brand=${customerBrand}&page=1&page_size=200`);
+    allCustomers = d.customers || [];
+    customerPage = 1;
+    renderCustomers();
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--red)">Lỗi tải dữ liệu</td></tr>`;
+  }
+}
+
+function setCustomerBrand(brand, el) {
+  customerBrand = brand;
+  document.querySelectorAll('#page-customers .filter-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  loadCustomers();
+}
+
+function filterCustomers() {
+  customerPage = 1;
+  renderCustomers();
+}
+
+function renderCustomers() {
+  const search = document.getElementById('customer-search').value.toLowerCase();
+  let filtered = allCustomers.filter(c =>
+    !search || c.phone?.includes(search) || c.fb_name?.toLowerCase().includes(search) ||
+    c.area?.toLowerCase().includes(search) || c.sender_id?.includes(search)
+  );
+  const pageSize = 20;
+  const total = filtered.length;
+  const start = (customerPage-1)*pageSize;
+  const items = filtered.slice(start, start+pageSize);
+  const tbody = document.getElementById('customers-table');
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text3)">Không có khách hàng nào</td></tr>`;
+  } else {
+    tbody.innerHTML = items.map(c => `
+      <tr>
+        <td><span class="badge ${c.brand==='ZEO'?'badge-purple':'badge-blue'}">${c.brand}</span></td>
+        <td style="font-family:monospace;font-size:11px;color:var(--text3)">${c.sender_id?.slice(-8)}</td>
+        <td>${c.fb_name || '<span style="color:var(--text3)">—</span>'}</td>
+        <td style="font-weight:600;color:${c.phone?'var(--green)':'var(--text3)'}">
+          ${c.phone || '—'}
+        </td>
+        <td style="font-size:12px;color:var(--text2)">${c.area || '—'}</td>
+        <td>${stageBadge(c.lead_stage)}</td>
+        <td style="font-size:11.5px;color:var(--text3)">${c.last_intent || '—'}</td>
+        <td>
+          <div style="display:flex;gap:4px;align-items:center">
+            <button class="btn btn-ghost btn-sm" title="Xem phiên hội thoại" onclick="viewSession('${c.brand.toLowerCase()}','${c.sender_id}')">👁 Session</button>
+            <button class="btn btn-primary btn-sm" title="Chỉnh sửa thông tin" onclick="openEditCustomer('${c.brand.toLowerCase()}','${c.sender_id}')">✏️ Sửa</button>
+            <button class="btn btn-ghost btn-sm" title="Reset phiên hội thoại" onclick="resetSession('${c.brand.toLowerCase()}','${c.sender_id}')">↺</button>
+            <button class="btn btn-danger btn-sm" title="Xóa hoàn toàn khỏi Redis" onclick="deleteCustomer('${c.brand.toLowerCase()}','${c.sender_id}')">🗑</button>
+          </div>
+        </td>
+      </tr>`).join('');
+  }
+  // Pagination
+  const pages = Math.ceil(total/pageSize);
+  const pagDiv = document.getElementById('customer-pagination');
+  if (pages <= 1) { pagDiv.innerHTML = ''; return; }
+  let html = '';
+  for (let i=1; i<=Math.min(pages,10); i++) {
+    html += `<button class="page-btn ${i===customerPage?'active':''}" onclick="goCustomerPage(${i})">${i}</button>`;
+  }
+  pagDiv.innerHTML = html;
+}
+
+function goCustomerPage(p) { customerPage = p; renderCustomers(); }
+
+async function openEditCustomer(brand, senderId) {
+  try {
+    const d = await fetchJSON(`/admin/customers/${brand}/${senderId}/session`);
+    const p = d.profile || {};
+    document.getElementById('edit-cust-brand').value = brand;
+    document.getElementById('edit-cust-sender-id').value = senderId;
+    document.getElementById('edit-cust-name').value = p.fb_name || '';
+    document.getElementById('edit-cust-phone').value = p.phone || p.customer_phone || '';
+    document.getElementById('edit-cust-area').value = p.area || p.customer_location || '';
+    document.getElementById('edit-cust-intent').value = p.last_intent || '';
+    document.getElementById('edit-cust-stage').value = p.lead_stage || 'new';
+    
+    document.getElementById('edit-modal-title').textContent = `✏️ Sửa thông tin — ${senderId.slice(-8)} (${brand.toUpperCase()})`;
+    document.getElementById('edit-customer-modal').classList.add('open');
+  } catch(e) {
+    toast('Lỗi tải thông tin khách hàng: ' + e.message, 'error');
+  }
+}
+
+function closeEditModal() {
+  document.getElementById('edit-customer-modal').classList.remove('open');
+}
+
+async function saveEditCustomer() {
+  const brand = document.getElementById('edit-cust-brand').value;
+  const senderId = document.getElementById('edit-cust-sender-id').value;
+  const payload = {
+    fb_name: document.getElementById('edit-cust-name').value.trim(),
+    phone: document.getElementById('edit-cust-phone').value.trim(),
+    area: document.getElementById('edit-cust-area').value.trim(),
+    lead_stage: document.getElementById('edit-cust-stage').value,
+    last_intent: document.getElementById('edit-cust-intent').value.trim()
+  };
+
+  try {
+    await fetchJSON(`/admin/customers/${brand}/${senderId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    toast('✅ Đã cập nhật thông tin khách hàng thành công!', 'success');
+    closeEditModal();
+    loadCustomers();
+    loadStats();
+  } catch(e) {
+    toast('Lỗi lưu khách hàng: ' + e.message, 'error');
+  }
+}
+
+async function deleteCustomer(brand, senderId) {
+  if (!confirm(`⚠️ CẢNH BÁO: Bạn có chắc chắn muốn XÓA HOÀN TOÀN khách hàng ${senderId} khỏi Redis không?\nHành động này không thể hoàn tác.`)) return;
+  try {
+    await fetchJSON(`/admin/customers/${brand}/${senderId}`, { method: 'DELETE' });
+    toast(`✅ Đã xóa hoàn toàn khách hàng ${senderId}!`, 'success');
+    loadCustomers();
+    loadStats();
+  } catch(e) {
+    toast('Lỗi xóa khách hàng: ' + e.message, 'error');
+  }
+}
+
+async function viewSession(brand, senderId) {
+  try {
+    const d = await fetchJSON(`/admin/customers/${brand}/${senderId}/session`);
+    const modal = document.getElementById('session-modal');
+    document.getElementById('modal-title').textContent = `Session — ${senderId.slice(-10)} (${brand.toUpperCase()})`;
+    const p = d.profile;
+    document.getElementById('modal-content').innerHTML = `
+      <div class="session-field"><div class="session-label">SĐT</div><div class="session-value">${p.phone||p.customer_phone||'—'}</div></div>
+      <div class="session-field"><div class="session-label">Khu vực</div><div class="session-value">${p.area||p.customer_location||'—'}</div></div>
+      <div class="session-field"><div class="session-label">Lead Stage</div><div class="session-value">${p.lead_stage||'—'}</div></div>
+      <div class="session-field"><div class="session-label">Intent cuối</div><div class="session-value">${p.last_intent||'—'}</div></div>
+      <div class="session-field"><div class="session-label">Tin nhắn cuối</div><div class="session-value">${p.last_user_message||'—'}</div></div>
+      <div class="session-field"><div class="session-label">Bot trả lời</div><div class="session-value">${p.last_bot_reply||'—'}</div></div>
+      <div class="session-field"><div class="session-label">Toàn bộ Session JSON</div><div class="session-value code">${JSON.stringify(d.session, null, 2)}</div></div>
+      <button class="btn btn-danger" style="margin-top:12px" onclick="resetSession('${brand}','${senderId}');closeModal()">↺ Reset Session này</button>
+    `;
+    modal.classList.add('open');
+  } catch(e) { toast('Lỗi tải session: '+e.message, 'error'); }
+}
+
+function closeModal() { document.getElementById('session-modal').classList.remove('open'); }
+
+async function resetSession(brand, senderId) {
+  if (!confirm(`Reset session của ${senderId}?`)) return;
+  try {
+    await fetchJSON(`/admin/customers/${brand}/${senderId}/session`, {method:'DELETE'});
+    toast('Đã reset session!', 'success');
+    loadCustomers();
+  } catch(e) { toast('Lỗi: '+e.message, 'error'); }
+}
+
+// ─── MODULE 4: Learning Queue ───
+async function loadLearningQueue() {
+  const container = document.getElementById('lq-container');
+  container.innerHTML = `<div style="text-align:center;padding:30px"><span class="spinner"></span> Đang tải...</div>`;
+  try {
+    const d = await fetchJSON(`/admin/learning-queue?brand=${lqBrand}`);
+    if (!d.items?.length) {
+      container.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><p>Không có câu nào cần review. Bot đang hoạt động tốt!</p></div>`;
+      return;
+    }
+    container.innerHTML = d.items.map((item, i) => `
+      <div class="lq-card" id="lq-item-${i}">
+        <div class="lq-meta">
+          <span class="badge ${item.brand==='ZEO'?'badge-purple':'badge-blue'}">${item.brand||'?'}</span>
+          ${item.confidence ? `<span class="badge badge-yellow">score: ${item.confidence}</span>` : ''}
+          ${item.timestamp ? `<span style="font-size:11px;color:var(--text3)">${new Date(item.timestamp).toLocaleString('vi-VN')}</span>` : ''}
+        </div>
+        <div class="lq-query">💬 "${item.user_message || item.query || item.raw || JSON.stringify(item)}"</div>
+        ${item.bot_reply ? `<div class="lq-answer">Bot trả lời: ${item.bot_reply}</div>` : ''}
+        <div class="lq-actions">
+          <button class="btn btn-success btn-sm" onclick="approveLQ(${i}, '${item.brand?.toLowerCase()||'zeo'}', this)">✅ Thêm vào FAQ</button>
+          <button class="btn btn-danger btn-sm" onclick="document.getElementById('lq-item-${i}').style.display='none'">🗑 Bỏ qua</button>
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><p>Chưa có learning queue nào được n8n đẩy vào Redis.<br><small>Key format: {brand}:learning:queue</small></p></div>`;
+  }
+}
+
+function setLQBrand(brand, el) {
+  lqBrand = brand;
+  document.querySelectorAll('#page-learning .filter-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  loadLearningQueue();
+}
+
+async function approveLQ(idx, brand, btn) {
+  const intent = prompt('Nhập intent name (ví dụ: shipping_methods):');
+  if (!intent) return;
+  const answer = prompt('Nhập câu trả lời chuẩn:');
+  if (!answer) return;
+  const question = prompt('Câu hỏi mẫu (phân cách bằng ;):') || '';
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    await fetchJSON(`/admin/learning-queue/approve?brand=${brand}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({intent, question_examples: question, answer, category:'faq'})
+    });
+    toast('✅ Đã thêm vào FAQ và cập nhật Vector Index!', 'success');
+    document.getElementById('lq-item-'+idx).style.display='none';
+  } catch(e) { toast('Lỗi: '+e.message, 'error'); btn.disabled=false; btn.textContent='✅ Thêm vào FAQ'; }
+}
+
+// ─── Test Bot ───
+function setTestBrand(brand, el) {
+  testBrand = brand;
+  document.querySelectorAll('#page-test .filter-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+async function runTest() {
+  const query = document.getElementById('test-query').value.trim();
+  if (!query) { toast('Nhập câu hỏi trước', 'error'); return; }
+  const btn = document.getElementById('test-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  const result = document.getElementById('test-result');
+  result.style.display = 'none';
+  try {
+    const d = await fetchJSON(`/admin/test/query?query=${encodeURIComponent(query)}&brand=${testBrand}`, {method:'POST'});
+    document.getElementById('res-intent').textContent = d.intent || '(không khớp)';
+    document.getElementById('res-answer').textContent = d.answer || '—';
+    const score = Math.round((d.score||0)*100);
+    document.getElementById('res-score').textContent = `${score}% (${d.score_margin ? '+'+Math.round(d.score_margin*100)+'% margin' : ''})`;
+    document.getElementById('res-bar').style.width = score + '%';
+    document.getElementById('res-bar').style.background = score>=78?'var(--green)':score>=55?'var(--yellow)':'var(--red)';
+    const confMap = {high:'badge-green ✅ High',medium:'badge-yellow ⚠️ Medium',low:'badge-red ❌ Low'};
+    const [cls, lbl] = (confMap[d.confidence]||'badge-gray Low').split(' ');
+    document.getElementById('res-confidence-badge').className = 'badge '+cls;
+    document.getElementById('res-confidence-badge').textContent = lbl;
+    document.getElementById('res-top5').innerHTML = (d.results||[]).map((r,i) => `
+      <div style="display:flex;gap:10px;align-items:center;padding:8px 10px;background:var(--bg${i===0?'':'2'});border-radius:6px;margin-bottom:4px;border:1px solid ${i===0?'var(--accent)':'var(--border)'}">
+        <span style="font-size:11px;color:var(--text3);min-width:22px">#${i+1}</span>
+        <span style="flex:1;font-size:12px;color:var(--text2)">${r.intent}</span>
+        <span style="font-size:11px;font-weight:700;color:${r.score>=0.78?'var(--green)':r.score>=0.55?'var(--yellow)':'var(--text3)'}">${Math.round(r.score*100)}%</span>
+        <span style="font-size:10.5px;color:var(--text3)">${r.category}</span>
+      </div>`).join('');
+    result.style.display = 'block';
+  } catch(e) { toast('Lỗi test: '+e.message, 'error'); }
+  finally { btn.disabled=false; btn.textContent='▶ Test'; }
+}
+
+// ─── Settings ───
+async function loadSettings() {
+  try {
+    const cfg = await fetchJSON('/admin/settings');
+    if (cfg.n8n) {
+      document.getElementById('set-n8n-url').value = cfg.n8n.url || '';
+      document.getElementById('set-n8n-api-key').value = cfg.n8n.api_key || '';
+    }
+    if (cfg.redis) {
+      document.getElementById('set-redis-host').value = cfg.redis.host || '127.0.0.1';
+      document.getElementById('set-redis-port').value = cfg.redis.port || 6379;
+      document.getElementById('set-redis-pass').value = cfg.redis.password || '';
+    }
+    if (cfg.ollama) {
+      document.getElementById('set-ollama-url').value = cfg.ollama.base_url || 'http://127.0.0.1:11434';
+      document.getElementById('set-ollama-embed').value = cfg.ollama.embed_model || 'bge-m3';
+      document.getElementById('set-ollama-fallback').value = cfg.ollama.fallback_embed_model || 'qwen2.5:7b-instruct';
+    }
+    if (cfg.rag) {
+      document.getElementById('set-rag-high').value = cfg.rag.high_confidence_threshold || 0.78;
+      document.getElementById('set-rag-med').value = cfg.rag.medium_confidence_threshold || 0.55;
+      document.getElementById('set-rag-topk').value = cfg.rag.top_k || 5;
+    }
+  } catch(e) {
+    toast('Lỗi tải cài đặt: ' + e.message, 'error');
+  }
+}
+
+async function saveSettings() {
+  const payload = {
+    n8n: {
+      url: document.getElementById('set-n8n-url').value.trim(),
+      api_key: document.getElementById('set-n8n-api-key').value.trim()
+    },
+    redis: {
+      host: document.getElementById('set-redis-host').value.trim(),
+      port: parseInt(document.getElementById('set-redis-port').value) || 6379,
+      password: document.getElementById('set-redis-pass').value.trim()
+    },
+    ollama: {
+      base_url: document.getElementById('set-ollama-url').value.trim(),
+      embed_model: document.getElementById('set-ollama-embed').value.trim(),
+      fallback_embed_model: document.getElementById('set-ollama-fallback').value.trim()
+    },
+    rag: {
+      high_confidence_threshold: parseFloat(document.getElementById('set-rag-high').value) || 0.78,
+      medium_confidence_threshold: parseFloat(document.getElementById('set-rag-med').value) || 0.55,
+      top_k: parseInt(document.getElementById('set-rag-topk').value) || 5
+    }
+  };
+
+  try {
+    const res = await fetchJSON('/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    toast('✅ Đã lưu cài đặt & API Keys thành công!', 'success');
+    loadStatus();
+  } catch(e) {
+    toast('Lỗi lưu cài đặt: ' + e.message, 'error');
+  }
+}
+
+async function testN8n() {
+  toast('Đang thử kết nối n8n...', 'success');
+  await saveSettings();
+  try {
+    const s = await fetchJSON('/admin/status');
+    if (s.services?.n8n?.status === 'ok') {
+      toast(`✅ Kết nối n8n thành công! (${s.services.n8n.total_workflows} workflows)`, 'success');
+    } else if (s.services?.n8n?.status === 'no_api_key') {
+      toast('⚠️ Kết nối được nhưng thiếu hoặc sai API Key!', 'error');
+    } else {
+      toast('❌ Không thể kết nối n8n: ' + (s.services?.n8n?.detail || 'Lỗi mạng'), 'error');
+    }
+  } catch(e) {
+    toast('Lỗi test n8n: ' + e.message, 'error');
+  }
+}
+
+async function testRedis() {
+  toast('Đang kiểm tra Redis...', 'success');
+  await saveSettings();
+  try {
+    const s = await fetchJSON('/admin/status');
+    if (s.services?.redis?.status === 'ok') {
+      toast(`✅ Kết nối Redis OK (v${s.services.redis.version})`, 'success');
+    } else {
+      toast('❌ Lỗi Redis: ' + (s.services?.redis?.detail || 'Sai host/port/pass'), 'error');
+    }
+  } catch(e) {
+    toast('Lỗi: ' + e.message, 'error');
+  }
+}
+
+async function testOllama() {
+  toast('Đang kiểm tra Ollama...', 'success');
+  await saveSettings();
+  try {
+    const s = await fetchJSON('/admin/status');
+    if (s.services?.ollama?.status === 'ok') {
+      toast(`✅ Ollama OK! (${s.services.ollama.models.length} models, bge-m3: ${s.services.ollama.embed_ready ? 'Sẵn sàng' : 'Chưa có'})`, 'success');
+    } else {
+      toast('❌ Lỗi Ollama: ' + (s.services?.ollama?.detail || 'Chưa chạy ollama serve'), 'error');
+    }
+  } catch(e) {
+    toast('Lỗi: ' + e.message, 'error');
+  }
+}
+
+// Init
+window.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+document.getElementById('test-query').addEventListener('keydown', e => { if(e.key==='Enter') runTest(); });
+loadPage('dashboard');
+setLastUpdated();
+// Auto refresh dashboard every 60s
+setInterval(() => { if(currentPage==='dashboard') { loadStats(); loadStatus(); } }, 60000);
+</script>
+</body>
+</html>

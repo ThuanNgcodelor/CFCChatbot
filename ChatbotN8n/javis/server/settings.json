@@ -24,5 +24,9 @@
     "host": "0.0.0.0",
     "port": 8000,
     "reload": true
+  },
+  "n8n": {
+    "url": "https://n8n.dinhduongcantho.io.vn",
+    "api_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0YWY3N2ZiZS03OTE0LTRhYzMtODk4OS01NzBhYmJhNWUyMDUiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiODUwZTQ3MzYtODA1Yi00ODY4LTgyZDYtM2ZjMDU2YTQyZWY5IiwiaWF0IjoxNzg2NzAxNDkwfQ.Wpb-A3uvSQEPJ9qyfrxhInLhI8Y0sBK75dmp_q_lbjc"
   }
 }

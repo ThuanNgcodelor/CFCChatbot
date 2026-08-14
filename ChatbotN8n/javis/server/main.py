@@ -14,11 +14,13 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from admin_routes import router as admin_router
 from embedder import embed_text, get_embed_dim
 from knowledge_sync import sync_brand
 from rag_search import get_redis, semantic_search
@@ -30,8 +32,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="ZeO/CFC Semantic RAG Service",
-    description="Tìm kiếm ngữ nghĩa tiếng Việt cho Chatbot ZeO và CFC Cò Bay",
+    title="ZeO/CFC Semantic RAG & CFC AI Admin",
+    description="Tìm kiếm ngữ nghĩa tiếng Việt & Quản trị Chatbot ZeO và CFC Cò Bay",
     version="1.0.0",
 )
 
@@ -41,6 +43,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Đăng ký admin API router
+app.include_router(admin_router)
+
+# Mount static folder
+static_dir = Path(__file__).parent / "static"
+static_dir.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    """Giao diện web quản trị CFC AI Admin Dashboard."""
+    html_file = static_dir / "admin.html"
+    if html_file.exists():
+        return FileResponse(html_file)
+    return HTMLResponse("<h1>admin.html not found</h1>", status_code=404)
+
+
+@app.get("/")
+async def root():
+    """Chuyển hướng hoặc mở CFC AI Admin Dashboard."""
+    return FileResponse(static_dir / "admin.html")
 
 
 def _load_settings() -> dict:

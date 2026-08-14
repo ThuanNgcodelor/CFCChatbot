@@ -1,4 +1,4 @@
-# Javis Semantic RAG Server
+# CFC AI Semantic RAG Server
 
 Service Python giúp chatbot ZeO và CFC Cò Bay hiểu ngữ nghĩa tiếng Việt thay vì chỉ đếm từ khoá.
 

@@ -194,6 +194,31 @@ async def semantic_search(
     else:
         confidence = "low"
 
+    # Hybrid Document Search: Tìm kiếm tài liệu Markdown bổ trợ
+    doc_matches = []
+    try:
+        from document_ingestor import search_documents
+        doc_matches = await search_documents(query=query, brand=brand, top_k=2)
+    except Exception:
+        pass
+
+    matched_doc = doc_matches[0] if doc_matches and doc_matches[0]["score"] >= 0.70 else None
+
+    # Shopee Link Matcher: Khớp link sản phẩm Shopee nếu khách có nhu cầu
+    shopee_match = None
+    try:
+        from shopee_matcher import match_shopee_product, is_shopee_inquiry
+        if is_shopee_inquiry(query):
+            shopee_match = match_shopee_product(query, brand=brand)
+            if shopee_match:
+                # Ưu tiên câu trả lời Shopee chính xác
+                best["answer"] = shopee_match["suggested_reply"]
+                best["intent"] = "shopee_product_link"
+                best_score = max(best_score, 0.88)
+                confidence = "high"
+    except Exception:
+        pass
+
     return {
         "query": query,
         "brand": brand,
@@ -205,5 +230,8 @@ async def semantic_search(
         "answer_mode": best["answer_mode"],
         "risk_level": best["risk_level"],
         "category": best["category"],
+        "shopee_match": shopee_match,
+        "matched_document": matched_doc,
+        "document_matches": doc_matches,
         "results": parsed_results,
     }

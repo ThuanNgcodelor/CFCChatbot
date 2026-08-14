@@ -72,6 +72,8 @@ class SettingsUpdateRequest(BaseModel):
     ollama: Optional[dict] = None
     n8n: Optional[dict] = None
     rag: Optional[dict] = None
+    ai_providers: Optional[dict] = None
+    telegram: Optional[dict] = None
 
 
 @router.get("/settings")
@@ -95,16 +97,22 @@ async def update_settings(req: SettingsUpdateRequest):
         current_cfg.setdefault("n8n", {}).update(req.n8n)
     if req.rag:
         current_cfg.setdefault("rag", {}).update(req.rag)
+    if req.ai_providers:
+        current_cfg.setdefault("ai_providers", {}).update(req.ai_providers)
+    if req.telegram:
+        current_cfg.setdefault("telegram", {}).update(req.telegram)
 
     cfg_path.write_text(json.dumps(current_cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     _settings = current_cfg
 
     # Refresh module caches
     try:
-        import rag_search, embedder
+        import rag_search, embedder, ai_engine, telegram_notifier
         rag_search._redis_pool = None
         rag_search._settings = {}
         embedder._settings = {}
+        ai_engine._settings = {}
+        telegram_notifier._settings = {}
     except Exception:
         pass
 
@@ -471,6 +479,22 @@ async def update_customer(brand: str, sender_id: str, req: CustomerUpdateRequest
                 sess["lead_stage"] = req.lead_stage
             await r.set(session_key, json.dumps(sess, ensure_ascii=False))
 
+        # Tự động bắn thông báo Telegram nếu có SĐT hoặc Lead sẵn sàng
+        phone_val = profile.get("phone", "") or profile.get("customer_phone", "")
+        if phone_val and len(re.findall(r"\d", phone_val)) >= 9:
+            try:
+                from telegram_notifier import notify_new_lead
+                await notify_new_lead(
+                    brand=brand,
+                    phone=phone_val,
+                    area=profile.get("area", "") or profile.get("customer_location", ""),
+                    fb_name=profile.get("fb_name", ""),
+                    need=profile.get("last_intent", "") or profile.get("last_need", ""),
+                    sender_id=sender_id,
+                )
+            except Exception:
+                pass
+
         return {"success": True, "message": "Đã cập nhật thông tin khách hàng thành công!", "profile": profile}
     finally:
         await r.aclose()
@@ -650,3 +674,105 @@ async def test_query(query: str, brand: str = "zeo"):
     from rag_search import semantic_search
     result = await semantic_search(query=query, brand=brand, top_k=5)
     return result
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: DOCUMENT KNOWLEDGE INGESTION (.md / .txt)
+# ─────────────────────────────────────────────────────
+
+@router.get("/documents")
+async def list_documents():
+    """Danh sách tất cả tài liệu Markdown / Text trong thư mục knowledge/."""
+    knowledge_dir = Path(__file__).resolve().parents[2] / "knowledge"
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+
+    docs = []
+    for file in knowledge_dir.glob("*"):
+        if file.suffix.lower() in [".md", ".txt"]:
+            stat = file.stat()
+            docs.append({
+                "name": file.name,
+                "size_kb": round(stat.st_size / 1024, 2),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "brand": "CFC" if "cfc" in file.name.lower() or "co_bay" in file.name.lower() else "ZEO",
+            })
+    return {"total": len(docs), "documents": docs}
+
+
+@router.post("/documents/sync")
+async def sync_all_documents():
+    """Quét và đồng bộ toàn bộ tài liệu Markdown trong knowledge/ vào Redis Vector Index."""
+    from document_ingestor import ingest_knowledge_folder
+    res = await ingest_knowledge_folder()
+    return {"success": True, "message": "Đã đồng bộ toàn bộ tài liệu Markdown vào Redis Vector Index", "result": res}
+
+
+class ExtractFaqRequest(BaseModel):
+    document_name: Optional[str] = None
+    text: Optional[str] = None
+    brand: str = "zeo"
+
+
+@router.post("/documents/extract-faq")
+async def extract_faqs_endpoint(req: ExtractFaqRequest):
+    """Dùng AI tự động sinh các câu hỏi - câu trả lời FAQ chuẩn từ tài liệu."""
+    from document_ingestor import ai_extract_faqs
+    doc_text = req.text or ""
+    if not doc_text and req.document_name:
+        doc_path = Path(__file__).resolve().parents[2] / "knowledge" / req.document_name
+        if doc_path.exists():
+            doc_text = doc_path.read_text(encoding="utf-8")
+
+    if not doc_text:
+        raise HTTPException(status_code=400, detail="Không có nội dung tài liệu để trích xuất")
+
+    faqs = await ai_extract_faqs(doc_text, brand=req.brand)
+    return {"success": True, "brand": req.brand, "faqs_count": len(faqs), "faqs": faqs}
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: TELEGRAM & SHOPEE ENDPOINTS
+# ─────────────────────────────────────────────────────
+
+class TelegramTestRequest(BaseModel):
+    bot_token: str
+    chat_id: str
+
+
+@router.post("/telegram/test")
+async def test_telegram_endpoint(req: TelegramTestRequest):
+    """Kiểm thử gửi tin nhắn qua Telegram Bot."""
+    from telegram_notifier import test_telegram
+    res = await test_telegram(req.bot_token, req.chat_id)
+    return res
+
+
+@router.get("/shopee/catalog")
+async def get_shopee_catalog():
+    """Lấy toàn bộ danh mục sản phẩm Shopee hiện có."""
+    from shopee_matcher import load_shopee_catalog
+    items = load_shopee_catalog()
+    return {"total": len(items), "products": items}
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: AI EXECUTIVE REPORTER ENDPOINTS
+# ─────────────────────────────────────────────────────
+
+@router.get("/reports/latest")
+async def get_latest_report_endpoint():
+    """Lấy bản tin báo cáo kinh doanh gần nhất đã lưu trong Redis."""
+    from ai_reporter import get_latest_report
+    report = await get_latest_report()
+    return {"has_report": report is not None, "report": report}
+
+
+@router.post("/reports/generate")
+async def generate_report_endpoint(send_telegram: bool = False):
+    """Kích hoạt AI quét dữ liệu và tạo Bản Tin Báo Cáo Điều Hành mới."""
+    from ai_reporter import generate_daily_executive_report
+    res = await generate_daily_executive_report(send_telegram=send_telegram)
+    return res
+
+
+

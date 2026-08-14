@@ -1,0 +1,78 @@
+/* ================================================
+   base.css — CSS Variables, Reset, Typography
+   CFC AI Admin Dashboard
+   ================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* Colors */
+  --bg:       #0d0f17;
+  --bg2:      #13161f;
+  --bg3:      #1a1e2e;
+  --bg4:      #1f2438;
+  --border:   #232840;
+  --border2:  #2e3554;
+  --accent:   #6366f1;
+  --accent2:  #818cf8;
+  --accent3:  rgba(99,102,241,.12);
+  --green:    #22c55e;
+  --red:      #ef4444;
+  --yellow:   #f59e0b;
+  --blue:     #38bdf8;
+  --purple:   #a78bfa;
+  --text:     #e2e8f0;
+  --text2:    #94a3b8;
+  --text3:    #64748b;
+
+  /* Radius */
+  --r:     12px;
+  --r-sm:  8px;
+  --r-xs:  6px;
+
+  /* Shadow */
+  --shadow:    0 4px 24px rgba(0,0,0,.35);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+
+  /* Sidebar */
+  --sidebar-w: 220px;
+
+  /* Transitions */
+  --t: .15s ease;
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: .85em;
+  background: var(--bg3);
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  color: var(--accent2);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }

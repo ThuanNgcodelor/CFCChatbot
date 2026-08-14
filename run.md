@@ -11,3 +11,8 @@ export OLLAMA_HOST=0.0.0.0:11434
 export OLLAMA_CONTEXT_LENGTH=4096
 export OLLAMA_NUM_PARALLEL=1
 ollama serve
+
+
+
+cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis
+./.venv/bin/python server/main.py

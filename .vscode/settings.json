@@ -1,0 +1,7 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/ChatbotN8n/javis/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/ChatbotN8n/javis/server",
+    "${workspaceFolder}/ChatbotN8n/javis"
+  ]
+}

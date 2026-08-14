@@ -157,14 +157,19 @@ const productDiscoveryWords = ['ban gi', 'co gi', 'san pham gi', 'co san pham na
 const normalizedText = normalizeForSearch(text);
 const emptyInput = !text || !text.trim();
 const tokenCount = normalizedText ? normalizedText.split(' ').length : 0;
+// FIX: Regex chuẩn sdt VN 10 số (đầu số 03x/05x/07x/08x/09x hoặc +84). Dùng  để không nuốt số nhà.
 const phoneDigits = text.replace(/\\D/g, '');
-const contextualPhone = /(so dien thoai|dien thoai|so cua toi|goi toi|lien he)/.test(normalizedText) && /^\\d{8,12}$/.test(phoneDigits);
-const hasPhoneNumber = /(0\\d[\\d\\s.\\-]{7,12}\\d|\\+?84[\\d\\s.\\-]{8,12}\\d)/.test(text) || /^\\d{9,11}$/.test(phoneDigits) || contextualPhone;
-const areaWords = ['tinh', 'thanh pho', 'tp', 'huyen', 'quan', 'q', 'xa', 'phuong', 'thi xa', 'khu vuc', 'mien', 'can tho', 'thai binh', 'kien giang', 'tra noc', 'tphcm', 'ho chi minh'];
+const phoneMatchRaw = text.match(/(?:\\+84|84|0)(?:3[2-9]|5[2689]|7[06789]|8[0-9]|9[0-9])[0-9]{7}\\b/);
+const contextualPhone = /(so dien thoai|dien thoai|so cua toi|goi toi|lien he)/.test(normalizedText) && /^\\d{10,11}$/.test(phoneDigits);
+const hasPhoneNumber = Boolean(phoneMatchRaw) || contextualPhone;
+const areaWords = ['tinh', 'thanh pho', 'tp', 'huyen', 'quan', 'q', 'xa', 'phuong', 'thi xa', 'khu vuc', 'mien', 'can tho', 'thai binh', 'kien giang', 'rach gia', 'tra noc', 'tphcm', 'ho chi minh', 'binh duong', 'dong nai', 'long an', 'vung tau', 'da nang', 'ha noi', 'hai phong'];
 const isAreaQuestion = /(^|\\s)(o dau|tai dau|cho nao|dia chi.*o dau|mua o dau|ban o dau)(\\s|$)/.test(normalizedText);
+// FIX: Nới lỏng: nếu có sdt và phần chữ còn lại dài → có khu vực
+const textWithoutPhone = phoneMatchRaw ? text.replace(phoneMatchRaw[0], '').trim() : '';
 const hasAreaInfo = !isAreaQuestion && (
   areaWords.some(word => normalizedText.includes(word)) ||
-  /(^|\\s)(minh o|em o|toi o|anh o|chi o|khach hang cu o|ben minh o|o tinh|o huyen|o quan|khu vuc)\\s+[a-z0-9]/.test(normalizedText)
+  /(^|\\s)(minh o|em o|toi o|anh o|chi o|khach hang cu o|ben minh o|o tinh|o huyen|o quan|khu vuc)\\s+[a-z0-9]/.test(normalizedText) ||
+  (Boolean(phoneMatchRaw) && textWithoutPhone.replace(/[/\\-.,\\s0-9]/g, '').length >= 4)
 );
 const dealerRequestWords = ['nha phan phoi', 'dai ly', 'phan phoi', 'ban le', 'mua de ban', 'mua ban le', 'lien he mua', 'mua o dau', 'mua de ban le'];
 const isDealerLocationRequest = dealerRequestWords.some(word => normalizedText.includes(word)) ||
@@ -209,7 +214,7 @@ return [{
     isPromptInjection,
     isProductDiscovery: productDiscoveryWords.some(word => normalizedText.includes(word)),
     hasPhoneNumber,
-    phoneNumber: hasPhoneNumber ? phoneDigits : '',
+    phoneNumber: phoneMatchRaw ? phoneMatchRaw[0].trim() : (contextualPhone ? phoneDigits : ''),
     hasAreaInfo,
     isDealerLocationRequest,
   },
@@ -678,8 +683,9 @@ const profilePhone = String(customerProfile.phone || session.customer_phone || '
 const profileArea = String(customerProfile.area || session.customer_location || '').trim();
 const inputPhone = String(input.phoneNumber || '').trim();
 function stripPhoneFromArea(value) {
+  // FIX: dùng regex chuẩn 10 số để không cắt mất số nhà/địa chỉ
   return String(value || '')
-    .replace(/(?:\\+?84|0)[\\d\\s.\\-]{8,14}\\d/g, ' ')
+    .replace(/(?:\\+84|84|0)(?:3[2-9]|5[2689]|7[06789]|8[0-9]|9[0-9])[0-9]{7}\\b/g, '')
     .replace(/\\s+/g, ' ')
     .trim();
 }

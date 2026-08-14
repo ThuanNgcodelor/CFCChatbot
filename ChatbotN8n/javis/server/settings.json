@@ -1,0 +1,28 @@
+{
+  "redis": {
+    "host": "127.0.0.1",
+    "port": 6379,
+    "password": "crS9Lb7f/ywrTCiRP22gc32QCLZpirWIkczbnhjYIdU1o02Z",
+    "db": 0
+  },
+  "ollama": {
+    "base_url": "http://127.0.0.1:11434",
+    "embed_model": "bge-m3",
+    "embed_dim": 1024,
+    "fallback_embed_model": "qwen2.5:7b-instruct"
+  },
+  "rag": {
+    "top_k": 5,
+    "high_confidence_threshold": 0.78,
+    "medium_confidence_threshold": 0.55,
+    "zeo_kb_key": "zeo:kb:basic:active",
+    "cfc_kb_key": "cfc:kb:basic:active",
+    "zeo_index_name": "zeo:vec:faq",
+    "cfc_index_name": "cfc:vec:faq"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "reload": true
+  }
+}

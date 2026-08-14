@@ -160,17 +160,21 @@ const vagueProductWords = ['buon', 'do buon', 'cho vui', 'mua gi', 'ban gi', 'co
 const unsupportedProductWords = ['may do oxy', 'do oxy', 'zeo mini', 'thiet bi y te', 'cham soc ca nhan', 'san pham suc khoe', 'phu kien suc khoe', 'nuoc xa vai', 'xa vai', 'fabric softener'];
 const lower = normalizeForSearch(text);
 const tokenCount = lower ? lower.split(' ').length : 0;
-const phoneMatch = text.match(/(?:\\+?84|0)[\\d\\s.\\-]{8,14}\\d/);
+// FIX: Regex chuẩn sdt VN 10 số (đầu số 03x/05x/07x/08x/09x hoặc +84). Dùng word-boundary  để không nuốt số nhà.
+const phoneMatch = text.match(/(?:\\+84|84|0)(?:3[2-9]|5[2689]|7[06789]|8[0-9]|9[0-9])[0-9]{7}\\b/);
 const hasPhoneNumber = Boolean(phoneMatch);
 const lowerTokens = lower.split(' ').filter(Boolean);
-const areaPhraseWords = ['thanh pho', 'thi xa', 'khu vuc', 'can tho', 'binh duong', 'ho chi minh', 'thu duc'];
+const areaPhraseWords = ['thanh pho', 'thi xa', 'khu vuc', 'can tho', 'binh duong', 'ho chi minh', 'thu duc', 'kien giang', 'rach gia', 'long an', 'dong nai', 'vung tau', 'da nang', 'ha noi', 'hai phong'];
 const areaSingleWords = new Set(['tinh', 'tp', 'huyen', 'quan', 'q', 'xa', 'phuong', 'mien', 'tphcm']);
 const isAreaQuestion = /(^|\\s)(o dau|tai dau|cho nao|dia chi.*o dau|mua o dau|ban o dau)(\\s|$)/.test(lower);
 const hasAreaKeyword = areaPhraseWords.some(word => lower.includes(word))
   || lowerTokens.some(token => areaSingleWords.has(token));
+// FIX: Nới lỏng: nếu có sdt và phần chữ còn lại (sau tách sdt) đủ dài → coi là có khu vực
+const textWithoutPhone = phoneMatch ? text.replace(phoneMatch[0], '').trim() : '';
 const hasAreaInfo = !isAreaQuestion && (
   hasAreaKeyword ||
-  /(^|\\s)(minh o|em o|toi o|anh o|chi o|ben minh o|o tinh|o huyen|o quan|khu vuc)\\s+[a-z0-9]/.test(lower)
+  /(^|\\s)(minh o|em o|toi o|anh o|chi o|ben minh o|o tinh|o huyen|o quan|khu vuc)\\s+[a-z0-9]/.test(lower) ||
+  (Boolean(phoneMatch) && textWithoutPhone.replace(/[/\\-.,\\s0-9]/g, '').length >= 4)
 );
 const isSensitive = sensitiveWords.some(w => lower.includes(w));
 const isOutOfScope = outOfScopeWords.some(w => lower.includes(w));
@@ -238,7 +242,7 @@ return [{ json: {
   isVagueProductRequest,
   isUnsupportedProductQuestion,
   hasPhoneNumber,
-  phoneNumber: phoneMatch ? phoneMatch[0].replace(/\\s+/g, ' ').trim() : '',
+  phoneNumber: phoneMatch ? phoneMatch[0].trim() : '',
   hasAreaInfo,
 } }];
 `,
@@ -741,8 +745,9 @@ const profilePhone = String(customerProfile.phone || session.customer_phone || '
 const profileArea = String(customerProfile.area || session.customer_location || '').trim();
 const inputPhone = String(input.phoneNumber || '').trim();
 function stripPhoneFromArea(value) {
+  // FIX: dùng regex chuẩn 10 số để không cắt mất số nhà/địa chỉ
   return String(value || '')
-    .replace(/(?:\\+?84|0)[\\d\\s.\\-]{8,14}\\d/g, ' ')
+    .replace(/(?:\\+84|84|0)(?:3[2-9]|5[2689]|7[06789]|8[0-9]|9[0-9])[0-9]{7}\\b/g, '')
     .replace(/\\s+/g, ' ')
     .trim();
 }

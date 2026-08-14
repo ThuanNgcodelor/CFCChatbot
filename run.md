@@ -16,3 +16,6 @@ ollama serve
 
 cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis
 ./.venv/bin/python server/main.py
+
+
+docker exec -it zeo-redis redis-cli -a "crS9Lb7f/ywrTCiRP22gc32QCLZpirWIkczbnhjYIdU1o02Z"

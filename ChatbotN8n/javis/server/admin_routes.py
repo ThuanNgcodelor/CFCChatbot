@@ -1,18 +1,24 @@
 """
 admin_routes.py — FastAPI Router cho CFC AI Admin Dashboard
-Modules 1-4: Status, n8n Control, Customers, Learning Queue, Settings
+Modules: Status, n8n, Customers, Learning Queue, Settings,
+         Documents Upload, Shopee CRUD, Sheet Sync, Analytics,
+         Chat History, Export CSV, Admin Notes, AI LQ Suggest
 """
 
+import csv
+import io
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 import redis.asyncio as aioredis
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -74,6 +80,7 @@ class SettingsUpdateRequest(BaseModel):
     rag: Optional[dict] = None
     ai_providers: Optional[dict] = None
     telegram: Optional[dict] = None
+    shopee: Optional[dict] = None  # shopee_sheet_url
 
 
 @router.get("/settings")
@@ -101,6 +108,8 @@ async def update_settings(req: SettingsUpdateRequest):
         current_cfg.setdefault("ai_providers", {}).update(req.ai_providers)
     if req.telegram:
         current_cfg.setdefault("telegram", {}).update(req.telegram)
+    if req.shopee:
+        current_cfg.setdefault("shopee", {}).update(req.shopee)
 
     cfg_path.write_text(json.dumps(current_cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     _settings = current_cfg
@@ -438,6 +447,8 @@ class CustomerUpdateRequest(BaseModel):
     area: Optional[str] = None
     lead_stage: Optional[str] = None
     last_intent: Optional[str] = None
+    admin_notes: Optional[str] = None  # B3: Admin notes nội bộ
+    admin_tags: Optional[List[str]] = None  # B3: Tags [HOT LEAD, CHỜ BÁO GIÁ, ...]
 
 
 @router.put("/customers/{brand}/{sender_id}")
@@ -463,6 +474,10 @@ async def update_customer(brand: str, sender_id: str, req: CustomerUpdateRequest
             profile["lead_stage"] = req.lead_stage
         if req.last_intent is not None:
             profile["last_intent"] = req.last_intent
+        if req.admin_notes is not None:
+            profile["admin_notes"] = req.admin_notes
+        if req.admin_tags is not None:
+            profile["admin_tags"] = req.admin_tags
 
         profile["updated_at"] = datetime.now(timezone.utc).isoformat()
         await r.set(customer_key, json.dumps(profile, ensure_ascii=False))
@@ -731,7 +746,151 @@ async def extract_faqs_endpoint(req: ExtractFaqRequest):
 
 
 # ─────────────────────────────────────────────────────
-# MODULE: TELEGRAM & SHOPEE ENDPOINTS
+# MODULE: CHAT HISTORY (B1)
+# ─────────────────────────────────────────────────────
+
+@router.get("/customers/{brand}/{sender_id}/history")
+async def get_customer_history(brand: str, sender_id: str):
+    """Lấy toàn bộ lịch sử hội thoại của 1 khách hàng từ Redis."""
+    r = _get_redis()
+    b = brand.lower()
+    try:
+        # Lịch sử lưu theo nhiều key pattern
+        history_keys = [
+            f"{b}:history:messenger:{sender_id}",
+            f"{b}:chat:history:{sender_id}",
+            f"{b}:session:history:{sender_id}",
+        ]
+        messages = []
+        for hkey in history_keys:
+            key_type = await r.type(hkey)
+            if key_type == "list":
+                raw_msgs = await r.lrange(hkey, 0, 100)
+                for raw in raw_msgs:
+                    try:
+                        msg = json.loads(raw)
+                        messages.append(msg)
+                    except Exception:
+                        messages.append({"raw": str(raw)})
+                break
+            elif key_type == "string":
+                raw = await r.get(hkey)
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, list):
+                            messages = parsed
+                        else:
+                            messages = [parsed]
+                    except Exception:
+                        pass
+                break
+
+        # Nếu không có key history riêng, lấy từ session
+        if not messages:
+            session_raw = await r.get(f"{b}:session:messenger:{sender_id}")
+            if session_raw:
+                sess = json.loads(session_raw)
+                # Lấy các trường chat trong session
+                history_field = sess.get("conversation_history") or sess.get("messages") or []
+                if isinstance(history_field, list):
+                    messages = history_field
+                elif isinstance(history_field, str):
+                    try:
+                        messages = json.loads(history_field)
+                    except Exception:
+                        pass
+
+        return {
+            "sender_id": sender_id,
+            "brand": brand.upper(),
+            "total_messages": len(messages),
+            "messages": messages,
+        }
+    finally:
+        await r.aclose()
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: EXPORT CSV (B2)
+# ─────────────────────────────────────────────────────
+
+@router.get("/customers/export")
+async def export_customers_csv(
+    brand: str = Query("all"),
+    has_phone: Optional[bool] = None,
+    lead_stage: Optional[str] = None,
+):
+    """Xuất danh sách khách hàng ra file CSV."""
+    r = _get_redis()
+    try:
+        brands = ["zeo", "cfc"] if brand == "all" else [brand.lower()]
+        all_customers = []
+        for b in brands:
+            pattern = f"{b}:customer:messenger:*"
+            cursor = 0
+            while True:
+                cursor, keys = await r.scan(cursor, match=pattern, count=200)
+                for key in keys:
+                    raw = await r.get(key)
+                    if not raw:
+                        continue
+                    try:
+                        profile = json.loads(raw)
+                    except Exception:
+                        continue
+                    sender_id = key.split(":")[-1]
+                    phone_val = profile.get("phone", "") or profile.get("customer_phone", "")
+                    stage = profile.get("lead_stage", "new")
+
+                    # Filters
+                    if has_phone is True and not phone_val:
+                        continue
+                    if has_phone is False and phone_val:
+                        continue
+                    if lead_stage and stage != lead_stage:
+                        continue
+
+                    all_customers.append({
+                        "brand": b.upper(),
+                        "sender_id": sender_id,
+                        "fb_name": profile.get("fb_name", ""),
+                        "phone": phone_val,
+                        "area": profile.get("area", "") or profile.get("customer_location", ""),
+                        "lead_stage": stage,
+                        "last_intent": profile.get("last_intent", ""),
+                        "admin_notes": profile.get("admin_notes", ""),
+                        "admin_tags": ", ".join(profile.get("admin_tags", [])),
+                        "first_seen_at": profile.get("first_seen_at", ""),
+                        "last_seen_at": profile.get("last_seen_at", ""),
+                    })
+                if cursor == 0:
+                    break
+
+        # Sort by last_seen_at desc
+        all_customers.sort(key=lambda x: x.get("last_seen_at", ""), reverse=True)
+
+        # Build CSV
+        output = io.StringIO()
+        fieldnames = ["brand", "sender_id", "fb_name", "phone", "area",
+                      "lead_stage", "last_intent", "admin_notes", "admin_tags",
+                      "first_seen_at", "last_seen_at"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(all_customers)
+
+        filename = f"cfc_ai_customers_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    finally:
+        await r.aclose()
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: TELEGRAM ENDPOINTS
 # ─────────────────────────────────────────────────────
 
 class TelegramTestRequest(BaseModel):
@@ -747,12 +906,505 @@ async def test_telegram_endpoint(req: TelegramTestRequest):
     return res
 
 
+# ─────────────────────────────────────────────────────
+# MODULE: SHOPEE CATALOG CRUD (A2a)
+# ─────────────────────────────────────────────────────
+
+def _shopee_catalog_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "knowledge" / "shopee_catalog.json"
+
+
+def _load_raw_catalog() -> list:
+    p = _shopee_catalog_path()
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return []
+
+
+def _save_catalog(items: list):
+    p = _shopee_catalog_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Invalidate cache
+    try:
+        import shopee_matcher
+        shopee_matcher._catalog_cache = None
+    except Exception:
+        pass
+
+
+class ShopeeProductRequest(BaseModel):
+    brand: str
+    name: str
+    variant: Optional[str] = ""
+    price: Optional[str] = ""
+    promotion: Optional[str] = ""
+    shopee_url: str
+    keywords: Optional[List[str]] = []
+
+
 @router.get("/shopee/catalog")
 async def get_shopee_catalog():
     """Lấy toàn bộ danh mục sản phẩm Shopee hiện có."""
-    from shopee_matcher import load_shopee_catalog
-    items = load_shopee_catalog()
+    items = _load_raw_catalog()
+    # Thêm index cho từng item
+    for i, item in enumerate(items):
+        item["_idx"] = i
     return {"total": len(items), "products": items}
+
+
+@router.post("/shopee/products")
+async def add_shopee_product(req: ShopeeProductRequest):
+    """Thêm sản phẩm Shopee mới vào catalog."""
+    items = _load_raw_catalog()
+    new_item = {
+        "brand": req.brand.upper(),
+        "name": req.name,
+        "variant": req.variant or "",
+        "price": req.price or "",
+        "promotion": req.promotion or "",
+        "shopee_url": req.shopee_url,
+        "keywords": req.keywords or [],
+        "added_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    items.append(new_item)
+    _save_catalog(items)
+    return {"success": True, "total": len(items), "product": new_item}
+
+
+@router.put("/shopee/products/{idx}")
+async def update_shopee_product(idx: int, req: ShopeeProductRequest):
+    """Cập nhật thông tin sản phẩm Shopee theo index."""
+    items = _load_raw_catalog()
+    if idx < 0 or idx >= len(items):
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
+    items[idx].update({
+        "brand": req.brand.upper(),
+        "name": req.name,
+        "variant": req.variant or "",
+        "price": req.price or "",
+        "promotion": req.promotion or "",
+        "shopee_url": req.shopee_url,
+        "keywords": req.keywords or [],
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    })
+    _save_catalog(items)
+    return {"success": True, "product": items[idx]}
+
+
+@router.delete("/shopee/products/{idx}")
+async def delete_shopee_product(idx: int):
+    """Xóa sản phẩm Shopee theo index."""
+    items = _load_raw_catalog()
+    if idx < 0 or idx >= len(items):
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
+    removed = items.pop(idx)
+    _save_catalog(items)
+    return {"success": True, "removed": removed, "total": len(items)}
+
+
+@router.post("/shopee/sync-sheet")
+async def sync_shopee_from_sheet(sheet_url: Optional[str] = None):
+    """Sync danh mục Shopee từ Google Sheets CSV URL."""
+    cfg = _cfg()
+    url = sheet_url or cfg.get("shopee", {}).get("sheet_url", "")
+    if not url:
+        raise HTTPException(status_code=400, detail="Chưa cấu hình Google Sheets URL cho Shopee")
+
+    # Chuyển URL Google Sheets sang CSV export URL
+    if "spreadsheets/d/" in url:
+        sheet_id = url.split("/d/")[1].split("/")[0]
+        gid = ""
+        if "gid=" in url:
+            gid = url.split("gid=")[1].split("&")[0].split("#")[0]
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        if gid:
+            csv_url += f"&gid={gid}"
+    else:
+        csv_url = url  # Assume already CSV URL
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(csv_url, headers={"User-Agent": "CFC-AI-Bot/2.0"})
+            resp.raise_for_status()
+
+        csv_text = resp.text
+        reader = csv.DictReader(io.StringIO(csv_text))
+        new_items = []
+        for row in reader:
+            # Flexible column mapping
+            def g(*keys):
+                for k in keys:
+                    for col in row:
+                        if col.lower().strip() == k.lower():
+                            return str(row[col]).strip()
+                return ""
+
+            shopee_url = g("link shopee", "shopee_url", "link", "url")
+            name = g("tên sp", "ten sp", "name", "tên sản phẩm", "ten san pham")
+            if not shopee_url or not name:
+                continue
+            new_items.append({
+                "brand": g("brand", "thương hiệu", "thuong hieu").upper() or "ZEO",
+                "name": name,
+                "variant": g("quy cách", "quy cach", "variant"),
+                "price": g("giá", "gia", "price"),
+                "promotion": g("ưu đãi", "uu dai", "promotion", "khuyến mãi"),
+                "shopee_url": shopee_url,
+                "keywords": [k.strip() for k in g("từ khóa", "tu khoa", "keywords").split(",") if k.strip()],
+                "synced_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            })
+
+        # Merge: keep manual items + overwrite sheet items by name
+        existing = _load_raw_catalog()
+        sheet_names = {item["name"].lower() for item in new_items}
+        kept = [item for item in existing if item.get("name", "").lower() not in sheet_names and not item.get("synced_at")]
+        merged = kept + new_items
+        _save_catalog(merged)
+
+        # Lưu thời gian sync vào Redis
+        try:
+            r = _get_redis()
+            await r.set("cfc:shopee:last_sync", datetime.now().isoformat())
+            await r.aclose()
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "synced_count": len(new_items),
+            "total": len(merged),
+            "synced_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi sync Google Sheets: {str(e)}")
+
+
+@router.get("/shopee/last-sync")
+async def get_shopee_last_sync():
+    """Lấy thời gian sync Shopee catalog lần cuối."""
+    try:
+        r = _get_redis()
+        last = await r.get("cfc:shopee:last_sync")
+        await r.aclose()
+        return {"last_sync": last or None}
+    except Exception:
+        return {"last_sync": None}
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: DOCUMENT UPLOAD (A1)
+# ─────────────────────────────────────────────────────
+
+@router.post("/documents/upload")
+async def upload_document(file: UploadFile = File(...), brand: str = Query("auto")):
+    """Upload file .md trực tiếp từ trình duyệt vào thư mục knowledge/ và vector hóa ngay."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Tên file không hợp lệ")
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in [".md", ".txt"]:
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .md và .txt")
+
+    knowledge_dir = Path(__file__).resolve().parents[2] / "knowledge"
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+    dest = knowledge_dir / file.filename
+
+    content = await file.read()
+    dest.write_bytes(content)
+    logger.info("Uploaded document: %s (%d bytes)", file.filename, len(content))
+
+    # Auto-ingest ngay sau khi upload
+    try:
+        from document_ingestor import ingest_single_file
+        result = await ingest_single_file(str(dest))
+    except ImportError:
+        from document_ingestor import ingest_knowledge_folder
+        result = await ingest_knowledge_folder()
+
+    return {
+        "success": True,
+        "filename": file.filename,
+        "size_kb": round(len(content) / 1024, 2),
+        "ingest_result": result,
+        "message": f"Đã upload và vector hóa '{file.filename}' thành công!",
+    }
+
+
+class ImportSheetRequest(BaseModel):
+    sheet_url: str
+    brand: str = "zeo"
+
+
+@router.post("/documents/import-sheet")
+async def import_document_from_sheet(req: ImportSheetRequest):
+    """Import nội dung tài liệu từ Google Sheets (dạng FAQ 2 cột: Câu hỏi | Câu trả lời) vào Vector Index."""
+    # Convert Google Sheets URL to CSV export
+    url = req.sheet_url.strip()
+    if "spreadsheets/d/" in url:
+        sheet_id = url.split("/d/")[1].split("/")[0]
+        gid = ""
+        if "gid=" in url:
+            gid = url.split("gid=")[1].split("&")[0].split("#")[0]
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        if gid:
+            csv_url += f"&gid={gid}"
+    else:
+        csv_url = url
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(csv_url, headers={"User-Agent": "CFC-AI-Bot/2.0"})
+            resp.raise_for_status()
+        csv_text = resp.text
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Không thể tải Google Sheets: {str(e)}")
+
+    reader = csv.DictReader(io.StringIO(csv_text))
+    rows = list(reader)
+    if not rows:
+        raise HTTPException(status_code=400, detail="Sheet trống hoặc không đọc được")
+
+    # Convert sheet rows to Markdown text
+    md_lines = [f"# Import từ Google Sheets — {datetime.now().strftime('%Y-%m-%d')}\n"]
+    cols = list(rows[0].keys())
+    is_faq_format = len(cols) >= 2
+
+    if is_faq_format:
+        # 2-column FAQ format
+        q_col, a_col = cols[0], cols[1]
+        for row in rows:
+            q = str(row.get(q_col, "")).strip()
+            a = str(row.get(a_col, "")).strip()
+            if q and a:
+                md_lines.append(f"## {q}\n{a}\n")
+    else:
+        # Single-column content
+        for row in rows:
+            line = " | ".join(str(v).strip() for v in row.values() if str(v).strip())
+            if line:
+                md_lines.append(line)
+
+    md_content = "\n".join(md_lines)
+    brand_prefix = "cfc" if req.brand.lower() == "cfc" else "zeo"
+    fname = f"{brand_prefix}_sheet_import_{int(time.time())}.md"
+    knowledge_dir = Path(__file__).resolve().parents[2] / "knowledge"
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+    fpath = knowledge_dir / fname
+    fpath.write_text(md_content, encoding="utf-8")
+
+    # Ingest ngay
+    try:
+        from document_ingestor import ingest_single_file
+        result = await ingest_single_file(str(fpath))
+    except ImportError:
+        from document_ingestor import ingest_knowledge_folder
+        result = await ingest_knowledge_folder()
+
+    return {
+        "success": True,
+        "rows_imported": len(rows),
+        "filename": fname,
+        "format": "faq" if is_faq_format else "content",
+        "ingest_result": result,
+        "message": f"Đã import {len(rows)} dòng từ Google Sheets và vector hóa thành công!",
+    }
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: AI LEARNING QUEUE SUGGEST (C1)
+# ─────────────────────────────────────────────────────
+
+@router.post("/learning/ai-suggest")
+async def ai_suggest_from_learning_queue(brand: str = Query("all")):
+    """AI tự phân tích Learning Queue: gom nhóm câu tương tự + đề xuất intent + câu trả lời."""
+    from ai_engine import generate_ai_text
+
+    # Lấy learning queue
+    r = _get_redis()
+    try:
+        brands = ["zeo", "cfc"] if brand == "all" else [brand.lower()]
+        raw_questions = []
+        for b in brands:
+            for lq_key in [f"{b}:learning:queue", f"{b}:kb:learning:queue"]:
+                key_type = await r.type(lq_key)
+                if key_type == "list":
+                    items = await r.lrange(lq_key, 0, 50)
+                elif key_type == "set":
+                    items = list(await r.smembers(lq_key))[:50]
+                else:
+                    continue
+                for raw in items:
+                    try:
+                        item = json.loads(raw)
+                        q = item.get("user_message") or item.get("query") or str(raw)
+                        raw_questions.append({"brand": b.upper(), "question": q, "raw": raw})
+                    except Exception:
+                        raw_questions.append({"brand": b.upper(), "question": str(raw), "raw": raw})
+    finally:
+        await r.aclose()
+
+    if not raw_questions:
+        return {"success": True, "suggestions": [], "message": "Learning Queue trống!"}
+
+    # Gửi cho AI phân tích
+    q_list = "\n".join([f"- [{i+1}] ({q['brand']}) {q['question']}" for i, q in enumerate(raw_questions[:30])])
+    prompt = f"""Bạn là chuyên gia phân tích FAQ chatbot ZeO/CFC bán hàng phân bón và nước giặt.
+
+Dưới đây là {len(raw_questions[:30])} câu hỏi khách hàng mà chatbot CHƯA trả lời được (Learning Queue):
+
+{q_list}
+
+Hãy:
+1. Gom nhóm các câu có ý nghĩa tương đồng lại với nhau
+2. Đặt tên intent ngắn gọn cho từng nhóm (VD: "wholesale_price", "product_usage", "return_policy")
+3. Viết câu trả lời chuẩn tiếng Việt cho từng nhóm (ngắn gọn, thân thiện, chuyên nghiệp)
+
+Traả về JSON array:
+[{{"intent": "tên_intent", "brand": "ZEO/CFC", "sample_questions": ["câu hỏi mẫu"], "suggested_answer": "câu trả lời gợi ý", "question_indices": [1,2,3]}}]
+
+Chỉ trả về JSON, không giải thích thêm."""
+
+    ai_raw = await generate_ai_text(prompt, max_tokens=2000)
+    suggestions = []
+    try:
+        # Extract JSON from response
+        json_start = ai_raw.find("[")
+        json_end = ai_raw.rfind("]") + 1
+        if json_start >= 0 and json_end > json_start:
+            suggestions = json.loads(ai_raw[json_start:json_end])
+    except Exception:
+        suggestions = [{"intent": "ai_error", "suggested_answer": ai_raw, "sample_questions": [], "brand": brand.upper()}]
+
+    return {
+        "success": True,
+        "total_questions": len(raw_questions),
+        "suggestions": suggestions,
+        "raw_questions": raw_questions[:30],
+    }
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: TREND ANALYTICS (C3)
+# ─────────────────────────────────────────────────────
+
+@router.get("/analytics/weekly")
+async def weekly_analytics():
+    """Trả về số liệu trend 7 ngày gần nhất (snapshot hàng ngày từ Redis)."""
+    r = _get_redis()
+    try:
+        labels = []
+        new_customers = []
+        leads_count = []
+        lq_counts = []
+
+        from datetime import timedelta
+        today = datetime.now()
+        for i in range(6, -1, -1):
+            day = today - timedelta(days=i)
+            label = day.strftime("%d/%m")
+            labels.append(label)
+            snap_key = f"cfc:analytics:daily:{day.strftime('%Y-%m-%d')}"
+            snap_raw = await r.get(snap_key)
+            if snap_raw:
+                snap = json.loads(snap_raw)
+                new_customers.append(snap.get("new_customers", 0))
+                leads_count.append(snap.get("leads_with_phone", 0))
+                lq_counts.append(snap.get("learning_queue", 0))
+            else:
+                new_customers.append(0)
+                leads_count.append(0)
+                lq_counts.append(0)
+
+        # Top intents 7 ngày (aggregate)
+        intent_agg: dict = {}
+        cursor = 0
+        while True:
+            cursor, keys = await r.scan(cursor, match="cfc:analytics:daily:*", count=50)
+            for key in keys:
+                snap_raw = await r.get(key)
+                if snap_raw:
+                    snap = json.loads(snap_raw)
+                    for intent, count in snap.get("top_intents", {}).items():
+                        intent_agg[intent] = intent_agg.get(intent, 0) + count
+            if cursor == 0:
+                break
+
+        top_intents_7d = sorted(intent_agg.items(), key=lambda x: x[1], reverse=True)[:8]
+
+        return {
+            "labels": labels,
+            "new_customers": new_customers,
+            "leads_with_phone": leads_count,
+            "learning_queue": lq_counts,
+            "top_intents_7d": dict(top_intents_7d),
+        }
+    finally:
+        await r.aclose()
+
+
+@router.post("/analytics/snapshot")
+async def save_daily_snapshot():
+    """Lưu snapshot số liệu ngày hôm nay vào Redis (gọi bởi scheduler)."""
+    r = _get_redis()
+    try:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        snap_key = f"cfc:analytics:daily:{today_str}"
+
+        # Count customers & leads
+        total_new = 0
+        leads = 0
+        lq_total = 0
+        top_intents: dict = {}
+
+        for b in ["zeo", "cfc"]:
+            cursor = 0
+            while True:
+                cursor, keys = await r.scan(cursor, match=f"{b}:customer:messenger:*", count=200)
+                for key in keys:
+                    raw = await r.get(key)
+                    if not raw:
+                        continue
+                    try:
+                        profile = json.loads(raw)
+                    except Exception:
+                        continue
+                    # Count today's new customers
+                    first_seen = profile.get("first_seen_at", "")
+                    if first_seen.startswith(today_str):
+                        total_new += 1
+                    # Count leads with phone
+                    phone = profile.get("phone", "") or profile.get("customer_phone", "")
+                    if phone and len(re.findall(r"\d", phone)) >= 9:
+                        leads += 1
+                    # Aggregate intents
+                    intent = profile.get("last_intent", "")
+                    if intent:
+                        top_intents[intent] = top_intents.get(intent, 0) + 1
+                if cursor == 0:
+                    break
+            # Learning queue count
+            for lq_key in [f"{b}:learning:queue", f"{b}:kb:learning:queue"]:
+                kt = await r.type(lq_key)
+                if kt == "list":
+                    lq_total += await r.llen(lq_key)
+                elif kt == "set":
+                    lq_total += await r.scard(lq_key)
+
+        snap = {
+            "date": today_str,
+            "new_customers": total_new,
+            "leads_with_phone": leads,
+            "learning_queue": lq_total,
+            "top_intents": dict(sorted(top_intents.items(), key=lambda x: x[1], reverse=True)[:10]),
+            "saved_at": datetime.now().isoformat(),
+        }
+        await r.setex(snap_key, 60 * 60 * 24 * 8, json.dumps(snap, ensure_ascii=False))  # 8 ngày TTL
+        return {"success": True, "snapshot": snap}
+    finally:
+        await r.aclose()
 
 
 # ─────────────────────────────────────────────────────
@@ -773,6 +1425,4 @@ async def generate_report_endpoint(send_telegram: bool = False):
     from ai_reporter import generate_daily_executive_report
     res = await generate_daily_executive_report(send_telegram=send_telegram)
     return res
-
-
 

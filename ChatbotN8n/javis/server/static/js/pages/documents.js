@@ -1,9 +1,10 @@
-/** documents.js — Document list, Sync, Extract FAQ */
+/** documents.js — Document list, Upload .md, Import Google Sheet, Sync, Extract FAQ */
 'use strict';
 
 async function loadDocuments() {
   const tbody = document.getElementById('documents-table');
-  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px"><span class="spinner"></span></td></tr>`;
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px"><span class="spinner"></span> Đang tải tài liệu...</td></tr>`;
   try {
     const d = await fetchJSON('/admin/documents');
     if (!d.documents?.length) {
@@ -17,11 +18,73 @@ async function loadDocuments() {
         <td style="font-size:12px;color:var(--text3)">${doc.size_kb} KB</td>
         <td style="font-size:12px;color:var(--text3)">${doc.modified_at}</td>
         <td>
-          <button class="btn btn-primary btn-sm" onclick="extractFaqFromDoc('${doc.name}', '${doc.brand.toLowerCase()}')">⚡ Trích xuất FAQ</button>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-primary btn-sm" onclick="extractFaqFromDoc('${doc.name}', '${doc.brand.toLowerCase()}')">⚡ Trích xuất FAQ</button>
+          </div>
         </td>
       </tr>`).join('');
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:16px">Lỗi tải danh sách: ${e.message}</td></tr>`;
+  }
+}
+
+async function uploadDocument(inputEl) {
+  const file = inputEl.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  toast(`Đang tải lên & vector hóa "${file.name}"...`, 'success');
+  try {
+    const resp = await fetch('/admin/documents/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const res = await resp.json();
+    toast(`✅ ${res.message || 'Tải lên thành công!'}`, 'success');
+    inputEl.value = '';
+    loadDocuments();
+  } catch (e) {
+    toast('Lỗi tải lên: ' + e.message, 'error');
+  }
+}
+
+function openImportSheetModal() {
+  document.getElementById('import-sheet-modal')?.classList.add('open');
+}
+
+function closeImportSheetModal() {
+  document.getElementById('import-sheet-modal')?.classList.remove('open');
+}
+
+async function submitImportSheet() {
+  const sheetUrl = document.getElementById('sheet-import-url')?.value?.trim();
+  const brand = document.getElementById('sheet-import-brand')?.value || 'zeo';
+
+  if (!sheetUrl) {
+    toast('Vui lòng nhập đường dẫn Google Sheets', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-import-sheet');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Đang nạp dữ liệu...'; }
+
+  toast('Đang tải và vector hóa dữ liệu từ Google Sheets...', 'success');
+  try {
+    const res = await fetchJSON('/admin/documents/import-sheet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_url: sheetUrl, brand: brand }),
+    });
+    toast(`✅ ${res.message}`, 'success');
+    closeImportSheetModal();
+    loadDocuments();
+  } catch (e) {
+    toast('Lỗi import Google Sheets: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Tiến Hành Import'; }
   }
 }
 

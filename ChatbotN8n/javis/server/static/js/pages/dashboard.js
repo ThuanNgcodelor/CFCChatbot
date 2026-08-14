@@ -1,4 +1,4 @@
-/** dashboard.js — Dashboard: Status cards, Stat numbers, Intent charts */
+/** dashboard.js — Dashboard: Status cards, Stat numbers, Intent charts, Weekly Trend Analytics (C3) */
 'use strict';
 
 async function loadStatus() {
@@ -46,6 +46,9 @@ async function loadStats() {
     renderIntents('zeo', s.zeo?.top_intents || {});
     renderIntents('cfc', s.cfc?.top_intents || {});
     setLastUpdated();
+
+    // Load Weekly Analytics
+    loadWeeklyAnalytics();
   } catch (e) { console.error('loadStats', e); }
 }
 
@@ -68,4 +71,47 @@ function renderIntents(brand, intents) {
       </td>
       <td style="font-weight:700;text-align:right;font-size:13px">${count}</td>
     </tr>`).join('');
+}
+
+// ─── Weekly Trend Analytics (C3) ───
+async function loadWeeklyAnalytics() {
+  const chartContainer = document.getElementById('weekly-chart-container');
+  if (!chartContainer) return;
+
+  try {
+    const d = await fetchJSON('/admin/analytics/weekly');
+    const labels = d.labels || [];
+    const newCust = d.new_customers || [];
+    const leads = d.leads_with_phone || [];
+    const maxVal = Math.max(1, ...newCust, ...leads);
+
+    let barsHtml = labels.map((lbl, i) => {
+      const cVal = newCust[i] || 0;
+      const lVal = leads[i] || 0;
+      const cPct = Math.round((cVal / maxVal) * 100);
+      const lPct = Math.round((lVal / maxVal) * 100);
+
+      return `
+        <div class="trend-col">
+          <div class="trend-bars">
+            <div class="trend-bar bar-cust" style="height:${Math.max(4, cPct)}%" title="Khách mới: ${cVal}"></div>
+            <div class="trend-bar bar-lead" style="height:${Math.max(4, lPct)}%" title="Leads SĐT: ${lVal}"></div>
+          </div>
+          <div class="trend-label">${lbl}</div>
+        </div>
+      `;
+    }).join('');
+
+    chartContainer.innerHTML = `
+      <div class="trend-wrapper">
+        <div class="trend-legend">
+          <span><span class="legend-dot dot-cust"></span> Khách mới</span>
+          <span><span class="legend-dot dot-lead"></span> Leads SĐT</span>
+        </div>
+        <div class="trend-chart">${barsHtml}</div>
+      </div>
+    `;
+  } catch (e) {
+    chartContainer.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:10px">Chưa có đủ dữ liệu lịch sử 7 ngày</div>`;
+  }
 }

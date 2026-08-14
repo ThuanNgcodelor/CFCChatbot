@@ -7,6 +7,7 @@ Nhận câu hỏi của khách → embed → KNN search trong Redis → trả to
 import json
 import logging
 import struct
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -191,33 +192,40 @@ async def semantic_search(
         confidence = "high"
     elif best_score >= med_thresh:
         confidence = "medium"
-    else:
-        confidence = "low"
+    # 3-Layer Fallback:
+    # 1. Score >= High (0.78): Direct / confident reply
+    # 2. Score >= Med (0.55): Medium confidence / Rewrite
+    # 3. Score < Med (0.55): Auto-escalate to Admin via Telegram + push to Learning Queue
+    if confidence == "low":
+        fallback_msg = (
+            f"Dạ câu hỏi này em xin phép chuyển cho chuyên viên tư vấn của {brand.upper()} hỗ trợ mình kỹ hơn ngay nhé ạ! "
+            "Anh/chị có thể để lại số điện thoại hoặc tin nhắn chi tiết giúp em nha."
+        )
+        if not best["answer"] or best_score < 0.35:
+            best["answer"] = fallback_msg
 
-    # Hybrid Document Search: Tìm kiếm tài liệu Markdown bổ trợ
-    doc_matches = []
-    try:
-        from document_ingestor import search_documents
-        doc_matches = await search_documents(query=query, brand=brand, top_k=2)
-    except Exception:
-        pass
+        # Auto-push to Learning Queue in Redis
+        try:
+            r = await get_redis()
+            lq_item = json.dumps({
+                "query": query,
+                "user_message": query,
+                "confidence": best_score,
+                "brand": brand.upper(),
+                "bot_reply": best["answer"],
+                "timestamp": datetime.now().isoformat() if "datetime" in globals() else "",
+            }, ensure_ascii=False)
+            await r.rpush(f"{brand.lower()}:learning:queue", lq_item)
+        except Exception:
+            pass
 
-    matched_doc = doc_matches[0] if doc_matches and doc_matches[0]["score"] >= 0.70 else None
-
-    # Shopee Link Matcher: Khớp link sản phẩm Shopee nếu khách có nhu cầu
-    shopee_match = None
-    try:
-        from shopee_matcher import match_shopee_product, is_shopee_inquiry
-        if is_shopee_inquiry(query):
-            shopee_match = match_shopee_product(query, brand=brand)
-            if shopee_match:
-                # Ưu tiên câu trả lời Shopee chính xác
-                best["answer"] = shopee_match["suggested_reply"]
-                best["intent"] = "shopee_product_link"
-                best_score = max(best_score, 0.88)
-                confidence = "high"
-    except Exception:
-        pass
+        # Auto-notify admin via Telegram
+        try:
+            from telegram_notifier import notify_admin_unanswered
+            import asyncio
+            asyncio.create_task(notify_admin_unanswered(brand=brand, query=query, score=best_score))
+        except Exception:
+            pass
 
     return {
         "query": query,

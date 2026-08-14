@@ -101,7 +101,36 @@ async def notify_new_lead(
     return await send_telegram_message(msg)
 
 
+async def notify_admin_unanswered(
+    brand: str,
+    query: str,
+    sender_id: str = "",
+    score: float = 0.0,
+) -> dict:
+    """Bắn cảnh báo câu hỏi chưa có câu trả lời (score thấp) để Admin hỗ trợ ngay."""
+    cfg = _telegram_cfg()
+    if not cfg.get("enabled", True) and not cfg.get("bot_token"):
+        return {"success": False, "skipped": True, "reason": "Telegram chưa kích hoạt"}
+
+    now_str = datetime.now().strftime("%H:%M:%S - %d/%m/%Y")
+    brand_title = "ZEO VIETNAM 🧴" if brand.upper() == "ZEO" else "CFC CÒ BAY 🌾"
+
+    msg = f"""
+⚠️ <b>CẦN ADMIN HỖ TRỢ — BOT KHÔNG TỰ TIN ({brand_title})</b>
+
+❓ <b>Khách hỏi:</b> <i>"{query}"</i>
+📊 <b>RAG Score:</b> {round(score * 100)}% (Dưới ngưỡng 55%)
+🆔 <b>Sender ID:</b> <code>{sender_id or 'Ẩn danh / Web Test'}</code>
+⏰ <b>Thời gian:</b> {now_str}
+
+👉 <i>Vui lòng vào fanpage hoặc Learning Queue để trả lời và bổ sung FAQ!</i>
+""".strip()
+
+    return await send_telegram_message(msg)
+
+
 async def test_telegram(bot_token: str, chat_id: str) -> dict:
     """Gửi tin nhắn kiểm thử kết nối Telegram."""
     test_msg = "⚡ <b>CFC AI Test Notification</b>\n\nKết nối Telegram Bot thành công! Bạn sẽ nhận được thông báo Lead và Báo cáo tại đây."
     return await send_telegram_message(test_msg, bot_token=bot_token, chat_id=chat_id)
+

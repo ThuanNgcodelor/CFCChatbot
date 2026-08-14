@@ -1,6 +1,7 @@
 /* ================================================
    components.css — Cards, Buttons, Badges, Tables,
-                    Modals, Forms, Toast, Spinner
+                    Modals, Forms, Toast, Spinner,
+                    Chat Timeline, Trend Analytics
    CFC AI Admin Dashboard
    ================================================ */
 
@@ -167,7 +168,7 @@
 .badge-gray   { background: rgba(100,116,139,.12); color: var(--text3);   border: 1px solid rgba(100,116,139,.2); }
 
 /* ════════════════════════════════════
-   FILTER TABS
+   FILTER TABS & CHIPS
 ════════════════════════════════════ */
 .filter-tabs {
   display: flex;
@@ -177,7 +178,7 @@
   padding: 3px;
   border: 1px solid var(--border);
 }
-.filter-tab {
+.filter-tab, .filter-phone-btn {
   padding: 5px 14px;
   border-radius: var(--r-xs);
   font-size: 12px;
@@ -189,7 +190,7 @@
   background: transparent;
   font-family: inherit;
 }
-.filter-tab.active {
+.filter-tab.active, .filter-phone-btn.active {
   background: var(--bg2);
   color: var(--text);
   box-shadow: 0 1px 4px rgba(0,0,0,.35);
@@ -373,6 +374,110 @@ select.form-input, select.test-input {
   max-height: 180px;
   overflow-y: auto;
 }
+
+/* ════════════════════════════════════
+   CHAT TIMELINE (History Modal)
+════════════════════════════════════ */
+.chat-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 500px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.chat-bubble {
+  max-width: 82%;
+  padding: 10px 14px;
+  border-radius: var(--r);
+  font-size: 13px;
+  line-height: 1.55;
+  border: 1px solid var(--border);
+}
+.chat-bubble.chat-user {
+  align-self: flex-start;
+  background: var(--bg3);
+  border-color: var(--border2);
+}
+.chat-bubble.chat-bot {
+  align-self: flex-end;
+  background: rgba(99,102,241,.12);
+  border-color: rgba(99,102,241,.3);
+  color: var(--text);
+}
+.chat-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+.chat-sender { font-weight: 700; color: var(--text); }
+.chat-time { color: var(--text3); font-size: 10px; }
+.chat-text { white-space: pre-wrap; word-break: break-word; }
+
+/* ════════════════════════════════════
+   WEEKLY TREND ANALYTICS CHARTS (C3)
+════════════════════════════════════ */
+.trend-wrapper {
+  padding: 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  margin-bottom: 20px;
+}
+.trend-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 11.5px;
+  color: var(--text2);
+  margin-bottom: 14px;
+  justify-content: flex-end;
+}
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+.legend-dot.dot-cust { background: var(--accent); }
+.legend-dot.dot-lead { background: var(--green); }
+
+.trend-chart {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  height: 130px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.trend-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.trend-bars {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 100px;
+  width: 100%;
+  justify-content: center;
+}
+.trend-bar {
+  width: 12px;
+  border-radius: 3px 3px 0 0;
+  transition: height .4s ease;
+}
+.trend-bar.bar-cust { background: var(--accent); }
+.trend-bar.bar-lead { background: var(--green); }
+.trend-label { font-size: 10.5px; color: var(--text3); }
 
 /* ════════════════════════════════════
    TOAST NOTIFICATION

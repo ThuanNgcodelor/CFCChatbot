@@ -8,8 +8,10 @@ Endpoints:
   POST /rewrite         → gọi Ollama để viết lại câu trả lời tự nhiên hơn (tuỳ chọn)
 """
 
+import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -31,10 +33,60 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ─────────────────────────────────────────
+# Background Tasks (Shopee Sync 10 min, Analytics Snapshot)
+# ─────────────────────────────────────────
+
+async def _periodic_shopee_sync():
+    """Tự động sync Shopee catalog từ Google Sheets mỗi 10 phút."""
+    while True:
+        try:
+            await asyncio.sleep(600)  # 10 phút
+            from admin_routes import sync_shopee_from_sheet, _cfg
+            cfg = _cfg()
+            sheet_url = cfg.get("shopee", {}).get("sheet_url", "")
+            if sheet_url:
+                logger.info("Shopee auto-sync starting (10 min cycle)...")
+                res = await sync_shopee_from_sheet(sheet_url)
+                logger.info("Shopee auto-sync completed: %s", res)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Shopee auto-sync error: %s", e)
+
+
+async def _periodic_daily_snapshot():
+    """Tự động chụp snapshot số liệu phân tích mỗi 1 giờ."""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # 1 giờ
+            from admin_routes import save_daily_snapshot
+            await save_daily_snapshot()
+            logger.info("Daily analytics snapshot saved")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Analytics snapshot error: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Khởi tạo background tasks
+    task_shopee = asyncio.create_task(_periodic_shopee_sync())
+    task_snapshot = asyncio.create_task(_periodic_daily_snapshot())
+    logger.info("CFC AI background workers initialized (Shopee 10m sync, Analytics snapshot).")
+    yield
+    # Dọn dẹp
+    task_shopee.cancel()
+    task_snapshot.cancel()
+
+
 app = FastAPI(
     title="ZeO/CFC Semantic RAG & CFC AI Admin",
     description="Tìm kiếm ngữ nghĩa tiếng Việt & Quản trị Chatbot ZeO và CFC Cò Bay",
-    version="1.0.0",
+    version="2.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

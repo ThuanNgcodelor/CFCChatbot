@@ -135,7 +135,7 @@ function normalize(str) {
 function normalizeForSearch(str) {
   const aliases = {
     k: 'khong', ko: 'khong', kh: 'khong', hok: 'khong', hem: 'khong', hong: 'khong',
-    dc: 'duoc', dk: 'duoc', sp: 'san pham', ib: 'nhan tin', nt: 'nhan tin',
+    dc: 'duoc', dk: 'duoc', giac: 'giat', sp: 'san pham', ib: 'nhan tin', nt: 'nhan tin',
     bn: 'ban', mn: 'minh', ship: 'giao hang', cty: 'cong ty',
     li: 'ly',
     sdt: 'so dien thoai', dt: 'dien thoai', gia: 'gia ban', gif: 'gi', j: 'gi', z: 'vay',
@@ -148,6 +148,8 @@ function normalizeForSearch(str) {
     .map(token => aliases[token] || token)
     .join(' ')
     .replace(/\\b(o|tai)\\s+dua\\b/g, '$1 dau')
+    .replace(/\\bda\\s+(sao|bao nhieu|bn|nhiu)\\b/g, 'gia $1')
+    .replace(/\\bbao\\s+da\\b/g, 'bao gia')
     .replace(/\\s+/g, ' ')
     .trim();
 }
@@ -390,6 +392,16 @@ const nluIntent = String(nlu.intent || '').trim();
 const nluConfidence = Number(nlu.confidence || 0);
 const nluComplaint = nluIntent === 'bot_answer_complaint' && nluConfidence >= 0.55;
 const isBotComplaint = Boolean(input.isBotComplaint || explicitBotComplaint || shortFrustrationAfterBot || nluComplaint);
+const businessLower = lower
+  .replace(/\\bgiac\\b/g, 'giat')
+  .replace(/\\bda\\s+(sao|bao nhieu|bn|nhiu)\\b/g, 'gia $1')
+  .replace(/\\bbao\\s+da\\b/g, 'bao gia');
+const hasWholesaleSignal = /(mua si|lay si|nhap si|gia si|si gia|ban si|mua.*\\bsi\\b|dai ly|phan phoi)/.test(businessLower);
+const hasPriceSignal = /(gia sao|xin gia|bao gia|bang gia|bao nhieu tien|nhieu tien|price)/.test(businessLower);
+const hasBusinessProduct = /(nuoc giat|bot giat|giat do|pano|zeo|oplus|thuoc tay|nuoc tay|javen|javel|tay toilet|nuoc rua chen|rua chen|nuoc lau san|lau san|lau kinh|xit tay|tay da nang)/.test(businessLower);
+const dealerRegistrationSignal = /(muon|can|xin|dang ky|lam|tro thanh|mo|hop tac).*(dai ly|nha phan phoi)|(?:dai ly|nha phan phoi).*(duoc khong|sao|the nao|dang ky|lam)/.test(businessLower);
+const contactInfoSignal = Boolean(input.hasPhoneNumber || input.hasAreaInfo);
+const previousNeedsContact = /(so dien thoai|sdt|khu vuc|tinh thanh|dia chi|admin|chot don|xac nhan don|dai ly|lay si|nhap si)/.test(previousText);
 
 let intent = nluIntent || '';
 let replyType = 'knowledge_lookup';
@@ -425,12 +437,33 @@ if (isBotComplaint) {
   useRag = false;
   responseMode = 'direct';
   finalReply = 'Dạ vâng ạ. Khi cần hỗ trợ thêm, bạn cứ nhắn ZeO nhé.';
+} else if (contactInfoSignal && previousNeedsContact && !input.isOrderQuantityRequest) {
+  intent = 'contact_information_received';
+  replyType = 'capture_contact';
+  useRag = false;
+  responseMode = 'review';
+  fallbackReason = 'contact_information_received';
+  needsHuman = true;
 } else if (input.isOrderQuantityRequest || nluIntent === 'order_request') {
   intent = 'order_request';
   replyType = 'confirm_order';
   useRag = false;
   responseMode = 'review';
   fallbackReason = 'order_request';
+  needsHuman = true;
+} else if (dealerRegistrationSignal) {
+  intent = 'wholesale_inquiry';
+  replyType = 'wholesale_inquiry';
+  useRag = false;
+  responseMode = 'review';
+  fallbackReason = 'wholesale_contact_needed';
+  needsHuman = true;
+} else if ((hasWholesaleSignal || hasPriceSignal) && hasBusinessProduct) {
+  intent = hasPriceSignal ? 'price_request' : 'wholesale_inquiry';
+  replyType = hasPriceSignal ? 'price_request' : 'wholesale_inquiry';
+  useRag = false;
+  responseMode = 'review';
+  fallbackReason = hasPriceSignal ? 'price_unverified' : 'wholesale_contact_needed';
   needsHuman = true;
 } else if (/(wholesale_inquiry|price_request|distributor_availability|contact_next_step|customer_profile_lookup)/.test(nluIntent)) {
   intent = nluIntent;
@@ -518,14 +551,16 @@ function normalize(value) {
 function normalizeForSearch(value) {
   const aliases = {
     k: 'khong', ko: 'khong', kh: 'khong', hok: 'khong', hem: 'khong', hong: 'khong',
-    dc: 'duoc', dk: 'duoc', sp: 'san pham', ib: 'nhan tin', nt: 'nhan tin',
+    dc: 'duoc', dk: 'duoc', giac: 'giat', sp: 'san pham', ib: 'nhan tin', nt: 'nhan tin',
     bn: 'ban', mn: 'minh', ship: 'giao hang', cty: 'cong ty',
     li: 'ly',
     sdt: 'so dien thoai', dt: 'dien thoai', gia: 'gia ban', gif: 'gi', j: 'gi', z: 'vay',
     web: 'website', wed: 'website', wep: 'website', cod: 'cod',
   };
   return normalize(value).split(/\\s+/).filter(Boolean).map(token => aliases[token] || token).join(' ')
-    .replace(/\\b(o|tai)\\s+dua\\b/g, '$1 dau');
+    .replace(/\\b(o|tai)\\s+dua\\b/g, '$1 dau')
+    .replace(/\\bda\\s+(sao|bao nhieu|bn|nhiu)\\b/g, 'gia $1')
+    .replace(/\\bbao\\s+da\\b/g, 'bao gia');
 }
 
 const STOP_WORDS = new Set([
@@ -645,6 +680,17 @@ function buildCatalogReply(items) {
     : 'Dạ ZeO có các sản phẩm tẩy rửa gia dụng. Bạn cần bột giặt, nước rửa chén, nước lau sàn hay sản phẩm vệ sinh nhà cửa ạ?';
 }
 
+function buildDetailedCatalogReply() {
+  return [
+    'Dạ ZeO có thể hỗ trợ các nhóm sản phẩm chính như:',
+    '1. Giặt giũ: bột giặt/nước giặt ZeO, PANO và Oplus.',
+    '2. Rửa chén: ZeO/ZIF, PANO Chanh, PANO Vitamin E và Oplus.',
+    '3. Lau sàn: nước lau sàn ZeO/Oplus với các hương như Y Lan, Bạc Hà, Sả Chanh, Hoa Hạ và Baby.',
+    '4. Tẩy rửa vệ sinh: Javen ZeO, tẩy toilet ZeO, tẩy màu ZeO, lau kính ZeO và xịt tẩy đa năng PANO.',
+    'Bạn muốn xem chi tiết nhóm nào trước ạ?'
+  ].join('\\n');
+}
+
 const input = $('Dialogue Manager').first().json;
 const dialogue = input.dialogue || input.responsePlan || {};
 const nlu = input.nlu || {};
@@ -694,7 +740,16 @@ const looksLikeAreaReply = !isAreaQuestion && /^(toi|minh|em|anh|chi)?\\s*(o|tai
 const profilePhone = String(customerProfile.phone || session.customer_phone || '').trim();
 const profileArea = String(customerProfile.area || session.customer_location || '').trim();
 const inputPhone = String(input.phoneNumber || '').trim();
-const inputArea = input.hasAreaInfo ? input.text : '';
+function stripPhoneFromArea(value) {
+  return String(value || '')
+    .replace(/(?:\\+?84|0)[\\d\\s.\\-]{8,14}\\d/g, ' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+}
+const rawAreaFromContactMessage = stripPhoneFromArea(input.text);
+const inputArea = (input.hasAreaInfo || (input.hasPhoneNumber && waitingForContact && rawAreaFromContactMessage))
+  ? rawAreaFromContactMessage
+  : '';
 const knownPhone = inputPhone || profilePhone;
 const knownArea = inputArea || profileArea;
 const hasFullContact = Boolean(knownPhone && knownArea);
@@ -722,6 +777,10 @@ function contactReadyReply(intent, prefix) {
   const needText = normalizeForSearch([input.text, intent, session.last_intent, customerProfile.last_need, session.last_user_message, session.last_bot_reply].filter(Boolean).join(' '));
   if (/(wholesale|dai ly|phan phoi|lay si|nhap si|hop tac)/.test(needText)) {
     return 'Dạ, ZeO đã ghi nhận nhu cầu đại lý/lấy sỉ của bạn tại ' + knownArea + ' với số ' + knownPhone + '. Admin sẽ kiểm tra khu vực phụ trách, điều kiện hợp tác và liên hệ tư vấn tiếp. Bạn có thể nhắn thêm dòng sản phẩm hoặc số lượng dự kiến để admin chuẩn bị kỹ hơn nha.';
+  }
+  if (/(order_request|dat hang|chot don|xac nhan don|don hang)|(^|\\s)\\d+(?:[.,]\\d+)?\\s*(kg|ki|ky|kilo|lit|l|ml|chai|can|bich|tui|goi|thung|hop)(\\s|$)/.test(needText)) {
+    const orderText = String(session.last_user_message || customerProfile.last_user_message || '').replace(/\\s+/g, ' ').trim();
+    return 'Dạ, ZeO đã nhận được số ' + knownPhone + ' và khu vực ' + knownArea + ' cho đơn bạn vừa đặt' + (orderText ? ': ' + orderText : '') + '. Admin sẽ kiểm tra đúng sản phẩm, quy cách, tồn hàng và giá rồi liên hệ xác nhận đơn nha.';
   }
   if (/(online_purchase|mua|dat hang|link shopee|shopee|tiktok shop|pano|zeo|oplus)/.test(needText)) {
     return 'Dạ, ZeO đã lưu số ' + knownPhone + ' và khu vực ' + knownArea + ' để hỗ trợ mua hàng. Bước tiếp theo là admin kiểm tra sản phẩm/link chính thức hoặc nhân viên phù hợp khu vực rồi liên hệ lại. Bạn nhắn giúp mình dòng sản phẩm muốn mua, ví dụ PANO, ZeO hay Oplus nha.';
@@ -757,6 +816,11 @@ const selectedHotlineBranch02 = /^(2|02)$/.test(normalizedInputText)
 const isPurchaseIntent = /(mua|dat hang|dat mua|link mua|link shopee|shopee|tiki|lazada|tiktok shop|san thuong mai|cua hang|gio hang)/.test(normalizedInputText);
 const isPriceQuestion = /(^|\\s)(gia|bang gia|bao gia|xin gia|bao nhieu tien|nhieu tien|price)(\\s|$)/.test(normalizedInputText);
 const isDistributorAvailabilityQuestion = /(nha phan phoi|dai ly).*(chua|co khong|o dau|gan|khu vuc)|(^|\\s)[a-z0-9 ]+\\s+co\\s+(nha phan phoi|dai ly)\\s+chua/.test(normalizedInputText);
+const isDetailedCatalogQuestion = /(chi tiet|cu the|ke ro|danh sach|liet ke).*(san pham|mat hang|nhom)|san pham.*(chi tiet|cu the|gom nhung gi|co nhung dong)/.test(normalizedInputText);
+const isBroadCleaningProductQuestion = /^(nuoc )?tay rua$/.test(normalizedInputText)
+  || /^(san pham |nhom )?tay rua$/.test(normalizedInputText)
+  || ((/(\\bnuoc tay rua\\b|\\bsan pham tay rua\\b|\\bnhom tay rua\\b)/.test(normalizedInputText))
+    && !/(javen|javel|toilet|bon cau|mau|kinh|da nang|rua chen|lau san)/.test(normalizedInputText));
 const distributorAreaMatch = input.text.match(/^\\s*(.+?)\\s+(có|co)\\s+(nhà phân phối|nha phan phoi|đại lý|dai ly)/i)
   || input.text.match(/(nhà phân phối|nha phan phoi|đại lý|dai ly).*(ở|o|tại|tai)\\s+(.+)/i);
 const requestedDistributorArea = distributorAreaMatch
@@ -916,6 +980,24 @@ if (shouldIgnore) {
   fallbackReason = '';
   matchedIntent = 'contact_next_step';
   finalReply = contactReadyReply(session.last_intent || customerProfile.last_need || '');
+} else if ((dialogue.intent === 'contact_information_received' || isLeadInfo) && !input.isOrderQuantityRequest) {
+  responseMode = 'review';
+  fallbackReason = contactFallbackReason();
+  matchedIntent = session.last_intent || customerProfile.last_need || dialogue.intent || '';
+  finalReply = hasFullContact
+    ? contactReadyReply(matchedIntent, 'Dạ, ZeO đã nhận được thông tin liên hệ bạn gửi.')
+    : contactReply('Dạ, ZeO đã nhận được thông tin bạn gửi.');
+} else if (dialogue.intent === 'wholesale_inquiry') {
+  responseMode = hasFullContact ? 'review' : 'direct';
+  fallbackReason = hasFullContact ? 'lead_contact_ready' : '';
+  matchedIntent = 'wholesale_inquiry';
+  if (hasFullContact) {
+    finalReply = contactReadyReply(matchedIntent);
+  } else if (!knownPhone && !knownArea) {
+    finalReply = 'Dạ, ZeO đã ghi nhận nhu cầu đăng ký đại lý/lấy sỉ của bạn. Bạn gửi giúp mình số điện thoại và khu vực/tỉnh thành muốn kinh doanh để admin chuyển đúng nhân viên phụ trách nha.';
+  } else {
+    finalReply = contactReply('Dạ, ZeO đã ghi nhận nhu cầu đại lý/lấy sỉ của bạn.');
+  }
 } else if (input.isOrderQuantityRequest || dialogue.intent === 'order_request') {
   responseMode = 'review';
   matchedIntent = 'order_request';
@@ -967,6 +1049,16 @@ if (shouldIgnore) {
   responseMode = 'review';
   fallbackReason = 'cfc_homecare_unverified';
   finalReply = 'Dạ, thông tin này hiện chưa có trong dữ liệu ZeO nên mình chưa dám xác nhận. Admin ZeO sẽ kiểm tra và phản hồi bạn chính xác hơn nhé.';
+} else if (isDetailedCatalogQuestion) {
+  responseMode = 'direct';
+  fallbackReason = '';
+  matchedIntent = 'product_catalog_detail';
+  finalReply = buildDetailedCatalogReply();
+} else if (isBroadCleaningProductQuestion) {
+  responseMode = 'direct';
+  fallbackReason = 'product_scope_clarification';
+  matchedIntent = 'cleaning_product_group_clarification';
+  finalReply = 'Dạ nhóm tẩy rửa của ZeO có nhiều loại như Javen, tẩy toilet, tẩy màu, lau kính và xịt tẩy đa năng PANO. Bạn muốn loại tẩy rửa cho quần áo, nhà vệ sinh, kính, bếp hay rửa chén ạ?';
 } else if (asksPanoProductType) {
   responseMode = 'direct';
   fallbackReason = '';

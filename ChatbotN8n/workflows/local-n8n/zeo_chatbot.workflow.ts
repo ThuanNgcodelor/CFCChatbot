@@ -71,42 +71,42 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // =====================================================================
 
 @workflow({
-    id: 'd7fctbMhVUmhrNG0',
-    name: 'Zeo Chatbot',
-    active: false,
-    isArchived: false,
-    settings: { executionOrder: 'v1', binaryMode: 'separate' },
+  id: 'd7fctbMhVUmhrNG0',
+  name: 'Zeo Chatbot',
+  active: false,
+  isArchived: false,
+  settings: { executionOrder: 'v1', binaryMode: 'separate' },
 })
 export class ZeoChatbotWorkflow {
-    // =====================================================================
-    // CONFIGURATION DES NOEUDS
-    // =====================================================================
+  // =====================================================================
+  // CONFIGURATION DES NOEUDS
+  // =====================================================================
 
-    @node({
-        id: 'e0767e41-3b17-4747-b905-fd8498514194',
-        webhookId: 'cd8401c0-c92f-44c4-b8d1-77b5e7344b07',
-        name: 'Messenger Trigger',
-        type: 'n8n-nodes-base.facebookTrigger',
-        version: 1,
-        position: [0, 304],
-        credentials: { facebookGraphAppApi: { id: 'DPEr450xHI0lpcpn', name: 'ZeO' } },
-    })
-    MessengerTrigger = {
-        appId: '701126356010152',
-        object: 'page',
-        fields: ['messages'],
-        options: {},
-    };
+  @node({
+    id: 'e0767e41-3b17-4747-b905-fd8498514194',
+    webhookId: 'cd8401c0-c92f-44c4-b8d1-77b5e7344b07',
+    name: 'Messenger Trigger',
+    type: 'n8n-nodes-base.facebookTrigger',
+    version: 1,
+    position: [0, 304],
+    credentials: { facebookGraphAppApi: { id: 'DPEr450xHI0lpcpn', name: 'ZeO' } },
+  })
+  MessengerTrigger = {
+    appId: '701126356010152',
+    object: 'page',
+    fields: ['messages'],
+    options: {},
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000001',
-        name: 'Loc Dau Vao',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [224, 304],
-    })
-    LocDauVao = {
-        jsCode: `
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000001',
+    name: 'Loc Dau Vao',
+    type: 'n8n-nodes-base.code',
+    version: 2,
+    position: [224, 304],
+  })
+  LocDauVao = {
+    jsCode: `
 const data = $input.first().json;
 let text = '';
 let senderId = '';
@@ -251,37 +251,37 @@ return [{ json: {
   hasAreaInfo,
 } }];
 `,
-    };
+  };
 
-    @node({
-        id: 'f3000001-0000-0000-0000-000000000003',
-        name: 'Goi Fast API Chat Pipeline',
-        type: 'n8n-nodes-base.httpRequest',
-        version: 4.2,
-        position: [448, 160],
-        onError: 'continueErrorOutput',
-    })
-    GoiFastApiChatPipeline = {
-        method: 'POST',
-        url: 'http://127.0.0.1:8000/api/chat-pipeline',
-        sendBody: true,
-        specifyBody: 'json',
-        jsonBody:
-            '={{ { brand: "zeo", sender_id: $json.senderId, text: $json.text, fb_name: $json.fb_name || "", message_id: $json.messageId || "" } }}',
-        options: {
-            timeout: 8000,
-        },
-    };
+  @node({
+    id: 'f3000001-0000-0000-0000-000000000003',
+    name: 'Goi Fast API Chat Pipeline',
+    type: 'n8n-nodes-base.httpRequest',
+    version: 4.2,
+    position: [448, 160],
+    onError: 'continueErrorOutput',
+  })
+  GoiFastApiChatPipeline = {
+    method: 'POST',
+    url: 'http://127.0.0.1:8000/api/chat-pipeline',
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody:
+      '={{ { brand: "zeo", sender_id: $json.senderId, text: $json.text, fb_name: $json.fb_name || "", message_id: $json.messageId || "" } }}',
+    options: {
+      timeout: 8000,
+    },
+  };
 
-    @node({
-        id: 'f3000001-0000-0000-0000-000000000004',
-        name: 'Prepare Messenger Reply',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [680, 160],
-    })
-    PrepareMessengerReply = {
-        jsCode: `
+  @node({
+    id: 'f3000001-0000-0000-0000-000000000004',
+    name: 'Prepare Messenger Reply',
+    type: 'n8n-nodes-base.code',
+    version: 2,
+    position: [680, 160],
+  })
+  PrepareMessengerReply = {
+    jsCode: `
 const input = $('Loc Dau Vao').first().json;
 const pipelineRes = $input.first().json || {};
 const finalReply = pipelineRes.answer || "Dạ ZeO đã nhận được tin nhắn của bạn và sẽ phản hồi sớm nhất nhé ạ!";
@@ -298,35 +298,35 @@ return [{
   }
 }];
 `,
-    };
+  };
 
-    @node({
-        id: '8b86d1f4-1ac9-44cf-9db9-2f42fb237c71',
-        name: 'Get Customer Profile',
-        type: 'n8n-nodes-base.redis',
-        version: 1,
-        position: [448, 380],
-        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
-        onError: 'continueRegularOutput',
-        alwaysOutputData: true,
-    })
-    GetCustomerProfile = {
-        operation: 'get',
-        propertyName: 'customerProfileRaw',
-        key: '={{ "zeo:customer:messenger:" + $json.senderId }}',
-        keyType: 'string',
-        options: {},
-    };
+  @node({
+    id: '8b86d1f4-1ac9-44cf-9db9-2f42fb237c71',
+    name: 'Get Customer Profile',
+    type: 'n8n-nodes-base.redis',
+    version: 1,
+    position: [448, 380],
+    credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    onError: 'continueRegularOutput',
+    alwaysOutputData: true,
+  })
+  GetCustomerProfile = {
+    operation: 'get',
+    propertyName: 'customerProfileRaw',
+    key: '={{ "zeo:customer:messenger:" + $json.senderId }}',
+    keyType: 'string',
+    options: {},
+  };
 
-    @node({
-        id: 'be606f18-31ac-44f5-a9c5-c2c095cb5795',
-        name: 'Merge Customer Profile',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [240, 624],
-    })
-    MergeCustomerProfile = {
-        jsCode: `
+  @node({
+    id: 'be606f18-31ac-44f5-a9c5-c2c095cb5795',
+    name: 'Merge Customer Profile',
+    type: 'n8n-nodes-base.code',
+    version: 2,
+    position: [240, 624],
+  })
+  MergeCustomerProfile = {
+    jsCode: `
 function parseJson(value, fallback) {
   if (!value) return fallback;
   if (typeof value !== 'string') return value;
@@ -358,53 +358,53 @@ return [{ json: {
   customerProfile: profile,
 } }];
 `,
-    };
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000002',
-        name: 'Get Session',
-        type: 'n8n-nodes-base.redis',
-        version: 1,
-        position: [448, 640],
-        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
-        onError: 'continueRegularOutput',
-        alwaysOutputData: true,
-    })
-    GetSession = {
-        operation: 'get',
-        propertyName: 'sessionRaw',
-        key: '={{ "zeo:session:messenger:" + $json.senderId }}',
-        keyType: 'string',
-        options: {},
-    };
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000002',
+    name: 'Get Session',
+    type: 'n8n-nodes-base.redis',
+    version: 1,
+    position: [448, 640],
+    credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    onError: 'continueRegularOutput',
+    alwaysOutputData: true,
+  })
+  GetSession = {
+    operation: 'get',
+    propertyName: 'sessionRaw',
+    key: '={{ "zeo:session:messenger:" + $json.senderId }}',
+    keyType: 'string',
+    options: {},
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000010',
-        name: 'Goi Ollama NLU Local',
-        type: 'n8n-nodes-base.httpRequest',
-        version: 4,
-        position: [672, 416],
-        onError: 'continueErrorOutput',
-    })
-    GoiOllamaNluLocal = {
-        method: 'POST',
-        url: 'http://127.0.0.1:11434/api/chat',
-        sendBody: true,
-        specifyBody: 'json',
-        jsonBody:
-            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.1, num_predict: 220 }, messages: [ { role: "system", content: "Bạn là bộ phân loại NLU cho CSKH ZeO. Chỉ trả về JSON hợp lệ, không markdown. Không trả lời khách. Schema: {intent,speech_act,sentiment,topic,entities,order_items,memory_updates,needs_human,confidence,use_rag}. intent ưu tiên một trong: bot_answer_complaint,greeting,thanks,goodbye,acknowledgement,order_request,wholesale_inquiry,general_support_request,product_consultation_request,customer_profile_lookup,contact_next_step,price_request,distributor_availability,product_faq,policy_faq,company_faq,unknown. Nếu khách chửi bot, nói bot trả sai, nói không liên quan, chán vì câu trước, chọn bot_answer_complaint và use_rag=false. Nếu là câu hỏi sản phẩm/chính sách/công ty thì use_rag=true. Không bịa dữ kiện." }, { role: "user", content: JSON.stringify({ message: $("Loc Dau Vao").first().json.text, normalized_message: $("Loc Dau Vao").first().json.normalizedText, flags: $("Loc Dau Vao").first().json, customer_profile: $("Merge Customer Profile").first().json.customerProfile, session_raw: $("Get Session").first().json.sessionRaw || "{}" }) } ] } }}',
-        options: {},
-    };
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000010',
+    name: 'Goi Ollama NLU Local',
+    type: 'n8n-nodes-base.httpRequest',
+    version: 4,
+    position: [672, 416],
+    onError: 'continueErrorOutput',
+  })
+  GoiOllamaNluLocal = {
+    method: 'POST',
+    url: 'http://127.0.0.1:11434/api/chat',
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody:
+      '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.1, num_predict: 220 }, messages: [ { role: "system", content: "Bạn là bộ phân loại NLU cho CSKH ZeO. Chỉ trả về JSON hợp lệ, không markdown. Không trả lời khách. Schema: {intent,speech_act,sentiment,topic,entities,order_items,memory_updates,needs_human,confidence,use_rag}. intent ưu tiên một trong: bot_answer_complaint,greeting,thanks,goodbye,acknowledgement,order_request,wholesale_inquiry,general_support_request,product_consultation_request,customer_profile_lookup,contact_next_step,price_request,distributor_availability,product_faq,policy_faq,company_faq,unknown. Nếu khách chửi bot, nói bot trả sai, nói không liên quan, chán vì câu trước, chọn bot_answer_complaint và use_rag=false. Nếu là câu hỏi sản phẩm/chính sách/công ty thì use_rag=true. Không bịa dữ kiện." }, { role: "user", content: JSON.stringify({ message: $("Loc Dau Vao").first().json.text, normalized_message: $("Loc Dau Vao").first().json.normalizedText, flags: $("Loc Dau Vao").first().json, customer_profile: $("Merge Customer Profile").first().json.customerProfile, session_raw: $("Get Session").first().json.sessionRaw || "{}" }) } ] } }}',
+    options: {},
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000011',
-        name: 'Dialogue Manager',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [896, 416],
-    })
-    DialogueManager = {
-        jsCode: `
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000011',
+    name: 'Dialogue Manager',
+    type: 'n8n-nodes-base.code',
+    version: 2,
+    position: [896, 416],
+  })
+  DialogueManager = {
+    jsCode: `
 function normalize(value) {
   return String(value || '')
     .normalize('NFD')
@@ -563,35 +563,35 @@ return [{
   },
 }];
 `,
-    };
+  };
 
-    @node({
-        id: '126f8f96-9c0f-4f45-b397-71ddf19a80bb',
-        name: 'Get Knowledge Snapshot',
-        type: 'n8n-nodes-base.redis',
-        version: 1,
-        position: [672, 656],
-        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
-        onError: 'continueRegularOutput',
-        alwaysOutputData: true,
-    })
-    GetKnowledgeSnapshot = {
-        operation: 'get',
-        propertyName: 'knowledgeSnapshot',
-        key: 'zeo:kb:basic:active',
-        keyType: 'string',
-        options: {},
-    };
+  @node({
+    id: '126f8f96-9c0f-4f45-b397-71ddf19a80bb',
+    name: 'Get Knowledge Snapshot',
+    type: 'n8n-nodes-base.redis',
+    version: 1,
+    position: [672, 656],
+    credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    onError: 'continueRegularOutput',
+    alwaysOutputData: true,
+  })
+  GetKnowledgeSnapshot = {
+    operation: 'get',
+    propertyName: 'knowledgeSnapshot',
+    key: 'zeo:kb:basic:active',
+    keyType: 'string',
+    options: {},
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000003',
-        name: 'RAG Tim Kiem',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [1264, 288],
-    })
-    RagTimKiem = {
-        jsCode: `
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000003',
+    name: 'RAG Tim Kiem',
+    type: 'n8n-nodes-base.code',
+    version: 2,
+    position: [1264, 288],
+  })
+  RagTimKiem = {
+    jsCode: `
 function normalize(value) {
   return String(value || '')
     .normalize('NFD')
@@ -732,7 +732,7 @@ function buildCatalogReply(items) {
   if (hasBleach) groups.push('sản phẩm tẩy rửa');
   if (hasPano) groups.push('các dòng PANO/Oplus liên quan');
   return groups.length
-    ? 'Dạ ZeO hiện có các nhóm sản phẩm như ' + groups.join(', ') + '. Bạn đang quan tâm nhóm nào để mình gửi thông tin cụ thể hơn nha?'
+    ? 'Dạ ZeO hiện có các nhóm sản phẩm như ' + groups.join(', ') + '. Bạn đang quan tâm nhóm nào để mình gửi thông tin cụ thể hơn ạ?'
     : 'Dạ ZeO có các sản phẩm tẩy rửa gia dụng. Bạn cần bột giặt, nước rửa chén, nước lau sàn hay sản phẩm vệ sinh nhà cửa ạ?';
 }
 
@@ -1101,7 +1101,7 @@ if (shouldIgnore) {
 } else if (input.mentionsAba && input.isShortDetergentQuestion) {
   responseMode = 'review';
   fallbackReason = 'competitor_product_question';
-  finalReply = 'Dạ, hiện dữ liệu của ZeO chỉ có thông tin về các sản phẩm thuộc ZeO, PANO và Oplus. Bạn muốn hỏi bột giặt ZeO hay PANO/Oplus để mình hỗ trợ đúng thông tin nha?';
+  finalReply = 'Dạ, hiện dữ liệu của ZeO chỉ có thông tin về các sản phẩm thuộc ZeO, PANO và Oplus. Bạn muốn hỏi bột giặt ZeO hay PANO/Oplus để mình hỗ trợ đúng thông tin ạ?';
 } else if (input.isCfcHomecareQuestion) {
   responseMode = 'review';
   fallbackReason = 'cfc_homecare_unverified';
@@ -1365,47 +1365,47 @@ return [{ json: {
   sessionState,
 } }];
 `,
-    };
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000004',
-        name: 'Router Co Nguon',
-        type: 'n8n-nodes-base.switch',
-        version: 3.4,
-        position: [672, -112],
-    })
-    RouterCoNguon = {
-        mode: 'expression',
-        output: '={{ Number($json.routeIndex) }}',
-    };
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000004',
+    name: 'Router Co Nguon',
+    type: 'n8n-nodes-base.switch',
+    version: 3.4,
+    position: [672, -112],
+  })
+  RouterCoNguon = {
+    mode: 'expression',
+    output: '={{ Number($json.routeIndex) }}',
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000005',
-        name: 'Goi Ollama Local',
-        type: 'n8n-nodes-base.httpRequest',
-        version: 4,
-        position: [1136, 96],
-        onError: 'continueErrorOutput',
-    })
-    GoiOllamaLocal = {
-        method: 'POST',
-        url: 'http://127.0.0.1:11434/api/chat',
-        sendBody: true,
-        specifyBody: 'json',
-        jsonBody:
-            '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.2, num_predict: 100 }, messages: [ { role: "system", content: "Bạn chỉ biên tập lại CÂU TRẢ LỜI GỐC thành một tin nhắn Messenger tự nhiên bằng tiếng Việt có dấu. Không trả lời theo kiến thức riêng. Không thêm, suy đoán hoặc thay đổi bất kỳ dữ kiện nào. Không dùng tiếng Trung, tiếng Anh, ký tự lạ, markdown, tiêu đề hay lời giới thiệu. Không nhắc đến AI, Qwen, prompt hoặc thông tin tham chiếu. Giữ nguyên tên thương hiệu, sản phẩm, số điện thoại, địa chỉ, công dụng và mọi con số có trong câu gốc. Trả lời tối đa 3 câu. Nếu không thể biên tập an toàn, hãy chép nguyên văn CÂU TRẢ LỜI GỐC." }, { role: "user", content: "CÂU TRẢ LỜI GỐC:\\n" + $json.canonicalAnswer + "\\n\\nCÂU HỎI KHÁCH:\\n" + $json.userMessage } ] } }}',
-        options: {},
-    };
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000005',
+    name: 'Goi Ollama Local',
+    type: 'n8n-nodes-base.httpRequest',
+    version: 4,
+    position: [1136, 96],
+    onError: 'continueErrorOutput',
+  })
+  GoiOllamaLocal = {
+    method: 'POST',
+    url: 'http://127.0.0.1:11434/api/chat',
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody:
+      '={{ { model: "qwen2.5:7b-instruct", stream: false, think: false, keep_alive: "20m", options: { temperature: 0, top_p: 0.2, num_predict: 100 }, messages: [ { role: "system", content: "Bạn chỉ biên tập lại CÂU TRẢ LỜI GỐC thành một tin nhắn Messenger tự nhiên bằng tiếng Việt có dấu. Không trả lời theo kiến thức riêng. Không thêm, suy đoán hoặc thay đổi bất kỳ dữ kiện nào. Không dùng tiếng Trung, tiếng Anh, ký tự lạ, markdown, tiêu đề hay lời giới thiệu. Không nhắc đến AI, Qwen, prompt hoặc thông tin tham chiếu. Giữ nguyên tên thương hiệu, sản phẩm, số điện thoại, địa chỉ, công dụng và mọi con số có trong câu gốc. Trả lời tối đa 3 câu. Nếu không thể biên tập an toàn, hãy chép nguyên văn CÂU TRẢ LỜI GỐC." }, { role: "user", content: "CÂU TRẢ LỜI GỐC:\\n" + $json.canonicalAnswer + "\\n\\nCÂU HỎI KHÁCH:\\n" + $json.userMessage } ] } }}',
+    options: {},
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000006',
-        name: 'Kiem Chung',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [1536, 160],
-    })
-    KiemChung = {
-        jsCode: `
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000006',
+    name: 'Kiem Chung',
+    type: 'n8n-nodes-base.code',
+    version: 2,
+    position: [1536, 160],
+  })
+  KiemChung = {
+    jsCode: `
 const ollamaResult = $input.first().json;
 const ragData = $('RAG Tim Kiem').first().json;
 const aiText = (ollamaResult?.message?.content || ollamaResult?.response || '').trim();
@@ -1471,97 +1471,97 @@ return [{ json: {
   customerProfileState,
 }}];
 `,
-    };
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000007',
-        name: 'Router Guardrail',
-        type: 'n8n-nodes-base.if',
-        version: 2,
-        position: [1760, 160],
-    })
-    RouterGuardrail = {
-        conditions: {
-            options: {
-                caseSensitive: true,
-                leftValue: '',
-                typeValidation: 'strict',
-                version: 1,
-            },
-            conditions: [
-                {
-                    id: 'cond-passed',
-                    leftValue: '={{ $json.passed }}',
-                    rightValue: true,
-                    operator: {
-                        type: 'boolean',
-                        operation: 'equals',
-                    },
-                },
-            ],
-            combinator: 'and',
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000007',
+    name: 'Router Guardrail',
+    type: 'n8n-nodes-base.if',
+    version: 2,
+    position: [1760, 160],
+  })
+  RouterGuardrail = {
+    conditions: {
+      options: {
+        caseSensitive: true,
+        leftValue: '',
+        typeValidation: 'strict',
+        version: 1,
+      },
+      conditions: [
+        {
+          id: 'cond-passed',
+          leftValue: '={{ $json.passed }}',
+          rightValue: true,
+          operator: {
+            type: 'boolean',
+            operation: 'equals',
+          },
         },
-        options: {},
-    };
+      ],
+      combinator: 'and',
+    },
+    options: {},
+  };
 
-    @node({
-        id: '9d6307b1-c3c4-4ed8-a3eb-2a164b80d9a4',
-        name: 'Save Customer Profile',
-        type: 'n8n-nodes-base.redis',
-        version: 1,
-        position: [1984, -96],
-        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
-        onError: 'continueRegularOutput',
-    })
-    SaveCustomerProfile = {
-        operation: 'set',
-        key: '={{ "zeo:customer:messenger:" + $json.senderId }}',
-        value: '={{ JSON.stringify($json.customerProfileState || {}) }}',
-    };
+  @node({
+    id: '9d6307b1-c3c4-4ed8-a3eb-2a164b80d9a4',
+    name: 'Save Customer Profile',
+    type: 'n8n-nodes-base.redis',
+    version: 1,
+    position: [1984, -96],
+    credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    onError: 'continueRegularOutput',
+  })
+  SaveCustomerProfile = {
+    operation: 'set',
+    key: '={{ "zeo:customer:messenger:" + $json.senderId }}',
+    value: '={{ JSON.stringify($json.customerProfileState || {}) }}',
+  };
 
-    @node({
-        id: 'b7d1c4bc-3de0-41f1-92d1-01b1ab551b44',
-        name: 'Save Session',
-        type: 'n8n-nodes-base.redis',
-        version: 1,
-        position: [1984, 64],
-        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
-        onError: 'continueRegularOutput',
-    })
-    SaveSession = {
-        operation: 'set',
-        key: '={{ "zeo:session:messenger:" + $json.senderId }}',
-        value: '={{ JSON.stringify($json.sessionState) }}',
-        expire: true,
-        ttl: 1800,
-    };
+  @node({
+    id: 'b7d1c4bc-3de0-41f1-92d1-01b1ab551b44',
+    name: 'Save Session',
+    type: 'n8n-nodes-base.redis',
+    version: 1,
+    position: [1984, 64],
+    credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    onError: 'continueRegularOutput',
+  })
+  SaveSession = {
+    operation: 'set',
+    key: '={{ "zeo:session:messenger:" + $json.senderId }}',
+    value: '={{ JSON.stringify($json.sessionState) }}',
+    expire: true,
+    ttl: 1800,
+  };
 
-    @node({
-        id: 'b1c5d966-6729-4ce3-bf16-5958bc8c6cad',
-        name: 'Queue Learning Review',
-        type: 'n8n-nodes-base.redis',
-        version: 1,
-        position: [1312, 464],
-        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
-        onError: 'continueRegularOutput',
-    })
-    QueueLearningReview = {
-        operation: 'push',
-        list: 'zeo:learning:queue',
-        messageData:
-            '={{ JSON.stringify({ status: "pending", channel: "messenger", sender_id: $json.senderId, message_id: $("Loc Dau Vao").first().json.messageId, user_message: $json.userMessage, normalized_message: $json.normalizedMessage, fallback_reason: $json.fallbackReason, matched_intent: $json.matchedIntent, matched_source_id: $json.matchedSourceId, reply_type: $json.replyType, response_mode: $json.responseMode, use_rag: $json.useRag, rag_score: $json.ragScore, score_margin: $json.scoreMargin, nlu: $json.nlu, response_plan: $json.responsePlan, session_summary: $json.sessionState?.conversation_summary, customer_profile: { phone: $json.customerProfileState?.phone, area: $json.customerProfileState?.area, lead_stage: $json.customerProfileState?.lead_stage, last_need: $json.customerProfileState?.last_need }, bot_reply: $json.finalReply, created_at: $now.toISO() }) }}',
-        tail: true,
-    };
+  @node({
+    id: 'b1c5d966-6729-4ce3-bf16-5958bc8c6cad',
+    name: 'Queue Learning Review',
+    type: 'n8n-nodes-base.redis',
+    version: 1,
+    position: [1312, 464],
+    credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    onError: 'continueRegularOutput',
+  })
+  QueueLearningReview = {
+    operation: 'push',
+    list: 'zeo:learning:queue',
+    messageData:
+      '={{ JSON.stringify({ status: "pending", channel: "messenger", sender_id: $json.senderId, message_id: $("Loc Dau Vao").first().json.messageId, user_message: $json.userMessage, normalized_message: $json.normalizedMessage, fallback_reason: $json.fallbackReason, matched_intent: $json.matchedIntent, matched_source_id: $json.matchedSourceId, reply_type: $json.replyType, response_mode: $json.responseMode, use_rag: $json.useRag, rag_score: $json.ragScore, score_margin: $json.scoreMargin, nlu: $json.nlu, response_plan: $json.responsePlan, session_summary: $json.sessionState?.conversation_summary, customer_profile: { phone: $json.customerProfileState?.phone, area: $json.customerProfileState?.area, lead_stage: $json.customerProfileState?.lead_stage, last_need: $json.customerProfileState?.last_need }, bot_reply: $json.finalReply, created_at: $now.toISO() }) }}',
+    tail: true,
+  };
 
-    @node({
-        id: '94597224-c6db-4e43-b941-2d2a1aec3170',
-        name: 'Prepare Telegram Alert',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [1552, 592],
-    })
-    PrepareTelegramAlert = {
-        jsCode: `
+  @node({
+    id: '94597224-c6db-4e43-b941-2d2a1aec3170',
+    name: 'Prepare Telegram Alert',
+    type: 'n8n-nodes-base.code',
+    version: 2,
+    position: [1552, 592],
+  })
+  PrepareTelegramAlert = {
+    jsCode: `
 const event = $input.first().json;
 const isUrgent = Boolean(event.isSensitive);
 
@@ -1579,115 +1579,115 @@ return [{
   },
 }];
 `,
-    };
+  };
 
-    @node({
-        id: '311f36f9-ed4f-4bdf-967e-14cc6d194d64',
-        name: 'Notify Telegram Operations',
-        type: 'n8n-nodes-base.executeWorkflow',
-        version: 1.3,
-        position: [1792, 592],
-        onError: 'continueErrorOutput',
-    })
-    NotifyTelegramOperations = {
-        workflowId: 'f2IjxVj9sW3KQRAw',
-        workflowInputs: {
-            mappingMode: 'passthrough',
-            value: {},
-        },
-        mode: 'each',
-        options: {
-            waitForSubWorkflow: false,
-        },
-    };
+  @node({
+    id: '311f36f9-ed4f-4bdf-967e-14cc6d194d64',
+    name: 'Notify Telegram Operations',
+    type: 'n8n-nodes-base.executeWorkflow',
+    version: 1.3,
+    position: [1792, 592],
+    onError: 'continueErrorOutput',
+  })
+  NotifyTelegramOperations = {
+    workflowId: 'f2IjxVj9sW3KQRAw',
+    workflowInputs: {
+      mappingMode: 'passthrough',
+      value: {},
+    },
+    mode: 'each',
+    options: {
+      waitForSubWorkflow: false,
+    },
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000008',
-        name: 'Nhan Khach Auto',
-        type: 'n8n-nodes-base.httpRequest',
-        version: 4.1,
-        position: [2208, 64],
-        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'ZeO' } },
-    })
-    NhanKhachAuto = {
-        method: 'POST',
-        url: 'https://graph.facebook.com/v17.0/me/messages',
-        authentication: 'predefinedCredentialType',
-        nodeCredentialType: 'facebookGraphApi',
-        sendBody: true,
-        specifyBody: 'json',
-        jsonBody: '={{ { recipient: { id: $json.senderId }, message: { text: $json.finalReply } } }}',
-        options: {},
-    };
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000008',
+    name: 'Nhan Khach Auto',
+    type: 'n8n-nodes-base.httpRequest',
+    version: 4.1,
+    position: [2208, 64],
+    credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'ZeO' } },
+  })
+  NhanKhachAuto = {
+    method: 'POST',
+    url: 'https://graph.facebook.com/v17.0/me/messages',
+    authentication: 'predefinedCredentialType',
+    nodeCredentialType: 'facebookGraphApi',
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody: '={{ { recipient: { id: $json.senderId }, message: { text: $json.finalReply } } }}',
+    options: {},
+  };
 
-    @node({
-        id: 'f1000001-0000-0000-0000-000000000009',
-        name: 'Nhan Khach Fallback',
-        type: 'n8n-nodes-base.httpRequest',
-        version: 4.1,
-        position: [1536, 464],
-        credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'ZeO' } },
-    })
-    NhanKhachFallback = {
-        method: 'POST',
-        url: 'https://graph.facebook.com/v17.0/me/messages',
-        authentication: 'predefinedCredentialType',
-        nodeCredentialType: 'facebookGraphApi',
-        sendBody: true,
-        specifyBody: 'json',
-        jsonBody: '={{ { recipient: { id: $json.senderId }, message: { text: $json.finalReply } } }}',
-        options: {},
-    };
+  @node({
+    id: 'f1000001-0000-0000-0000-000000000009',
+    name: 'Nhan Khach Fallback',
+    type: 'n8n-nodes-base.httpRequest',
+    version: 4.1,
+    position: [1536, 464],
+    credentials: { facebookGraphApi: { id: 'JyJ5NRHHJdzjsL4R', name: 'ZeO' } },
+  })
+  NhanKhachFallback = {
+    method: 'POST',
+    url: 'https://graph.facebook.com/v17.0/me/messages',
+    authentication: 'predefinedCredentialType',
+    nodeCredentialType: 'facebookGraphApi',
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody: '={{ { recipient: { id: $json.senderId }, message: { text: $json.finalReply } } }}',
+    options: {},
+  };
 
-    @node({
-        id: '9fa518cc-364d-45ef-a3d2-f1a28c73a029',
-        name: 'Sticky Note',
-        type: 'n8n-nodes-base.stickyNote',
-        version: 1,
-        position: [1136, -112],
-    })
-    StickyNote = {
-        content: 'Redis snapshot, session và learning queue',
-        height: 144,
-        width: 256,
-        color: 5,
-    };
+  @node({
+    id: '9fa518cc-364d-45ef-a3d2-f1a28c73a029',
+    name: 'Sticky Note',
+    type: 'n8n-nodes-base.stickyNote',
+    version: 1,
+    position: [1136, -112],
+  })
+  StickyNote = {
+    content: 'Redis snapshot, session và learning queue',
+    height: 144,
+    width: 256,
+    color: 5,
+  };
 
-    // =====================================================================
-    // ROUTAGE ET CONNEXIONS
-    // =====================================================================
+  // =====================================================================
+  // ROUTAGE ET CONNEXIONS
+  // =====================================================================
 
-    @links()
-    defineRouting() {
-        this.MessengerTrigger.out(0).to(this.LocDauVao.in(0));
-        this.LocDauVao.out(0).to(this.GoiFastApiChatPipeline.in(0));
-        this.GoiFastApiChatPipeline.out(0).to(this.PrepareMessengerReply.in(0));
-        this.GoiFastApiChatPipeline.error().to(this.GetCustomerProfile.in(0));
-        this.PrepareMessengerReply.out(0).to(this.NhanKhachAuto.in(0));
-        this.GetCustomerProfile.out(0).to(this.MergeCustomerProfile.in(0));
-        this.MergeCustomerProfile.out(0).to(this.GetSession.in(0));
-        this.GetSession.out(0).to(this.GoiOllamaNluLocal.in(0));
-        this.GoiOllamaNluLocal.out(0).to(this.DialogueManager.in(0));
-        this.GoiOllamaNluLocal.error().to(this.DialogueManager.in(0));
-        this.DialogueManager.out(0).to(this.GetKnowledgeSnapshot.in(0));
-        this.GetKnowledgeSnapshot.out(0).to(this.RagTimKiem.in(0));
-        this.RagTimKiem.out(0).to(this.RouterCoNguon.in(0));
-        this.RouterCoNguon.out(0).to(this.SaveCustomerProfile.in(0));
-        this.RouterCoNguon.out(0).to(this.SaveSession.in(0));
-        this.RouterCoNguon.out(1).to(this.GoiOllamaLocal.in(0));
-        this.RouterCoNguon.out(2).to(this.SaveCustomerProfile.in(0));
-        this.RouterCoNguon.out(2).to(this.SaveSession.in(0));
-        this.RouterCoNguon.out(2).to(this.QueueLearningReview.in(0));
-        this.GoiOllamaLocal.out(0).to(this.KiemChung.in(0));
-        this.GoiOllamaLocal.error().to(this.KiemChung.in(0));
-        this.KiemChung.out(0).to(this.RouterGuardrail.in(0));
-        this.RouterGuardrail.out(0).to(this.SaveCustomerProfile.in(0));
-        this.RouterGuardrail.out(0).to(this.SaveSession.in(0));
-        this.RouterGuardrail.out(1).to(this.SaveCustomerProfile.in(0));
-        this.RouterGuardrail.out(1).to(this.SaveSession.in(0));
-        this.RouterGuardrail.out(1).to(this.QueueLearningReview.in(0));
-        this.SaveSession.out(0).to(this.NhanKhachAuto.in(0));
-        this.QueueLearningReview.out(0).to(this.PrepareTelegramAlert.in(0));
-        this.PrepareTelegramAlert.out(0).to(this.NotifyTelegramOperations.in(0));
-    }
+  @links()
+  defineRouting() {
+    this.MessengerTrigger.out(0).to(this.LocDauVao.in(0));
+    this.LocDauVao.out(0).to(this.GoiFastApiChatPipeline.in(0));
+    this.GoiFastApiChatPipeline.out(0).to(this.PrepareMessengerReply.in(0));
+    this.GoiFastApiChatPipeline.error().to(this.GetCustomerProfile.in(0));
+    this.PrepareMessengerReply.out(0).to(this.NhanKhachAuto.in(0));
+    this.GetCustomerProfile.out(0).to(this.MergeCustomerProfile.in(0));
+    this.MergeCustomerProfile.out(0).to(this.GetSession.in(0));
+    this.GetSession.out(0).to(this.GoiOllamaNluLocal.in(0));
+    this.GoiOllamaNluLocal.out(0).to(this.DialogueManager.in(0));
+    this.GoiOllamaNluLocal.error().to(this.DialogueManager.in(0));
+    this.DialogueManager.out(0).to(this.GetKnowledgeSnapshot.in(0));
+    this.GetKnowledgeSnapshot.out(0).to(this.RagTimKiem.in(0));
+    this.RagTimKiem.out(0).to(this.RouterCoNguon.in(0));
+    this.RouterCoNguon.out(0).to(this.SaveCustomerProfile.in(0));
+    this.RouterCoNguon.out(0).to(this.SaveSession.in(0));
+    this.RouterCoNguon.out(1).to(this.GoiOllamaLocal.in(0));
+    this.RouterCoNguon.out(2).to(this.SaveCustomerProfile.in(0));
+    this.RouterCoNguon.out(2).to(this.SaveSession.in(0));
+    this.RouterCoNguon.out(2).to(this.QueueLearningReview.in(0));
+    this.GoiOllamaLocal.out(0).to(this.KiemChung.in(0));
+    this.GoiOllamaLocal.error().to(this.KiemChung.in(0));
+    this.KiemChung.out(0).to(this.RouterGuardrail.in(0));
+    this.RouterGuardrail.out(0).to(this.SaveCustomerProfile.in(0));
+    this.RouterGuardrail.out(0).to(this.SaveSession.in(0));
+    this.RouterGuardrail.out(1).to(this.SaveCustomerProfile.in(0));
+    this.RouterGuardrail.out(1).to(this.SaveSession.in(0));
+    this.RouterGuardrail.out(1).to(this.QueueLearningReview.in(0));
+    this.SaveSession.out(0).to(this.NhanKhachAuto.in(0));
+    this.QueueLearningReview.out(0).to(this.PrepareTelegramAlert.in(0));
+    this.PrepareTelegramAlert.out(0).to(this.NotifyTelegramOperations.in(0));
+  }
 }

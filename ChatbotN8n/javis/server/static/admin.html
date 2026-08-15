@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CFC AI Admin — Chatbot Control Center</title>
-  <meta name="description" content="Bảng điều khiển quản trị CFC AI Chatbot — ZeO & CFC Cò Bay">
+  <title>CFC AI Enterprise — Chatbot Control Center</title>
+  <meta name="description" content="Trung tâm điều hành Chatbot AI — ZeO Vietnam & CFC Cò Bay">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
 
   <!-- CSS -->
   <link rel="stylesheet" href="/static/css/base.css">
@@ -13,620 +16,782 @@
 </head>
 <body>
 
-<!-- ══════════════════════════════════════════════
-     SIDEBAR
-══════════════════════════════════════════════ -->
-<aside class="sidebar">
-  <div class="sidebar-brand">
-    <h1>
-      <span class="brand-icon">⚡</span>
-      CFC AI
-    </h1>
-    <p>Chatbot Control Center</p>
-  </div>
+<div class="app">
 
-  <nav class="sidebar-nav">
-    <!-- PHÂN TÍCH -->
-    <div class="nav-group">
-      <div class="nav-group-label">Phân Tích</div>
-      <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard', this)">
-        <span class="nav-icon">📊</span> Dashboard
+  <!-- ══════════════════════════════════════════════
+       SIDEBAR
+  ══════════════════════════════════════════════ -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon-box">
+        <i data-lucide="bot"></i>
       </div>
-      <div class="nav-item" data-page="reports" onclick="switchPage('reports', this)">
-        <span class="nav-icon">📈</span> Báo Cáo AI
+      <div class="brand-text">
+        <h1>CFC AI System</h1>
+        <p>Enterprise Control Center</p>
       </div>
     </div>
 
-    <!-- NỘI DUNG -->
-    <div class="nav-group">
-      <div class="nav-group-label">Nội Dung</div>
-      <div class="nav-item" data-page="documents" onclick="switchPage('documents', this)">
-        <span class="nav-icon">📁</span> Nạp Tài Liệu MD
-      </div>
-      <div class="nav-item" data-page="shopee" onclick="switchPage('shopee', this)">
-        <span class="nav-icon">🛒</span> Shopee Catalog
-      </div>
-    </div>
-
-    <!-- VẬN HÀNH -->
-    <div class="nav-group">
-      <div class="nav-group-label">Vận Hành</div>
-      <div class="nav-item" data-page="n8n" onclick="switchPage('n8n', this)">
-        <span class="nav-icon">🔁</span> n8n Control
-      </div>
-      <div class="nav-item" data-page="customers" onclick="switchPage('customers', this)">
-        <span class="nav-icon">💬</span> Hội Thoại
-      </div>
-      <div class="nav-item" data-page="learning" onclick="switchPage('learning', this)">
-        <span class="nav-icon">🧠</span> Learning Queue
-        <span class="nav-badge" id="lq-badge">0</span>
-      </div>
-    </div>
-
-    <!-- CÔNG CỤ -->
-    <div class="nav-group">
-      <div class="nav-group-label">Công Cụ</div>
-      <div class="nav-item" data-page="test" onclick="switchPage('test', this)">
-        <span class="nav-icon">🔬</span> Test Bot
-      </div>
-      <div class="nav-item" data-page="settings" onclick="switchPage('settings', this)">
-        <span class="nav-icon">⚙️</span> Cài Đặt &amp; API
-      </div>
-    </div>
-  </nav>
-
-  <div class="sidebar-footer">
-    <div class="version">CFC AI v2.1 · FastAPI + Redis + Ollama</div>
-    <div class="sys-status">
-      <span class="sys-dot" id="sidebar-sys-dot"></span>
-      <span id="sidebar-sys-label">Đang kiểm tra...</span>
-    </div>
-  </div>
-</aside>
-
-<!-- ══════════════════════════════════════════════
-     MAIN CONTENT
-══════════════════════════════════════════════ -->
-<main class="main">
-
-  <!-- Topbar -->
-  <header class="topbar">
-    <div class="topbar-left">
-      <div class="breadcrumb">
-        <span class="crumb-home">CFC AI</span>
-        <span class="sep">›</span>
-        <span class="crumb-current" id="breadcrumb-current">Dashboard</span>
-      </div>
-    </div>
-    <div class="topbar-right">
-      <span id="last-updated"></span>
-      <button class="refresh-btn" onclick="refreshCurrentPage()">↻ Làm mới</button>
-    </div>
-  </header>
-
-  <!-- ── PAGE: Dashboard ── -->
-  <div id="page-dashboard" class="page active">
-    <div class="status-grid">
-      <div class="status-card">
-        <div class="status-dot loading" id="dot-redis"></div>
-        <div class="status-info">
-          <div class="status-name">Redis</div>
-          <div class="status-detail" id="detail-redis">Đang kiểm tra...</div>
+    <nav class="sidebar-nav">
+      <!-- PHÂN TÍCH -->
+      <div class="nav-group">
+        <div class="nav-group-label">Phân Tích &amp; Báo Cáo</div>
+        <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard', this)">
+          <i data-lucide="layout-dashboard"></i>
+          <span>Dashboard</span>
+        </div>
+        <div class="nav-item" data-page="reports" onclick="switchPage('reports', this)">
+          <i data-lucide="file-bar-chart"></i>
+          <span>Báo Cáo AI</span>
         </div>
       </div>
-      <div class="status-card">
-        <div class="status-dot loading" id="dot-ollama"></div>
-        <div class="status-info">
-          <div class="status-name">Ollama</div>
-          <div class="status-detail" id="detail-ollama">Đang kiểm tra...</div>
+
+      <!-- NỘI DUNG -->
+      <div class="nav-group">
+        <div class="nav-group-label">Kiến Thức &amp; Danh Mục</div>
+        <div class="nav-item" data-page="documents" onclick="switchPage('documents', this)">
+          <i data-lucide="book-open"></i>
+          <span>Nạp Tài Liệu MD</span>
+        </div>
+        <div class="nav-item" data-page="shopee" onclick="switchPage('shopee', this)">
+          <i data-lucide="shopping-bag"></i>
+          <span>Shopee Catalog</span>
         </div>
       </div>
-      <div class="status-card">
-        <div class="status-dot loading" id="dot-n8n"></div>
-        <div class="status-info">
-          <div class="status-name">n8n</div>
-          <div class="status-detail" id="detail-n8n">Đang kiểm tra...</div>
+
+      <!-- VẬN HÀNH -->
+      <div class="nav-group">
+        <div class="nav-group-label">Vận Hành Chatbot</div>
+        <div class="nav-item" data-page="n8n" onclick="switchPage('n8n', this)">
+          <i data-lucide="git-branch"></i>
+          <span>n8n Control</span>
+        </div>
+        <div class="nav-item" data-page="customers" onclick="switchPage('customers', this)">
+          <i data-lucide="message-square"></i>
+          <span>Hội Thoại Lead</span>
+        </div>
+        <div class="nav-item" data-page="learning" onclick="switchPage('learning', this)">
+          <i data-lucide="brain"></i>
+          <span>Learning Queue</span>
+          <span class="nav-badge" id="lq-badge">0</span>
         </div>
       </div>
-      <div class="status-card">
-        <div class="status-dot ok" id="dot-api"></div>
-        <div class="status-info">
-          <div class="status-name">Python API</div>
-          <div class="status-detail">Đang chạy 🟢</div>
+
+      <!-- CÔNG CỤ -->
+      <div class="nav-group">
+        <div class="nav-group-label">Hệ Thống &amp; Cài Đặt</div>
+        <div class="nav-item" data-page="test" onclick="switchPage('test', this)">
+          <i data-lucide="sparkles"></i>
+          <span>Test Bot RAG</span>
+        </div>
+        <div class="nav-item" data-page="settings" onclick="switchPage('settings', this)">
+          <i data-lucide="sliders"></i>
+          <span>Cài Đặt &amp; API</span>
         </div>
       </div>
-    </div>
+    </nav>
 
-    <div class="card-grid">
-      <div class="card">
-        <div class="card-label">Tổng khách</div>
-        <div class="card-value" id="stat-total">—</div>
-        <div class="card-sub">ZeO + CFC</div>
-      </div>
-      <div class="card">
-        <div class="card-label">ZeO</div>
-        <div class="card-value green" id="stat-zeo">—</div>
-        <div class="card-sub">khách hàng</div>
-      </div>
-      <div class="card">
-        <div class="card-label">CFC Cò Bay</div>
-        <div class="card-value blue" id="stat-cfc">—</div>
-        <div class="card-sub">khách hàng</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Learning Queue</div>
-        <div class="card-value yellow" id="stat-lq">—</div>
-        <div class="card-sub">cần review</div>
+    <div class="sidebar-footer">
+      <div class="version">CFC AI v2.2 · FastAPI + Redis</div>
+      <div class="sys-status">
+        <span class="sys-dot" id="sidebar-sys-dot"></span>
+        <span id="sidebar-sys-label">Đang kết nối...</span>
       </div>
     </div>
+  </aside>
 
-    <!-- Trend Analytics 7 Ngày (C3) -->
-    <div class="section-header" style="margin-bottom:12px">
-      <div class="section-title">📈 Xu Hướng Tăng Trưởng 7 Ngày Gần Nhất</div>
-    </div>
-    <div id="weekly-chart-container"></div>
+  <!-- ══════════════════════════════════════════════
+       MAIN CONTENT
+  ══════════════════════════════════════════════ -->
+  <main class="main">
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div>
-        <div class="section-header"><div class="section-title">Top Intents — ZeO</div></div>
-        <div class="table-wrap"><table><thead><tr><th>Intent</th><th>Số lần</th></tr></thead><tbody id="intents-zeo"></tbody></table></div>
-      </div>
-      <div>
-        <div class="section-header"><div class="section-title">Top Intents — CFC</div></div>
-        <div class="table-wrap"><table><thead><tr><th>Intent</th><th>Số lần</th></tr></thead><tbody id="intents-cfc"></tbody></table></div>
-      </div>
-    </div>
-
-    <footer class="page-footer">
-      <div class="page-footer-info">
-        <span>CFC AI Admin v2.1</span>
-        <span class="sep">·</span>
-        <span>FastAPI + Redis Stack + Ollama bge-m3</span>
-        <span class="sep">·</span>
-        <span id="footer-time"></span>
-      </div>
-    </footer>
-  </div>
-
-  <!-- ── PAGE: Reports ── -->
-  <div id="page-reports" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>📈 Báo Cáo Điều Hành Kinh Doanh (AI Executive Briefing)</h2>
-        <p>AI tự động quét dữ liệu Redis và phân tích số liệu kinh doanh trong ngày</p>
-      </div>
-      <div class="page-header-actions">
-        <button class="btn btn-primary" id="btn-gen-report" onclick="generateReport(false)">⚡ Tạo Báo Cáo AI Hôm Nay</button>
-        <button class="btn btn-ghost" onclick="generateReport(true)">📱 Tạo &amp; Bắn Qua Telegram</button>
-      </div>
-    </div>
-    <div id="report-container" class="card" style="padding:24px;min-height:300px">
-      <div class="empty"><div class="empty-icon">📈</div><p>Chưa có báo cáo. Bấm nút bên trên để tạo!</p></div>
-    </div>
-  </div>
-
-  <!-- ── PAGE: Documents (A1) ── -->
-  <div id="page-documents" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>📁 Quản Lý Tài Liệu .md &amp; Tự Học Kiến Thức</h2>
-        <p>Tải lên file Markdown hoặc Import Google Sheets → Bot tự động phân đoạn và vector hóa vào Redis</p>
-      </div>
-      <div class="page-header-actions">
-        <input type="file" id="doc-file-input" accept=".md,.txt" style="display:none" onchange="uploadDocument(this)">
-        <button class="btn btn-primary" onclick="document.getElementById('doc-file-input').click()">📤 Tải Lên File .md</button>
-        <button class="btn btn-ghost" onclick="openImportSheetModal()">📊 Import Google Sheets</button>
-        <button class="btn btn-ghost" onclick="syncDocuments()">⚡ Sync Toàn Bộ</button>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <div class="table-container">
-        <table>
-          <thead><tr><th>Tên Tài Liệu</th><th>Thương Hiệu</th><th>Dung Lượng</th><th>Cập Nhật Lần Cuối</th><th>Hành Động</th></tr></thead>
-          <tbody id="documents-table">
-            <tr><td colspan="5" style="text-align:center"><span class="spinner"></span></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── PAGE: Shopee Catalog (A2) ── -->
-  <div id="page-shopee" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>🛒 Danh Mục Sản Phẩm Shopee Mall</h2>
-        <p>Bot tự động nhận diện câu hỏi và gửi đúng link Shopee từng sản phẩm</p>
-      </div>
-      <div class="page-header-actions">
-        <span class="badge badge-green" id="shopee-count">0 sản phẩm</span>
-        <span id="shopee-last-sync" style="font-size:11px;color:var(--text3)"></span>
-        <button class="btn btn-primary" onclick="openAddShopeeModal()">➕ Thêm Sản Phẩm</button>
-        <button class="btn btn-ghost" onclick="syncShopeeSheetNow()">↻ Sync Google Sheet</button>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <div class="table-container">
-        <table>
-          <thead><tr><th>Brand</th><th>Tên Sản Phẩm</th><th>Quy Cách</th><th>Giá Bán</th><th>Ưu Đãi</th><th>Link Shopee</th><th>Thao Tác</th></tr></thead>
-          <tbody id="shopee-table">
-            <tr><td colspan="7" style="text-align:center"><span class="spinner"></span></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── PAGE: n8n Control ── -->
-  <div id="page-n8n" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>🔁 n8n Control</h2>
-        <p>Quản lý workflows và executions của n8n instance</p>
-      </div>
-      <div class="page-header-actions">
-        <button class="btn btn-ghost" onclick="triggerSync('zeo')">Sync ZeO</button>
-        <button class="btn btn-ghost" onclick="triggerSync('cfc')">Sync CFC</button>
-        <button class="btn btn-primary" onclick="triggerSync('all')">⚡ Sync All KB</button>
-      </div>
-    </div>
-
-    <div class="section-header" style="margin-bottom:12px">
-      <div class="section-title">Danh sách Workflows</div>
-      <button class="btn btn-ghost btn-sm" onclick="loadN8nWorkflows()">↻ Tải lại</button>
-    </div>
-    <div class="table-wrap">
-      <table><thead><tr><th>Tên Workflow</th><th>ID</th><th>Trạng thái</th><th>Cập nhật</th><th></th></tr></thead>
-      <tbody id="workflows-table"></tbody></table>
-    </div>
-
-    <div class="section-header" style="margin-top:24px;margin-bottom:12px">
-      <div class="section-title">Lịch sử Executions</div>
-      <button class="btn btn-ghost btn-sm" onclick="loadExecutions()">↻ Làm mới</button>
-    </div>
-    <div class="table-wrap">
-      <table><thead><tr><th>Workflow</th><th>Trạng thái</th><th>Bắt đầu</th><th>Kết thúc</th></tr></thead>
-      <tbody id="executions-table"></tbody></table>
-    </div>
-  </div>
-
-  <!-- ── PAGE: Customers (B1, B2, B3) ── -->
-  <div id="page-customers" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>💬 Hội Thoại Khách Hàng</h2>
-        <p>Quản lý toàn bộ session, lịch sử chat và ghi chú khách hàng ZeO &amp; CFC</p>
-      </div>
-      <div class="page-header-actions">
-        <button class="btn btn-ghost" onclick="exportCustomersCSV()">📤 Xuất File CSV</button>
-      </div>
-    </div>
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-      <div class="filter-tabs">
-        <button class="filter-tab active" onclick="setCustomerBrand('all',this)">Tất cả</button>
-        <button class="filter-tab" onclick="setCustomerBrand('zeo',this)">ZeO</button>
-        <button class="filter-tab" onclick="setCustomerBrand('cfc',this)">CFC</button>
-      </div>
-      <div class="filter-tabs">
-        <button class="filter-phone-btn active" onclick="setPhoneFilter('all',this)">Tất cả SĐT</button>
-        <button class="filter-phone-btn" onclick="setPhoneFilter('yes',this)">📞 Có SĐT</button>
-        <button class="filter-phone-btn" onclick="setPhoneFilter('no',this)">Chưa SĐT</button>
-      </div>
-      <select class="form-input" style="width:160px;padding:6px 12px" onchange="setStageFilter(this.value)">
-        <option value="all">Tất cả Lead Stage</option>
-        <option value="new">Mới (new)</option>
-        <option value="collecting_contact">Đang thu thập</option>
-        <option value="lead_ready">Lead sẵn</option>
-        <option value="qualified">Qualified</option>
-        <option value="escalated">Chuyển admin</option>
-        <option value="resolved">Đã xử lý</option>
-      </select>
-      <input class="search-box" placeholder="Tìm SĐT, tên, khu vực, ghi chú..." id="customer-search" oninput="filterCustomers()">
-    </div>
-    <div class="table-wrap">
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Brand</th><th>Sender ID</th><th>Tên &amp; Tags</th><th>SĐT</th><th>Khu vực</th>
-              <th>Lead Stage</th><th>Intent &amp; Note</th><th>Thao tác</th>
-            </tr>
-          </thead>
-          <tbody id="customers-table"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="pagination" id="customer-pagination"></div>
-  </div>
-
-  <!-- ── PAGE: Learning Queue (C1) ── -->
-  <div id="page-learning" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>🧠 Learning Queue</h2>
-        <p>Các câu hỏi bot không tự tin trả lời — cần admin review và bổ sung vào FAQ</p>
-      </div>
-      <div class="page-header-actions">
-        <button class="btn btn-primary" id="btn-ai-suggest-faq" onclick="triggerAISuggestFAQ()">🤖 AI Phân Tích &amp; Đề Xuất FAQ</button>
-      </div>
-    </div>
-    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">
-      <div class="filter-tabs">
-        <button class="filter-tab active" onclick="setLQBrand('all',this)">Tất cả</button>
-        <button class="filter-tab" onclick="setLQBrand('zeo',this)">ZeO</button>
-        <button class="filter-tab" onclick="setLQBrand('cfc',this)">CFC</button>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="loadLearningQueue()">↻ Làm mới</button>
-    </div>
-    <div id="ai-suggest-results"></div>
-    <div id="lq-container"></div>
-  </div>
-
-  <!-- ── PAGE: Test Bot ── -->
-  <div id="page-test" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>🔬 Test Bot</h2>
-        <p>Thử câu hỏi bằng tiếng Việt (có dấu hoặc không dấu) — xem bot sẽ trả lời gì</p>
-      </div>
-    </div>
-    <div class="test-area">
-      <div class="test-input-row">
-        <input class="form-input" id="test-query" placeholder="Nhập câu hỏi bằng tiếng Việt...">
-        <div class="filter-tabs" style="margin-bottom:0">
-          <button class="filter-tab active" onclick="setTestBrand('zeo',this)">ZeO</button>
-          <button class="filter-tab" onclick="setTestBrand('cfc',this)">CFC</button>
+    <!-- Topbar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="breadcrumb">
+          <i data-lucide="terminal" style="width:14px;height:14px"></i>
+          <span class="crumb-home">CFC AI</span>
+          <span class="sep">/</span>
+          <span class="crumb-current" id="breadcrumb-current">Dashboard</span>
         </div>
-        <button class="btn btn-primary" onclick="runTest()" id="test-btn">▶ Test</button>
       </div>
-      <div id="test-result" style="display:none" class="test-result">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div>
-            <span style="font-size:11.5px;color:var(--text3)">Intent phát hiện:</span>
-            <span style="font-size:14px;font-weight:700;color:var(--accent2);margin-left:8px" id="res-intent">—</span>
+      <div class="topbar-right">
+        <span id="last-updated"></span>
+        <button class="refresh-btn" onclick="refreshCurrentPage()">
+          <i data-lucide="refresh-cw"></i>
+          <span>Làm mới</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ── PAGE: Dashboard ── -->
+    <div id="page-dashboard" class="page active">
+      <div class="status-grid">
+        <div class="status-card">
+          <div class="status-dot loading" id="dot-redis"></div>
+          <div class="status-info">
+            <div class="status-name">Redis Vector Store</div>
+            <div class="status-detail" id="detail-redis">Đang kết nối...</div>
           </div>
-          <span class="badge" id="res-confidence-badge">—</span>
         </div>
-        <div style="margin-bottom:12px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-            <span style="font-size:11px;color:var(--text3)">Score</span>
-            <span style="font-size:11px;font-weight:600" id="res-score">—</span>
+        <div class="status-card">
+          <div class="status-dot loading" id="dot-ollama"></div>
+          <div class="status-info">
+            <div class="status-name">Ollama Embedding</div>
+            <div class="status-detail" id="detail-ollama">Đang kiểm tra...</div>
           </div>
-          <div class="confidence-bar"><div class="confidence-fill" id="res-bar" style="width:0%;background:var(--green)"></div></div>
         </div>
-        <div style="margin-bottom:12px">
-          <div class="form-label">Câu trả lời gợi ý</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.65;background:var(--bg);padding:12px;border-radius:8px;border:1px solid var(--border)" id="res-answer">—</div>
+        <div class="status-card">
+          <div class="status-dot loading" id="dot-n8n"></div>
+          <div class="status-info">
+            <div class="status-name">n8n Instance</div>
+            <div class="status-detail" id="detail-n8n">Đang kiểm tra...</div>
+          </div>
+        </div>
+        <div class="status-card">
+          <div class="status-dot ok" id="dot-api"></div>
+          <div class="status-info">
+            <div class="status-name">Python FastAPI</div>
+            <div class="status-detail">Active :8000</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-label">
+            <span>Tổng Lead Khách Hàng</span>
+            <i data-lucide="users" style="width:14px;height:14px;color:var(--text-dim)"></i>
+          </div>
+          <div class="card-value" id="stat-total">—</div>
+          <div class="card-sub">Tổng ZeO + CFC Cò Bay</div>
+        </div>
+        <div class="card">
+          <div class="card-label">
+            <span>ZeO Vietnam</span>
+            <i data-lucide="droplet" style="width:14px;height:14px;color:var(--success)"></i>
+          </div>
+          <div class="card-value green" id="stat-zeo">—</div>
+          <div class="card-sub">Khách hàng chăm sóc nhà cửa</div>
+        </div>
+        <div class="card">
+          <div class="card-label">
+            <span>CFC Cò Bay</span>
+            <i data-lucide="sprout" style="width:14px;height:14px;color:var(--info)"></i>
+          </div>
+          <div class="card-value blue" id="stat-cfc">—</div>
+          <div class="card-sub">Khách hàng phân bón nông nghiệp</div>
+        </div>
+        <div class="card">
+          <div class="card-label">
+            <span>Learning Queue</span>
+            <i data-lucide="alert-circle" style="width:14px;height:14px;color:var(--warning)"></i>
+          </div>
+          <div class="card-value yellow" id="stat-lq">—</div>
+          <div class="card-sub">Câu hỏi cần Admin Review</div>
+        </div>
+      </div>
+
+      <!-- Trend Analytics 7 Ngày -->
+      <div class="section-header" style="margin-bottom:14px">
+        <div class="section-title">
+          <i data-lucide="trending-up"></i>
+          <span>Xu Hướng Tương Tác 7 Ngày Gần Nhất</span>
+        </div>
+      </div>
+      <div id="weekly-chart-container" style="margin-bottom:24px"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          <div class="section-header">
+            <div class="section-title">
+              <i data-lucide="activity"></i>
+              <span>Top Intents — ZeO</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Intent</th><th style="text-align:right">Số lần</th></tr></thead>
+              <tbody id="intents-zeo"></tbody>
+            </table>
+          </div>
         </div>
         <div>
-          <div class="form-label">Top 5 kết quả</div>
-          <div id="res-top5"></div>
+          <div class="section-header">
+            <div class="section-title">
+              <i data-lucide="activity"></i>
+              <span>Top Intents — CFC</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Intent</th><th style="text-align:right">Số lần</th></tr></thead>
+              <tbody id="intents-cfc"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <footer class="page-footer">
+        <div class="page-footer-info">
+          <span>CFC AI Enterprise v2.2</span>
+          <span class="sep">/</span>
+          <span>FastAPI + RediSearch + Ollama bge-m3</span>
+          <span class="sep">/</span>
+          <span id="footer-time"></span>
+        </div>
+      </footer>
+    </div>
+
+    <!-- ── PAGE: Reports ── -->
+    <div id="page-reports" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="file-bar-chart"></i>
+            <span>Báo Cáo Điều Hành Kinh Doanh (AI Briefing)</span>
+          </h2>
+          <p>AI tự động phân tích dữ liệu tương tác trong ngày và đưa ra insight điều hành</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-primary" id="btn-gen-report" onclick="generateReport(false)">
+            <i data-lucide="sparkles"></i>
+            <span>Tạo Báo Cáo AI Hôm Nay</span>
+          </button>
+          <button class="btn btn-ghost" onclick="generateReport(true)">
+            <i data-lucide="send"></i>
+            <span>Gửi Qua Telegram</span>
+          </button>
+        </div>
+      </div>
+      <div id="report-container" class="card" style="padding:28px;min-height:300px">
+        <div style="text-align:center;padding:48px 20px;color:var(--text-dim)">
+          <i data-lucide="file-text" style="width:40px;height:40px;margin-bottom:12px;opacity:0.4"></i>
+          <p>Chưa có báo cáo hôm nay. Bấm nút bên trên để AI tổng hợp!</p>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- ── PAGE: Settings ── -->
-  <div id="page-settings" class="page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2>⚙️ Cài Đặt &amp; API Keys</h2>
-        <p>Tất cả cấu hình được lưu vào <code>settings.json</code> — không hardcode</p>
+    <!-- ── PAGE: Documents ── -->
+    <div id="page-documents" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="book-open"></i>
+            <span>Quản Lý Tài Liệu &amp; Tự Học Kiến Thức</span>
+          </h2>
+          <p>Tải file Markdown hoặc Import Google Sheets → Tự động vector hóa vào RediSearch</p>
+        </div>
+        <div class="page-header-actions">
+          <input type="file" id="doc-file-input" accept=".md,.txt" style="display:none" onchange="uploadDocument(this)">
+          <button class="btn btn-primary" onclick="document.getElementById('doc-file-input').click()">
+            <i data-lucide="upload"></i>
+            <span>Tải Lên File .md</span>
+          </button>
+          <button class="btn btn-ghost" onclick="openImportSheetModal()">
+            <i data-lucide="sheet"></i>
+            <span>Import Google Sheets</span>
+          </button>
+          <button class="btn btn-ghost" onclick="syncDocuments()">
+            <i data-lucide="refresh-cw"></i>
+            <span>Sync Toàn Bộ</span>
+          </button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Tên Tài Liệu</th>
+                <th>Thương Hiệu</th>
+                <th>Dung Lượng</th>
+                <th>Cập Nhật Lần Cuối</th>
+                <th style="text-align:right">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="documents-table">
+              <tr><td colspan="5" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <div class="settings-grid">
-
-      <!-- Shopee Google Sheets Sync -->
-      <div class="settings-card">
-        <div class="settings-card-header">
-          <div class="settings-card-icon">🛒</div>
-          <div>
-            <div class="settings-card-title">Shopee Catalog &amp; Google Sheet</div>
-            <div class="settings-card-sub">Tự động đồng bộ danh mục &amp; giá sản phẩm mỗi 10 phút</div>
-          </div>
+    <!-- ── PAGE: Shopee Catalog ── -->
+    <div id="page-shopee" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="shopping-bag"></i>
+            <span>Danh Mục Sản Phẩm Shopee Mall</span>
+          </h2>
+          <p>Bot tự động nhận diện intent mua sắm và gửi chính xác link Shopee sản phẩm tương ứng</p>
         </div>
-        <div class="form-group">
-          <label class="form-label">Google Sheets URL Danh Mục Shopee</label>
-          <input class="form-input" id="set-shopee-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/.../edit">
-          <div class="form-hint">Cột chuẩn: Brand | Tên SP | Quy cách | Giá | Ưu đãi | Link Shopee | Từ khóa</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="syncShopeeSheetNow()">↻ Đồng bộ Shopee Sheet ngay</button>
-      </div>
-
-      <!-- n8n -->
-      <div class="settings-card">
-        <div class="settings-card-header">
-          <div class="settings-card-icon">🔁</div>
-          <div>
-            <div class="settings-card-title">n8n Configuration</div>
-            <div class="settings-card-sub">Kết nối quản trị n8n instance</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">n8n Instance URL</label>
-          <input class="form-input" id="set-n8n-url" placeholder="https://n8n.example.com">
-        </div>
-        <div class="form-group">
-          <label class="form-label">n8n API Key (X-N8N-API-KEY)</label>
-          <div class="input-group">
-            <input class="form-input" type="password" id="set-n8n-api-key" placeholder="Nhập n8n API Key...">
-            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-n8n-api-key')">👁</button>
-          </div>
-          <div class="form-hint">Lấy tại: n8n Settings › n8n API › Create API Key</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="testN8n()">🧪 Thử kết nối n8n</button>
-      </div>
-
-      <!-- Redis -->
-      <div class="settings-card">
-        <div class="settings-card-header">
-          <div class="settings-card-icon">⚡</div>
-          <div>
-            <div class="settings-card-title">Redis &amp; Vector Store</div>
-            <div class="settings-card-sub">Cơ sở dữ liệu RediSearch &amp; Session</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px" class="form-group">
-          <div>
-            <label class="form-label">Host</label>
-            <input class="form-input" id="set-redis-host" placeholder="127.0.0.1">
-          </div>
-          <div>
-            <label class="form-label">Port</label>
-            <input class="form-input" type="number" id="set-redis-port" placeholder="6379">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Redis Password</label>
-          <div class="input-group">
-            <input class="form-input" type="password" id="set-redis-pass" placeholder="Để trống nếu không có password">
-            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-redis-pass')">👁</button>
-          </div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="testRedis()">🧪 Thử kết nối Redis</button>
-      </div>
-
-      <!-- Ollama -->
-      <div class="settings-card">
-        <div class="settings-card-header">
-          <div class="settings-card-icon">🦙</div>
-          <div>
-            <div class="settings-card-title">Ollama AI Settings</div>
-            <div class="settings-card-sub">Mô hình Embedding &amp; Viết lại câu</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Ollama Base URL</label>
-          <input class="form-input" id="set-ollama-url" placeholder="http://127.0.0.1:11434">
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" class="form-group">
-          <div>
-            <label class="form-label">Embedding Model</label>
-            <input class="form-input" id="set-ollama-embed" placeholder="bge-m3">
-          </div>
-          <div>
-            <label class="form-label">Fallback Model</label>
-            <input class="form-input" id="set-ollama-fallback" placeholder="qwen2.5:7b-instruct">
-          </div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="testOllama()">🧪 Thử kết nối Ollama</button>
-      </div>
-
-      <!-- Cloud AI -->
-      <div class="settings-card">
-        <div class="settings-card-header">
-          <div class="settings-card-icon">☁️</div>
-          <div>
-            <div class="settings-card-title">Free Cloud AI Providers</div>
-            <div class="settings-card-sub">Google Gemini · OpenRouter · Groq</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Google Gemini API Key <span style="color:var(--green);font-size:10px">(Miễn phí)</span></label>
-          <div class="input-group">
-            <input class="form-input" type="password" id="set-gemini-key" placeholder="AIzaSy... (aistudio.google.com)">
-            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-gemini-key')">👁</button>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">OpenRouter API Key <span style="color:var(--text3);font-size:10px">(Tùy chọn)</span></label>
-          <div class="input-group">
-            <input class="form-input" type="password" id="set-openrouter-key" placeholder="sk-or-v1-...">
-            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-openrouter-key')">👁</button>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Groq API Key <span style="color:var(--text3);font-size:10px">(Tùy chọn)</span></label>
-          <div class="input-group">
-            <input class="form-input" type="password" id="set-groq-key" placeholder="gsk_...">
-            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-groq-key')">👁</button>
-          </div>
+        <div class="page-header-actions">
+          <span class="badge badge-green" id="shopee-count">0 sản phẩm</span>
+          <span id="shopee-last-sync" style="font-size:11.5px;color:var(--text-dim);font-family:'JetBrains Mono',monospace"></span>
+          <button class="btn btn-primary" onclick="openAddShopeeModal()">
+            <i data-lucide="plus"></i>
+            <span>Thêm Sản Phẩm</span>
+          </button>
+          <button class="btn btn-ghost" onclick="syncShopeeSheetNow()">
+            <i data-lucide="refresh-cw"></i>
+            <span>Sync Google Sheet</span>
+          </button>
         </div>
       </div>
-
-      <!-- Telegram -->
-      <div class="settings-card">
-        <div class="settings-card-header">
-          <div class="settings-card-icon">📱</div>
-          <div>
-            <div class="settings-card-title">Telegram Lead Notifier</div>
-            <div class="settings-card-sub">Bắn thông báo Lead SĐT &amp; Báo cáo vào Telegram</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Telegram Bot Token</label>
-          <div class="input-group">
-            <input class="form-input" type="password" id="set-telegram-token" placeholder="123456789:ABCdefGHI... (Từ @BotFather)">
-            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-telegram-token')">👁</button>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Telegram Chat ID</label>
-          <input class="form-input" id="set-telegram-chatid" placeholder="VD: 987654321 (Lấy từ @userinfobot)">
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="testTelegram()">🧪 Thử gửi tin nhắn Telegram</button>
-      </div>
-
-      <!-- RAG Thresholds -->
-      <div class="settings-card">
-        <div class="settings-card-header">
-          <div class="settings-card-icon">🎯</div>
-          <div>
-            <div class="settings-card-title">RAG &amp; Ngưỡng Điểm Ngữ Nghĩa</div>
-            <div class="settings-card-sub">Độ nhạy khi nhận diện intent câu hỏi</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px" class="form-group">
-          <div>
-            <label class="form-label">Ngưỡng Cao</label>
-            <input class="form-input" type="number" step="0.01" id="set-rag-high" placeholder="0.78">
-          </div>
-          <div>
-            <label class="form-label">Ngưỡng Trung</label>
-            <input class="form-input" type="number" step="0.01" id="set-rag-med" placeholder="0.55">
-          </div>
-          <div>
-            <label class="form-label">Top K</label>
-            <input class="form-input" type="number" id="set-rag-topk" placeholder="5">
-          </div>
-        </div>
-        <div class="form-hint">
-          • Điểm ≥ Ngưỡng cao → Bot tự tin trả lời trực tiếp.<br>
-          • Điểm ≥ Ngưỡng trung → Bot trả lời + AI Rewrite.<br>
-          • Điểm &lt; Ngưỡng trung → Tự động chuyển admin qua Telegram.
+      <div class="table-wrap">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Brand</th>
+                <th>Tên Sản Phẩm</th>
+                <th>Quy Cách</th>
+                <th>Giá Bán</th>
+                <th>Ưu Đãi</th>
+                <th>Link Shopee</th>
+                <th style="text-align:right">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="shopee-table">
+              <tr><td colspan="7" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
-
-    </div><!-- /settings-grid -->
-
-    <div style="margin-top:24px;display:flex;gap:12px;align-items:center;padding-bottom:24px">
-      <button class="btn btn-primary" style="padding:10px 28px;font-size:14px" onclick="saveSettings()">💾 Lưu Tất Cả Cài Đặt</button>
-      <button class="btn btn-ghost" onclick="loadSettings()">↺ Hủy thay đổi</button>
     </div>
-  </div>
 
-</main>
+    <!-- ── PAGE: n8n Control ── -->
+    <div id="page-n8n" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="git-branch"></i>
+            <span>n8n Workflow &amp; Deploy Console</span>
+          </h2>
+          <p>Quản lý trạng thái, lịch sử thực thi và deploy tự động không mất credentials</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-ghost" onclick="triggerSync('zeo')">
+            <i data-lucide="refresh-cw"></i>
+            <span>Sync ZeO</span>
+          </button>
+          <button class="btn btn-ghost" onclick="triggerSync('cfc')">
+            <i data-lucide="refresh-cw"></i>
+            <span>Sync CFC</span>
+          </button>
+          <button class="btn btn-primary" onclick="triggerSync('all')">
+            <i data-lucide="zap"></i>
+            <span>Sync All KB</span>
+          </button>
+        </div>
+      </div>
+      <!-- Tab-based n8n UI rendered by n8n.js -->
+      <div id="n8n-page"></div>
+    </div>
+
+    <!-- ── PAGE: Customers ── -->
+    <div id="page-customers" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="message-square"></i>
+            <span>Hội Thoại &amp; Quản Trị Lead Khách Hàng</span>
+          </h2>
+          <p>Theo dõi session chat thời gian thực, số điện thoại thu thập và ghi chú lead</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-ghost" onclick="exportCustomersCSV()">
+            <i data-lucide="download"></i>
+            <span>Xuất CSV</span>
+          </button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+        <div class="filter-tabs">
+          <button class="filter-tab active" onclick="setCustomerBrand('all',this)">Tất cả</button>
+          <button class="filter-tab" onclick="setCustomerBrand('zeo',this)">ZeO</button>
+          <button class="filter-tab" onclick="setCustomerBrand('cfc',this)">CFC</button>
+        </div>
+        <div class="filter-tabs">
+          <button class="filter-phone-btn active" onclick="setPhoneFilter('all',this)">Tất cả SĐT</button>
+          <button class="filter-phone-btn" onclick="setPhoneFilter('yes',this)">Có SĐT</button>
+          <button class="filter-phone-btn" onclick="setPhoneFilter('no',this)">Chưa có</button>
+        </div>
+        <select class="form-input" style="width:170px;padding:7px 12px" onchange="setStageFilter(this.value)">
+          <option value="all">Tất cả Lead Stage</option>
+          <option value="new">Mới (new)</option>
+          <option value="collecting_contact">Đang thu thập</option>
+          <option value="lead_ready">Lead sẵn</option>
+          <option value="qualified">Qualified</option>
+          <option value="escalated">Chuyển admin</option>
+          <option value="resolved">Đã xử lý</option>
+        </select>
+        <input class="search-box" style="flex:1;min-width:240px" placeholder="Tìm kiếm SĐT, tên, khu vực, ghi chú..." id="customer-search" oninput="filterCustomers()">
+      </div>
+
+      <div class="table-wrap">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Brand</th>
+                <th>Sender ID</th>
+                <th>Tên &amp; Tags</th>
+                <th>Số Điện Thoại</th>
+                <th>Khu Vực</th>
+                <th>Lead Stage</th>
+                <th>Intent &amp; Ghi Chú</th>
+                <th style="text-align:right">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="customers-table"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="pagination" id="customer-pagination" style="margin-top:18px"></div>
+    </div>
+
+    <!-- ── PAGE: Learning Queue ── -->
+    <div id="page-learning" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="brain"></i>
+            <span>Learning Queue — Câu Hỏi Chưa Nhận Diện</span>
+          </h2>
+          <p>Danh sách các câu hỏi khách hàng mà bot chưa tự tin trả lời — cần admin duyệt và bổ sung FAQ</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-primary" id="btn-ai-suggest-faq" onclick="triggerAISuggestFAQ()">
+            <i data-lucide="sparkles"></i>
+            <span>AI Đề Xuất FAQ Tự Động</span>
+          </button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-bottom:20px;align-items:center">
+        <div class="filter-tabs">
+          <button class="filter-tab active" onclick="setLQBrand('all',this)">Tất cả</button>
+          <button class="filter-tab" onclick="setLQBrand('zeo',this)">ZeO</button>
+          <button class="filter-tab" onclick="setLQBrand('cfc',this)">CFC</button>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadLearningQueue()">
+          <i data-lucide="refresh-cw"></i>
+          <span>Làm mới</span>
+        </button>
+      </div>
+
+      <div id="ai-suggest-results" style="margin-bottom:20px"></div>
+      <div id="lq-container"></div>
+    </div>
+
+    <!-- ── PAGE: Test Bot ── -->
+    <div id="page-test" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="sparkles"></i>
+            <span>Test Bot — Semantic Vector Search RAG</span>
+          </h2>
+          <p>Thử nghiệm câu hỏi bằng tiếng Việt (có dấu hoặc không dấu) để kiểm tra độ tin cậy và intent</p>
+        </div>
+      </div>
+
+      <div class="card" style="padding:24px;margin-bottom:24px">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <input class="form-input" style="flex:1;min-width:280px" id="test-query" placeholder="Nhập câu hỏi test tiếng Việt (VD: mua phân cò bay ở đâu, giá nước giặt zeo...)">
+          <div class="filter-tabs">
+            <button class="filter-tab active" onclick="setTestBrand('zeo',this)">ZeO</button>
+            <button class="filter-tab" onclick="setTestBrand('cfc',this)">CFC</button>
+          </div>
+          <button class="btn btn-primary" onclick="runTest()" id="test-btn">
+            <i data-lucide="play"></i>
+            <span>Thực Hiện Test</span>
+          </button>
+        </div>
+
+        <div id="test-result" style="display:none;margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <div>
+              <span style="font-size:12px;color:var(--text-dim)">Intent Nhận Diện:</span>
+              <span style="font-size:15px;font-weight:700;color:#A5B4FC;margin-left:8px;font-family:'JetBrains Mono',monospace" id="res-intent">—</span>
+            </div>
+            <span class="badge" id="res-confidence-badge">—</span>
+          </div>
+
+          <div style="margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:12px;color:var(--text-dim)">Similarity Score</span>
+              <span style="font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace" id="res-score">—</span>
+            </div>
+            <div style="height:6px;background:var(--bg-surface2);border-radius:var(--r-full);overflow:hidden">
+              <div id="res-bar" style="width:0%;height:100%;background:var(--success);transition:width var(--t-smooth)"></div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:20px">
+            <div class="form-label">Câu trả lời bot dự kiến:</div>
+            <div style="font-size:13.5px;color:var(--text-main);line-height:1.65;background:var(--bg-app);padding:14px 16px;border-radius:var(--r-sm);border:1px solid var(--border)" id="res-answer">—</div>
+          </div>
+
+          <div>
+            <div class="form-label">Top 5 Document Matching:</div>
+            <div id="res-top5"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PAGE: Settings ── -->
+    <div id="page-settings" class="page">
+      <div class="page-header">
+        <div class="page-header-left">
+          <h2>
+            <i data-lucide="sliders"></i>
+            <span>Cài Đặt Hệ Thống &amp; API Keys</span>
+          </h2>
+          <p>Tất cả cấu hình được lưu trực tiếp vào <code>settings.json</code> an toàn</p>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+
+        <!-- Shopee Sheet -->
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon">
+              <i data-lucide="shopping-bag"></i>
+            </div>
+            <div>
+              <div class="settings-card-title">Shopee Catalog &amp; Google Sheet</div>
+              <div class="settings-card-sub">Tự động đồng bộ danh mục &amp; giá sản phẩm mỗi 10 phút</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Google Sheets URL Danh Mục Shopee</label>
+            <input class="form-input" id="set-shopee-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/.../edit">
+            <div class="form-hint">Cột chuẩn: Brand | Tên SP | Quy cách | Giá | Ưu đãi | Link Shopee | Từ khóa</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="syncShopeeSheetNow()">
+            <i data-lucide="refresh-cw"></i>
+            <span>Đồng bộ Shopee Sheet ngay</span>
+          </button>
+        </div>
+
+        <!-- n8n Configuration -->
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon">
+              <i data-lucide="git-branch"></i>
+            </div>
+            <div>
+              <div class="settings-card-title">n8n Instance Configuration</div>
+              <div class="settings-card-sub">Kết nối quản trị API n8n server</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">n8n Instance URL</label>
+            <input class="form-input" id="set-n8n-url" placeholder="https://n8n.dinhduongcantho.io.vn">
+          </div>
+          <div class="form-group">
+            <label class="form-label">n8n API Key (X-N8N-API-KEY)</label>
+            <div class="input-group">
+              <input class="form-input" type="password" id="set-n8n-api-key" placeholder="Nhập API Key...">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-n8n-api-key')">
+                <i data-lucide="eye"></i>
+              </button>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="testN8n()">
+            <i data-lucide="check-circle"></i>
+            <span>Thử kết nối n8n</span>
+          </button>
+        </div>
+
+        <!-- Redis -->
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon">
+              <i data-lucide="database"></i>
+            </div>
+            <div>
+              <div class="settings-card-title">Redis &amp; RediSearch Store</div>
+              <div class="settings-card-sub">Cơ sở dữ liệu Vector Store và Session lưu trữ</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px" class="form-group">
+            <div>
+              <label class="form-label">Host</label>
+              <input class="form-input" id="set-redis-host" placeholder="127.0.0.1">
+            </div>
+            <div>
+              <label class="form-label">Port</label>
+              <input class="form-input" type="number" id="set-redis-port" placeholder="6379">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Redis Password</label>
+            <div class="input-group">
+              <input class="form-input" type="password" id="set-redis-pass" placeholder="Để trống nếu không có mật khẩu">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-redis-pass')">
+                <i data-lucide="eye"></i>
+              </button>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="testRedis()">
+            <i data-lucide="check-circle"></i>
+            <span>Thử kết nối Redis</span>
+          </button>
+        </div>
+
+        <!-- Ollama -->
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon">
+              <i data-lucide="cpu"></i>
+            </div>
+            <div>
+              <div class="settings-card-title">Ollama AI Local Engine</div>
+              <div class="settings-card-sub">Embedding Model &amp; LLM Rewrite câu hỏi</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ollama Base URL</label>
+            <input class="form-input" id="set-ollama-url" placeholder="http://127.0.0.1:11434">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" class="form-group">
+            <div>
+              <label class="form-label">Embedding Model</label>
+              <input class="form-input" id="set-ollama-embed" placeholder="bge-m3">
+            </div>
+            <div>
+              <label class="form-label">Fallback Model</label>
+              <input class="form-input" id="set-ollama-fallback" placeholder="qwen2.5:7b-instruct">
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="testOllama()">
+            <i data-lucide="check-circle"></i>
+            <span>Thử kết nối Ollama</span>
+          </button>
+        </div>
+
+        <!-- Free Cloud AI Providers -->
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon">
+              <i data-lucide="cloud"></i>
+            </div>
+            <div>
+              <div class="settings-card-title">Cloud AI Providers</div>
+              <div class="settings-card-sub">Google Gemini · OpenRouter · Groq</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Google Gemini API Key</label>
+            <div class="input-group">
+              <input class="form-input" type="password" id="set-gemini-key" placeholder="AIzaSy... (aistudio.google.com)">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-gemini-key')">
+                <i data-lucide="eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">OpenRouter API Key (Tùy chọn)</label>
+            <div class="input-group">
+              <input class="form-input" type="password" id="set-openrouter-key" placeholder="sk-or-v1-...">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-openrouter-key')">
+                <i data-lucide="eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Groq API Key (Tùy chọn)</label>
+            <div class="input-group">
+              <input class="form-input" type="password" id="set-groq-key" placeholder="gsk_...">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-groq-key')">
+                <i data-lucide="eye"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telegram Lead Notifier -->
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon">
+              <i data-lucide="send"></i>
+            </div>
+            <div>
+              <div class="settings-card-title">Telegram Lead Notifier</div>
+              <div class="settings-card-sub">Bắn thông báo Lead SĐT &amp; Báo cáo tức thì vào Telegram</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telegram Bot Token</label>
+            <div class="input-group">
+              <input class="form-input" type="password" id="set-telegram-token" placeholder="123456789:ABCdefGHI... (Từ @BotFather)">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="togglePass('set-telegram-token')">
+                <i data-lucide="eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telegram Chat ID</label>
+            <input class="form-input" id="set-telegram-chatid" placeholder="VD: 987654321 (Lấy từ @userinfobot)">
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="testTelegram()">
+            <i data-lucide="send"></i>
+            <span>Thử gửi tin nhắn Telegram</span>
+          </button>
+        </div>
+
+      </div><!-- /settings-grid -->
+
+      <div style="margin-top:28px;display:flex;gap:14px;align-items:center;padding-bottom:32px">
+        <button class="btn btn-primary" style="padding:10px 28px;font-size:14px" onclick="saveSettings()">
+          <i data-lucide="save"></i>
+          <span>Lưu Tất Cả Cài Đặt</span>
+        </button>
+        <button class="btn btn-ghost" onclick="loadSettings()">
+          <i data-lucide="rotate-ccw"></i>
+          <span>Hủy thay đổi</span>
+        </button>
+      </div>
+    </div>
+
+  </main>
+</div>
 
 <!-- ══════════════════════════════════════════════
      MODALS
 ══════════════════════════════════════════════ -->
+
 <!-- Session Modal -->
 <div class="modal-overlay" id="session-modal">
   <div class="modal">
     <div class="modal-header">
-      <div class="modal-title" id="modal-title">Session khách hàng</div>
+      <div class="modal-title" id="modal-title">
+        <i data-lucide="user"></i>
+        <span>Session khách hàng</span>
+      </div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body" id="modal-content"></div>
   </div>
 </div>
 
-<!-- Chat History Modal (B1) -->
+<!-- Chat History Modal -->
 <div class="modal-overlay" id="history-modal">
-  <div class="modal" style="max-width:650px">
+  <div class="modal" style="max-width:640px">
     <div class="modal-header">
-      <div class="modal-title" id="history-modal-title">💬 Lịch Sử Chat</div>
+      <div class="modal-title" id="history-modal-title">
+        <i data-lucide="message-square"></i>
+        <span>Lịch Sử Chat Khách Hàng</span>
+      </div>
       <button class="modal-close" onclick="closeHistoryModal()">✕</button>
     </div>
     <div class="modal-body">
@@ -635,11 +800,14 @@
   </div>
 </div>
 
-<!-- Edit Customer Modal (B3: Notes & Tags) -->
+<!-- Edit Customer Modal -->
 <div class="modal-overlay" id="edit-customer-modal">
-  <div class="modal" style="max-width:520px">
+  <div class="modal" style="max-width:540px">
     <div class="modal-header">
-      <div class="modal-title" id="edit-modal-title">✏️ Chỉnh sửa thông tin khách hàng</div>
+      <div class="modal-title" id="edit-modal-title">
+        <i data-lucide="edit-3"></i>
+        <span>Chỉnh Sửa Thông Tin Lead</span>
+      </div>
       <button class="modal-close" onclick="closeEditModal()">✕</button>
     </div>
     <div class="modal-body">
@@ -653,13 +821,12 @@
         <div class="form-group">
           <label class="form-label">Số Điện Thoại (SĐT)</label>
           <input class="form-input" id="edit-cust-phone" placeholder="VD: 0388509046">
-          <div class="form-hint">Có thể xóa ký tự thừa dính vào SĐT tại đây</div>
         </div>
         <div class="form-group">
           <label class="form-label">Khu Vực / Địa Chỉ</label>
           <input class="form-input" id="edit-cust-area" placeholder="VD: 597/39A Rạch Giá Kiên Giang">
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" class="form-group">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" class="form-group">
           <div>
             <label class="form-label">Trạng Thái Lead</label>
             <select class="form-input" id="edit-cust-stage">
@@ -677,8 +844,8 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Ghi Chú Admin (Private Notes)</label>
-          <textarea class="form-input" id="edit-cust-notes" rows="2" placeholder="Ghi chú nội bộ: khách hẹn gọi lại, nhu cầu phân bón lúa..."></textarea>
+          <label class="form-label">Ghi Chú Admin</label>
+          <textarea class="form-input" id="edit-cust-notes" rows="2" placeholder="Ghi chú nội bộ: khách hẹn gọi lại..."></textarea>
         </div>
         <div class="form-group">
           <label class="form-label">Tags Phân Loại (cách nhau bởi dấu phẩy)</label>
@@ -686,24 +853,30 @@
         </div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
           <button type="button" class="btn btn-ghost" onclick="closeEditModal()">Hủy</button>
-          <button type="submit" class="btn btn-primary">💾 Lưu Thay Đổi</button>
+          <button type="submit" class="btn btn-primary">
+            <i data-lucide="save"></i>
+            <span>Lưu Thay Đổi</span>
+          </button>
         </div>
       </form>
     </div>
   </div>
 </div>
 
-<!-- Shopee Product Add/Edit Modal (A2a) -->
+<!-- Shopee Product Modal -->
 <div class="modal-overlay" id="shopee-modal">
   <div class="modal" style="max-width:540px">
     <div class="modal-header">
-      <div class="modal-title" id="shopee-modal-title">➕ Thêm Sản Phẩm Shopee</div>
+      <div class="modal-title" id="shopee-modal-title">
+        <i data-lucide="shopping-bag"></i>
+        <span>Thêm Sản Phẩm Shopee</span>
+      </div>
       <button class="modal-close" onclick="closeShopeeModal()">✕</button>
     </div>
     <div class="modal-body">
       <form onsubmit="event.preventDefault(); saveShopeeProduct();">
         <input type="hidden" id="shopee-edit-idx" value="-1">
-        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px" class="form-group">
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px" class="form-group">
           <div>
             <label class="form-label">Thương hiệu</label>
             <select class="form-input" id="shopee-form-brand">
@@ -716,7 +889,7 @@
             <input class="form-input" id="shopee-form-name" placeholder="VD: Nước giặt ZeO Hương Nắng Mai" required>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" class="form-group">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" class="form-group">
           <div>
             <label class="form-label">Quy cách</label>
             <input class="form-input" id="shopee-form-variant" placeholder="VD: Can 3.6kg, Bao 25kg">
@@ -740,18 +913,24 @@
         </div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
           <button type="button" class="btn btn-ghost" onclick="closeShopeeModal()">Hủy</button>
-          <button type="submit" class="btn btn-primary">💾 Lưu Sản Phẩm</button>
+          <button type="submit" class="btn btn-primary">
+            <i data-lucide="save"></i>
+            <span>Lưu Sản Phẩm</span>
+          </button>
         </div>
       </form>
     </div>
   </div>
 </div>
 
-<!-- Import Google Sheets Modal (A1) -->
+<!-- Import Google Sheets Modal -->
 <div class="modal-overlay" id="import-sheet-modal">
-  <div class="modal" style="max-width:500px">
+  <div class="modal" style="max-width:520px">
     <div class="modal-header">
-      <div class="modal-title">📊 Import Tài Liệu Từ Google Sheets</div>
+      <div class="modal-title">
+        <i data-lucide="sheet"></i>
+        <span>Import Tài Liệu Google Sheets</span>
+      </div>
       <button class="modal-close" onclick="closeImportSheetModal()">✕</button>
     </div>
     <div class="modal-body">
@@ -770,7 +949,10 @@
         </div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
           <button type="button" class="btn btn-ghost" onclick="closeImportSheetModal()">Hủy</button>
-          <button type="submit" class="btn btn-primary" id="btn-submit-import-sheet">📥 Tiến Hành Import</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-import-sheet">
+            <i data-lucide="download"></i>
+            <span>Tiến Hành Import</span>
+          </button>
         </div>
       </form>
     </div>
@@ -820,15 +1002,17 @@
   setInterval(updateFooterClock, 1000);
   updateFooterClock();
 
-  // Init
+  // Initial Load
   loadPage('dashboard');
   setLastUpdated();
   updateSidebarStatus();
+  refreshIcons();
 
   // Auto-refresh dashboard every 60s
   setInterval(() => {
     if (APP.currentPage === 'dashboard') { loadStats(); loadStatus(); }
     updateSidebarStatus();
+    refreshIcons();
   }, 60000);
 </script>
 

@@ -238,8 +238,5 @@ async def semantic_search(
         "answer_mode": best["answer_mode"],
         "risk_level": best["risk_level"],
         "category": best["category"],
-        "shopee_match": shopee_match,
-        "matched_document": matched_doc,
-        "document_matches": doc_matches,
         "results": parsed_results,
     }

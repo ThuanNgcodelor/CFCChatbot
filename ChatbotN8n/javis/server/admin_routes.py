@@ -360,6 +360,468 @@ async def trigger_knowledge_sync(brand: str = Query("all")):
 
 
 # ─────────────────────────────────────────────────────
+# n8n: EXECUTIONS THEO TỪNG WORKFLOW (PHÂN TRANG)
+# ─────────────────────────────────────────────────────
+
+@router.get("/n8n/workflows/{workflow_id}/executions")
+async def list_workflow_executions(
+    workflow_id: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=5, le=100),
+    status: str = Query("all"),  # all | success | error | running | waiting
+):
+    """Lịch sử execution của 1 workflow, có phân trang và filter trạng thái."""
+    try:
+        # n8n API hỗ trợ filter theo workflowId
+        params = f"?workflowId={workflow_id}&limit={limit}&includeData=false"
+        if status != "all":
+            params += f"&status={status}"
+        resp = await _n8n_request("GET", f"/executions{params}")
+        if resp.status_code != 200:
+            return {"error": f"n8n {resp.status_code}", "executions": [], "total": 0}
+
+        data = resp.json()
+        all_execs = data.get("data", [])
+        total = data.get("count", len(all_execs))
+
+        # Thống kê nhanh
+        stats = {"success": 0, "error": 0, "running": 0, "waiting": 0, "other": 0}
+        parsed = []
+        for e in all_execs:
+            st = e.get("status", "other")
+            stats[st] = stats.get(st, 0) + 1
+            started = e.get("startedAt", "")
+            stopped = e.get("stoppedAt", "")
+            duration_ms = None
+            if started and stopped:
+                try:
+                    from datetime import datetime as _dt
+                    t0 = _dt.fromisoformat(started.replace("Z", "+00:00"))
+                    t1 = _dt.fromisoformat(stopped.replace("Z", "+00:00"))
+                    duration_ms = int((t1 - t0).total_seconds() * 1000)
+                except Exception:
+                    pass
+            parsed.append({
+                "id": e["id"],
+                "workflowId": e.get("workflowId", workflow_id),
+                "workflowName": e.get("workflowData", {}).get("name", "?"),
+                "status": st,
+                "mode": e.get("mode", ""),
+                "startedAt": started,
+                "stoppedAt": stopped,
+                "durationMs": duration_ms,
+                "retryOf": e.get("retryOf"),
+            })
+
+        return {
+            "executions": parsed,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "stats": stats,
+            "pages": max(1, (total + limit - 1) // limit),
+        }
+    except Exception as e:
+        return {"error": str(e), "executions": [], "total": 0}
+
+
+@router.get("/n8n/workflows/{workflow_id}/detail")
+async def workflow_detail(workflow_id: str):
+    """Chi tiết workflow: node count, tags, updatedAt, active status."""
+    try:
+        resp = await _n8n_request("GET", f"/workflows/{workflow_id}")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=404, detail="Workflow không tìm thấy")
+        w = resp.json()
+        nodes = w.get("nodes", [])
+        node_types = {}
+        for n in nodes:
+            t = n.get("type", "").split(".")[-1]
+            node_types[t] = node_types.get(t, 0) + 1
+        return {
+            "id": w["id"],
+            "name": w.get("name"),
+            "active": w.get("active", False),
+            "updatedAt": w.get("updatedAt"),
+            "createdAt": w.get("createdAt"),
+            "nodeCount": len(nodes),
+            "nodeTypes": node_types,
+            "tags": [t["name"] for t in w.get("tags", [])],
+            "settings": w.get("settings", {}),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────
+# n8n: FILE STATUS — kiểm tra file .ts đã thay đổi chưa
+# ─────────────────────────────────────────────────────
+
+_WORKFLOW_DIR = Path(__file__).resolve().parents[2] / "workflows" / "local-n8n"
+
+# Map workflow_id → filename (đọc từ file .ts bằng regex)
+def _discover_workflow_files() -> dict:
+    """Quét thư mục workflows/local-n8n/*.ts, trả dict {workflow_id: path}."""
+    result = {}
+    if not _WORKFLOW_DIR.exists():
+        return result
+    for ts_file in _WORKFLOW_DIR.glob("*.workflow.ts"):
+        content = ts_file.read_text(encoding="utf-8", errors="ignore")
+        import re as _re
+        # Tìm @workflow({ id: '...' })
+        m = _re.search(r"@workflow\(\s*\{[^}]*?id\s*:\s*['\"]([^'\"]+)['\"]", content, _re.DOTALL)
+        if m:
+            result[m.group(1)] = ts_file
+    return result
+
+
+@router.get("/n8n/file-status")
+async def n8n_file_status():
+    """
+    Kiểm tra file .ts local có thay đổi chưa push lên n8n không.
+    Logic: So sánh mtime của file local với updatedAt từ n8n API.
+    Nếu file local mới hơn → has_changes = True (cần push).
+    Nếu bằng hoặc cũ hơn → không có thay đổi.
+    """
+    files_info = []
+    try:
+        # Bước 1: Lấy danh sách file local
+        wf_map = _discover_workflow_files()
+        if not wf_map:
+            return {"files": [], "note": "Không tìm thấy file .ts trong workflows/local-n8n/"}
+
+        # Bước 2: Lấy updatedAt từ n8n API một lần cho tất cả workflows
+        n8n_updated: dict = {}  # {workflow_id: datetime}
+        try:
+            resp = await _n8n_request("GET", "/workflows?limit=50")
+            if resp.status_code == 200:
+                for w in resp.json().get("data", []):
+                    raw_ts = w.get("updatedAt", "")
+                    if raw_ts:
+                        try:
+                            n8n_updated[w["id"]] = datetime.fromisoformat(
+                                raw_ts.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+        except Exception:
+            pass  # Không lấy được n8n data → fallback về Redis
+
+        # Bước 3: Lấy timestamp từ deploy-log trong Redis làm fallback
+        r = _get_redis()
+        redis_push_ts: dict = {}  # {workflow_id: float}
+        for wf_id in wf_map:
+            raw = await r.get(f"n8n:deploy:last:{wf_id}")
+            if raw:
+                try:
+                    redis_push_ts[wf_id] = float(raw)
+                except Exception:
+                    pass
+
+        # Bước 4: So sánh và build kết quả
+        for wf_id, ts_path in wf_map.items():
+            stat = ts_path.stat()
+            file_mtime = stat.st_mtime
+            file_mtime_dt = datetime.fromtimestamp(file_mtime, tz=timezone.utc)
+
+            # Ưu tiên: so với n8n updatedAt → chính xác nhất
+            if wf_id in n8n_updated:
+                n8n_dt = n8n_updated[wf_id]
+                # Có thay đổi nếu file local mới hơn n8n, tính thêm buffer 60s
+                # (để tránh hiện "chưa push" do lệch đồng hồ nhỏ)
+                has_changes = (file_mtime_dt - n8n_dt).total_seconds() > 60
+                baseline_source = "n8n"
+                baseline_at = n8n_dt.isoformat()
+            elif wf_id in redis_push_ts:
+                # Fallback: so với Redis deploy log
+                push_dt = datetime.fromtimestamp(redis_push_ts[wf_id], tz=timezone.utc)
+                has_changes = (file_mtime_dt - push_dt).total_seconds() > 60
+                baseline_source = "deploy_log"
+                baseline_at = push_dt.isoformat()
+            else:
+                # Workflow chưa bao giờ được theo dõi → không hiện badge
+                # (không có gì để so sánh, không kết luận "chưa push")
+                has_changes = False
+                baseline_source = "none"
+                baseline_at = None
+
+            files_info.append({
+                "workflow_id": wf_id,
+                "filename": ts_path.name,
+                "last_modified": file_mtime_dt.isoformat(),
+                "baseline_at": baseline_at,
+                "baseline_source": baseline_source,
+                "has_changes": has_changes,
+            })
+
+    except Exception as e:
+        return {"error": str(e), "files": []}
+    return {"files": files_info}
+
+
+# ─────────────────────────────────────────────────────
+# n8n: DEPLOY — Chạy n8nac push, xử lý conflict tự động
+# ─────────────────────────────────────────────────────
+
+import asyncio as _asyncio
+import subprocess as _subprocess
+
+
+async def _run_cmd(cmd: list, cwd: str) -> tuple:
+    """Chạy shell command async, trả về (returncode, stdout, stderr)."""
+    proc = await _asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=cwd,
+        stdout=_asyncio.subprocess.PIPE,
+        stderr=_asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    return proc.returncode, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
+
+
+class DeployRequest(BaseModel):
+    workflow_file: str  # e.g. "cfc_cobay_chatbot.workflow.ts"
+    auto_resolve_conflict: bool = True  # Tự động resolve conflict bằng keep-current
+
+
+@router.post("/n8n/deploy")
+async def deploy_workflow(req: DeployRequest):
+    """
+    Deploy workflow lên n8n bằng n8nac push.
+    Nếu conflict → tự động resolve --mode keep-current rồi push lại.
+    Sau deploy → tự động bật lại workflow nếu bị tắt do quá trình push.
+    Ghi log vào Redis.
+    """
+    r = _get_redis()
+    workspace = str(Path(__file__).resolve().parents[2])  # ChatbotN8n/
+    ts_path = _WORKFLOW_DIR / req.workflow_file
+
+    if not ts_path.exists():
+        raise HTTPException(status_code=404, detail=f"File không tồn tại: {req.workflow_file}")
+
+    # Lấy workflow_id từ file
+    wf_map = _discover_workflow_files()
+    wf_id = next((k for k, v in wf_map.items() if v.name == req.workflow_file), None)
+    if not wf_id:
+        raise HTTPException(status_code=400, detail="Không tìm thấy workflow ID trong file .ts")
+
+    logs = []
+    deploy_ok = False
+    error_msg = ""
+
+    # Lưu trạng thái active TRƯỚC khi push để restore sau
+    was_active = False
+    try:
+        resp_before = await _n8n_request("GET", f"/workflows/{wf_id}")
+        if resp_before.status_code == 200:
+            was_active = resp_before.json().get("active", False)
+            logs.append(f"📋 Trạng thái trước push: {'Active' if was_active else 'Inactive'}")
+    except Exception:
+        pass
+
+    def _has_conflict(out: str, err: str) -> bool:
+        """n8nac push --verify trả rc=0 dù có conflict → phải check stdout/stderr."""
+        combined = (out + err).lower()
+        return "conflict detected" in combined or "💥 conflict" in combined
+
+    try:
+        # Bước 1: n8nac push --verify
+        logs.append(f"▶ Pushing {req.workflow_file}...")
+        push_cmd = ["npx", "--yes", "n8nac", "push", f"workflows/local-n8n/{req.workflow_file}", "--verify"]
+        rc, out, err = await _run_cmd(push_cmd, cwd=workspace)
+        logs.append(f"stdout: {out.strip()}")
+        if err.strip():
+            logs.append(f"stderr: {err.strip()}")
+
+        # ⚠️ FIX: n8nac trả rc=0 kể cả khi có conflict → phải check stdout
+        if rc == 0 and not _has_conflict(out, err):
+            deploy_ok = True
+            logs.append("✅ Push thành công!")
+
+        elif _has_conflict(out, err) and req.auto_resolve_conflict:
+            # Bước 2: Conflict → resolve --mode keep-current
+            logs.append(f"⚠️ Phát hiện conflict. Đang resolve với keep-current (giữ code local)...")
+            resolve_cmd = ["npx", "--yes", "n8nac", "resolve", wf_id, "--mode", "keep-current"]
+            rc2, out2, err2 = await _run_cmd(resolve_cmd, cwd=workspace)
+            logs.append(f"resolve: {out2.strip()}")
+            if err2.strip():
+                logs.append(f"resolve stderr: {err2.strip()}")
+
+            if rc2 == 0:
+                # Bước 3: Push lại sau resolve
+                logs.append("▶ Push lại sau resolve...")
+                rc3, out3, err3 = await _run_cmd(push_cmd, cwd=workspace)
+                logs.append(f"re-push: {out3.strip()}")
+                if err3.strip():
+                    logs.append(f"re-push stderr: {err3.strip()}")
+                if rc3 == 0 and not _has_conflict(out3, err3):
+                    deploy_ok = True
+                    logs.append("✅ Push thành công sau resolve!")
+                else:
+                    error_msg = (out3 + err3).strip()
+                    logs.append(f"❌ Re-push thất bại: {error_msg[:200]}")
+            else:
+                error_msg = f"Resolve thất bại: {out2} {err2}"
+                logs.append(f"❌ {error_msg[:200]}")
+        else:
+            error_msg = (out + err).strip()
+            logs.append(f"❌ Push thất bại (rc={rc}): {error_msg[:200]}")
+
+    except Exception as e:
+        error_msg = str(e)
+        logs.append(f"❌ Exception: {e}")
+
+    # Ghi deploy log vào Redis
+    now_ts = datetime.now(timezone.utc)
+    log_entry = json.dumps({
+        "workflow_id": wf_id,
+        "filename": req.workflow_file,
+        "success": deploy_ok,
+        "error": error_msg,
+        "logs": logs,
+        "deployed_at": now_ts.isoformat(),
+    }, ensure_ascii=False)
+    await r.rpush("n8n:deploy:log", log_entry)
+    await r.ltrim("n8n:deploy:log", -50, -1)
+
+    if deploy_ok:
+        # Cập nhật timestamp push cuối vào Redis
+        await r.set(f"n8n:deploy:last:{wf_id}", str(now_ts.timestamp()))
+
+        # ⚠️ FIX: n8nac push thường deactivate workflow → tự động bật lại nếu trước đó Active
+        if was_active:
+            try:
+                resp_after = await _n8n_request("GET", f"/workflows/{wf_id}")
+                if resp_after.status_code == 200:
+                    is_still_active = resp_after.json().get("active", False)
+                    if not is_still_active:
+                        logs.append("🔄 Workflow bị tắt sau push → đang bật lại...")
+                        await _n8n_request("POST", f"/workflows/{wf_id}/activate")
+                        logs.append("✅ Đã bật lại workflow (Active)!")
+                    else:
+                        logs.append("✅ Workflow vẫn Active sau push.")
+            except Exception as e:
+                logs.append(f"⚠️ Không thể kiểm tra/bật lại workflow: {e}")
+
+        # Cập nhật log entry sau khi đã bật lại
+        await r.lset("n8n:deploy:log", -1, json.dumps({
+            "workflow_id": wf_id,
+            "filename": req.workflow_file,
+            "success": deploy_ok,
+            "error": error_msg,
+            "logs": logs,
+            "deployed_at": now_ts.isoformat(),
+        }, ensure_ascii=False))
+
+        # Thông báo WebSocket
+        await r.publish("n8n:deploy:event", json.dumps({
+            "wf_id": wf_id, "filename": req.workflow_file, "status": "success"
+        }))
+
+    if not deploy_ok:
+        raise HTTPException(status_code=500, detail={"error": error_msg, "logs": logs})
+
+    return {
+        "ok": True,
+        "workflow_id": wf_id,
+        "filename": req.workflow_file,
+        "logs": logs,
+        "deployed_at": now_ts.isoformat(),
+    }
+
+
+
+@router.get("/n8n/deploy-log")
+async def get_deploy_log():
+    """Lịch sử các lần deploy workflow gần nhất (tối đa 50)."""
+    r = _get_redis()
+    try:
+        raw_logs = await r.lrange("n8n:deploy:log", -30, -1)
+        entries = [json.loads(l) for l in raw_logs]
+        entries.reverse()  # Mới nhất lên đầu
+        return {"logs": entries, "total": len(entries)}
+    except Exception as e:
+        return {"error": str(e), "logs": []}
+
+
+# ─────────────────────────────────────────────────────
+# n8n: WEBSOCKET — File Watcher real-time
+# ─────────────────────────────────────────────────────
+
+from fastapi import WebSocket, WebSocketDisconnect
+
+# Giữ danh sách client đang kết nối
+_ws_clients: list = []
+
+
+@router.websocket("/n8n/ws/file-watch")
+async def websocket_file_watch(websocket: WebSocket):
+    """
+    WebSocket endpoint: Push thông báo real-time khi file .ts thay đổi
+    hoặc khi có deploy mới.
+    Client kết nối tới: ws://localhost:8000/admin/n8n/ws/file-watch
+    """
+    await websocket.accept()
+    _ws_clients.append(websocket)
+
+    # Snapshot mtime hiện tại
+    file_mtimes: dict = {}
+    wf_map = _discover_workflow_files()
+    for wf_id, ts_path in wf_map.items():
+        try:
+            file_mtimes[wf_id] = ts_path.stat().st_mtime
+        except Exception:
+            pass
+
+    try:
+        # Gửi trạng thái ban đầu
+        await websocket.send_json({"type": "connected", "message": "File watcher ready", "files": len(wf_map)})
+
+        while True:
+            # Poll mỗi 3 giây
+            await _asyncio.sleep(3)
+            wf_map = _discover_workflow_files()
+            changed = []
+            for wf_id, ts_path in wf_map.items():
+                try:
+                    mtime = ts_path.stat().st_mtime
+                    if mtime != file_mtimes.get(wf_id, 0):
+                        file_mtimes[wf_id] = mtime
+                        changed.append({
+                            "workflow_id": wf_id,
+                            "filename": ts_path.name,
+                            "modified_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+                        })
+                except Exception:
+                    pass
+
+            if changed:
+                await websocket.send_json({"type": "file_changed", "changed": changed})
+
+    except (WebSocketDisconnect, _asyncio.CancelledError):
+        pass
+    except Exception:
+        pass
+    finally:
+        if websocket in _ws_clients:
+            _ws_clients.remove(websocket)
+
+
+async def _broadcast_ws(event: dict):
+    """Broadcast event đến tất cả WebSocket client đang kết nối."""
+    dead = []
+    for ws in _ws_clients:
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_clients.remove(ws)
+
+
+# ─────────────────────────────────────────────────────
 # MODULE 3: CUSTOMER CONVERSATIONS
 # ─────────────────────────────────────────────────────
 

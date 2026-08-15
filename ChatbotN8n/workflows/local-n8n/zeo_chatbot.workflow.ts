@@ -2,13 +2,15 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : Zeo Chatbot
-// Nodes   : 21  |  Connections: 27
+// Nodes   : 23  |  Connections: 30
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
 // MessengerTrigger                   facebookTrigger            [creds]
 // LocDauVao                          code
+// GoiFastApiChatPipeline             httpRequest                [onError→out(1)]
+// PrepareMessengerReply              code
 // GetCustomerProfile                 redis                      [onError→regular] [creds] [alwaysOutput]
 // MergeCustomerProfile               code
 // GetSession                         redis                      [onError→regular] [creds] [alwaysOutput]
@@ -33,32 +35,35 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // ──────────────────────────────────────────────────────────────────
 // MessengerTrigger
 //    → LocDauVao
-//      → GetCustomerProfile
-//        → MergeCustomerProfile
-//          → GetSession
-//            → GoiOllamaNluLocal
-//              → DialogueManager
-//                → GetKnowledgeSnapshot
-//                  → RagTimKiem
-//                    → RouterCoNguon
-//                      → SaveCustomerProfile
-//                      → SaveSession
-//                        → NhanKhachAuto
-//                     .out(1) → GoiOllamaLocal
-//                        → KiemChung
-//                          → RouterGuardrail
-//                            → SaveCustomerProfile (↩ loop)
-//                            → SaveSession (↩ loop)
-//                           .out(1) → SaveCustomerProfile (↩ loop)
-//                           .out(1) → SaveSession (↩ loop)
-//                           .out(1) → QueueLearningReview
-//                              → PrepareTelegramAlert
-//                                → NotifyTelegramOperations
-//                        → KiemChung (↩ loop)
-//                     .out(2) → SaveCustomerProfile (↩ loop)
-//                     .out(2) → SaveSession (↩ loop)
-//                     .out(2) → QueueLearningReview (↩ loop)
-//              → DialogueManager (↩ loop)
+//      → GoiFastApiChatPipeline
+//        → PrepareMessengerReply
+//          → NhanKhachAuto
+//        → GetCustomerProfile
+//          → MergeCustomerProfile
+//            → GetSession
+//              → GoiOllamaNluLocal
+//                → DialogueManager
+//                  → GetKnowledgeSnapshot
+//                    → RagTimKiem
+//                      → RouterCoNguon
+//                        → SaveCustomerProfile
+//                        → SaveSession
+//                          → NhanKhachAuto (↩ loop)
+//                       .out(1) → GoiOllamaLocal
+//                          → KiemChung
+//                            → RouterGuardrail
+//                              → SaveCustomerProfile (↩ loop)
+//                              → SaveSession (↩ loop)
+//                             .out(1) → SaveCustomerProfile (↩ loop)
+//                             .out(1) → SaveSession (↩ loop)
+//                             .out(1) → QueueLearningReview
+//                                → PrepareTelegramAlert
+//                                  → NotifyTelegramOperations
+//                          → KiemChung (↩ loop)
+//                       .out(2) → SaveCustomerProfile (↩ loop)
+//                       .out(2) → SaveSession (↩ loop)
+//                       .out(2) → QueueLearningReview (↩ loop)
+//                → DialogueManager (↩ loop)
 // </workflow-map>
 
 // =====================================================================
@@ -249,11 +254,58 @@ return [{ json: {
     };
 
     @node({
+        id: 'f3000001-0000-0000-0000-000000000003',
+        name: 'Goi Fast API Chat Pipeline',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4.2,
+        position: [448, 160],
+        onError: 'continueErrorOutput',
+    })
+    GoiFastApiChatPipeline = {
+        method: 'POST',
+        url: 'http://127.0.0.1:8000/api/chat-pipeline',
+        sendBody: true,
+        specifyBody: 'json',
+        jsonBody:
+            '={{ { brand: "zeo", sender_id: $json.senderId, text: $json.text, fb_name: $json.fb_name || "", message_id: $json.messageId || "" } }}',
+        options: {
+            timeout: 8000,
+        },
+    };
+
+    @node({
+        id: 'f3000001-0000-0000-0000-000000000004',
+        name: 'Prepare Messenger Reply',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [680, 160],
+    })
+    PrepareMessengerReply = {
+        jsCode: `
+const input = $('Loc Dau Vao').first().json;
+const pipelineRes = $input.first().json || {};
+const finalReply = pipelineRes.answer || "Dạ ZeO đã nhận được tin nhắn của bạn và sẽ phản hồi sớm nhất nhé ạ!";
+
+return [{
+  json: {
+    senderId: input.senderId,
+    finalReply: finalReply,
+    intent: pipelineRes.intent || 'unknown',
+    confidence: pipelineRes.confidence || 'medium',
+    score: pipelineRes.score || 0,
+    hasPhone: pipelineRes.has_phone || false,
+    latencyMs: pipelineRes.latency_ms || 0,
+  }
+}];
+`,
+    };
+
+    @node({
         id: '8b86d1f4-1ac9-44cf-9db9-2f42fb237c71',
         name: 'Get Customer Profile',
         type: 'n8n-nodes-base.redis',
         version: 1,
-        position: [448, 304],
+        position: [448, 380],
         credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
         onError: 'continueRegularOutput',
         alwaysOutputData: true,
@@ -1608,7 +1660,10 @@ return [{
     @links()
     defineRouting() {
         this.MessengerTrigger.out(0).to(this.LocDauVao.in(0));
-        this.LocDauVao.out(0).to(this.GetCustomerProfile.in(0));
+        this.LocDauVao.out(0).to(this.GoiFastApiChatPipeline.in(0));
+        this.GoiFastApiChatPipeline.out(0).to(this.PrepareMessengerReply.in(0));
+        this.GoiFastApiChatPipeline.error().to(this.GetCustomerProfile.in(0));
+        this.PrepareMessengerReply.out(0).to(this.NhanKhachAuto.in(0));
         this.GetCustomerProfile.out(0).to(this.MergeCustomerProfile.in(0));
         this.MergeCustomerProfile.out(0).to(this.GetSession.in(0));
         this.GetSession.out(0).to(this.GoiOllamaNluLocal.in(0));

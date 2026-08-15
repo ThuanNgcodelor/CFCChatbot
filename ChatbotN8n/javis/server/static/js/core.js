@@ -1,6 +1,6 @@
 /**
- * core.js — Shared utilities, state, navigation
- * CFC AI Admin Dashboard
+ * core.js — Shared utilities, state, navigation, Lucide icons
+ * CFC AI Admin Dashboard — Enterprise SaaS Edition
  */
 
 'use strict';
@@ -16,6 +16,14 @@ window.APP = {
   version: '2.1',
 };
 
+// ── Lucide Icon Auto-Refresh ──────────────────────
+function refreshIcons() {
+  if (window.lucide && typeof window.lucide.createIcons === 'function') {
+    window.lucide.createIcons();
+  }
+}
+window.refreshIcons = refreshIcons;
+
 // ── Fetch Helper ──────────────────────────────────
 async function fetchJSON(url, opts = {}) {
   const resp = await fetch(url, opts);
@@ -26,15 +34,19 @@ async function fetchJSON(url, opts = {}) {
 // ── Toast Notification ────────────────────────────
 function toast(msg, type = 'success') {
   const el = document.getElementById('toast');
-  el.innerHTML = msg;
+  if (!el) return;
+  const iconName = type === 'success' ? 'check-circle-2' : 'alert-circle';
+  el.innerHTML = `<i data-lucide="${iconName}" style="width:16px;height:16px;flex-shrink:0"></i><span>${msg}</span>`;
   el.className = `show ${type}`;
+  refreshIcons();
   clearTimeout(window._toastTimer);
-  window._toastTimer = setTimeout(() => { el.className = ''; }, 3200);
+  window._toastTimer = setTimeout(() => { el.className = ''; }, 3600);
 }
 
 // ── Password Toggle ───────────────────────────────
 function togglePass(id) {
   const el = document.getElementById(id);
+  if (!el) return;
   el.type = el.type === 'password' ? 'text' : 'password';
 }
 
@@ -76,6 +88,15 @@ function closeModal() {
 function closeEditModal() {
   document.getElementById('edit-customer-modal')?.classList.remove('open');
 }
+function closeHistoryModal() {
+  document.getElementById('history-modal')?.classList.remove('open');
+}
+function closeShopeeModal() {
+  document.getElementById('shopee-modal')?.classList.remove('open');
+}
+function closeImportSheetModal() {
+  document.getElementById('import-sheet-modal')?.classList.remove('open');
+}
 
 // ── Sidebar Footer Status ─────────────────────────
 async function updateSidebarStatus() {
@@ -84,8 +105,11 @@ async function updateSidebarStatus() {
     const allOk = s.services?.redis?.status === 'ok' && s.services?.ollama?.status === 'ok';
     const dot = document.getElementById('sidebar-sys-dot');
     const label = document.getElementById('sidebar-sys-label');
-    if (dot) dot.style.background = allOk ? 'var(--green)' : 'var(--yellow)';
-    if (label) label.textContent = allOk ? 'Hệ thống ổn định' : 'Có vấn đề cần kiểm tra';
+    if (dot) {
+      dot.style.background = allOk ? 'var(--success)' : 'var(--warning)';
+      dot.style.boxShadow = allOk ? '0 0 8px var(--success)' : '0 0 8px var(--warning)';
+    }
+    if (label) label.textContent = allOk ? 'Hệ thống ổn định' : 'Có cảnh báo hệ thống';
   } catch (_) {}
 }
 
@@ -116,6 +140,7 @@ function switchPage(page, el) {
 
   APP.currentPage = page;
   loadPage(page);
+  setTimeout(refreshIcons, 50);
 }
 
 function loadPage(page) {
@@ -124,14 +149,17 @@ function loadPage(page) {
     case 'reports':   loadReports(); break;
     case 'documents': loadDocuments(); break;
     case 'shopee':    loadShopee(); break;
-    case 'n8n':       loadN8nWorkflows(); loadExecutions(); break;
+    case 'n8n':       initN8nPage(); break;
     case 'customers': loadCustomers(); break;
     case 'learning':  loadLearningQueue(); break;
     case 'settings':  loadSettings(); break;
+    case 'test':      refreshIcons(); break;
   }
+  setTimeout(refreshIcons, 100);
 }
 
 function refreshCurrentPage() {
   loadPage(APP.currentPage);
   setLastUpdated();
+  refreshIcons();
 }

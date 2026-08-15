@@ -285,6 +285,24 @@ async def rewrite_answer(req: RewriteRequest):
 
 
 # ─────────────────────────────────────────
+# Fast-Path Chatbot Pipeline (< 50ms - 300ms)
+# ─────────────────────────────────────────
+
+from chat_pipeline import ChatPipelineRequest, ChatPipelineResponse, process_chat_pipeline
+
+
+@app.post("/api/chat-pipeline", response_model=ChatPipelineResponse)
+async def chat_pipeline_endpoint(req: ChatPipelineRequest):
+    """
+    High-Performance Fast-Path Chatbot Pipeline cho ZeO & CFC.
+    Xử lý toàn bộ: Lọc đầu vào, Trích xuất SĐT, Fast-Path, Shopee Match,
+    RediSearch KNN, Cập nhật Profile/Session và Bắn Telegram Lead.
+    Tốc độ: < 50ms - 300ms.
+    """
+    return await process_chat_pipeline(req)
+
+
+# ─────────────────────────────────────────
 # Dev entrypoint
 # ─────────────────────────────────────────
 

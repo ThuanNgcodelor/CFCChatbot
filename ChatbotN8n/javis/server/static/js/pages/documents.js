@@ -4,27 +4,35 @@
 async function loadDocuments() {
   const tbody = document.getElementById('documents-table');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px"><span class="spinner"></span> Đang tải tài liệu...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:36px"><span class="spinner"></span><span style="color:var(--text-muted);margin-left:8px">Đang tải danh sách tài liệu...</span></td></tr>`;
   try {
     const d = await fetchJSON('/admin/documents');
     if (!d.documents?.length) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text3)">Chưa có file tài liệu trong thư mục <code>knowledge/</code></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim)">Chưa có file tài liệu nào trong thư mục <code>knowledge/</code></td></tr>`;
+      refreshIcons();
       return;
     }
     tbody.innerHTML = d.documents.map(doc => `
       <tr>
-        <td style="font-weight:600">📄 ${doc.name}</td>
-        <td><span class="badge ${doc.brand === 'ZEO' ? 'badge-purple' : 'badge-blue'}">${doc.brand}</span></td>
-        <td style="font-size:12px;color:var(--text3)">${doc.size_kb} KB</td>
-        <td style="font-size:12px;color:var(--text3)">${doc.modified_at}</td>
-        <td>
-          <div style="display:flex;gap:4px">
-            <button class="btn btn-primary btn-sm" onclick="extractFaqFromDoc('${doc.name}', '${doc.brand.toLowerCase()}')">⚡ Trích xuất FAQ</button>
+        <td style="font-weight:600;color:var(--text-main)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <i data-lucide="file-text" style="width:16px;height:16px;color:#818CF8"></i>
+            <span>${doc.name}</span>
           </div>
         </td>
+        <td><span class="badge ${doc.brand === 'ZEO' ? 'badge-green' : 'badge-blue'}">${doc.brand}</span></td>
+        <td style="font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${doc.size_kb} KB</td>
+        <td style="font-size:12px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">${doc.modified_at}</td>
+        <td style="text-align:right">
+          <button class="btn btn-primary btn-xs" onclick="extractFaqFromDoc('${doc.name}', '${doc.brand.toLowerCase()}')">
+            <i data-lucide="sparkles"></i>
+            <span>Trích xuất FAQ</span>
+          </button>
+        </td>
       </tr>`).join('');
+    refreshIcons();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:16px">Lỗi tải danh sách: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger);padding:24px;text-align:center">Lỗi tải danh sách tài liệu: ${e.message}</td></tr>`;
   }
 }
 
@@ -43,7 +51,7 @@ async function uploadDocument(inputEl) {
     });
     if (!resp.ok) throw new Error(await resp.text());
     const res = await resp.json();
-    toast(`✅ ${res.message || 'Tải lên thành công!'}`, 'success');
+    toast(`${res.message || 'Tải lên thành công!'}`, 'success');
     inputEl.value = '';
     loadDocuments();
   } catch (e) {
@@ -53,6 +61,7 @@ async function uploadDocument(inputEl) {
 
 function openImportSheetModal() {
   document.getElementById('import-sheet-modal')?.classList.add('open');
+  refreshIcons();
 }
 
 function closeImportSheetModal() {
@@ -69,7 +78,7 @@ async function submitImportSheet() {
   }
 
   const btn = document.getElementById('btn-submit-import-sheet');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Đang nạp dữ liệu...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> <span>Đang nạp dữ liệu...</span>'; }
 
   toast('Đang tải và vector hóa dữ liệu từ Google Sheets...', 'success');
   try {
@@ -78,13 +87,13 @@ async function submitImportSheet() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sheet_url: sheetUrl, brand: brand }),
     });
-    toast(`✅ ${res.message}`, 'success');
+    toast(`${res.message}`, 'success');
     closeImportSheetModal();
     loadDocuments();
   } catch (e) {
     toast('Lỗi import Google Sheets: ' + e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '📥 Tiến Hành Import'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="download"></i><span>Tiến Hành Import</span>'; refreshIcons(); }
   }
 }
 
@@ -92,7 +101,7 @@ async function syncDocuments() {
   toast('Đang đồng bộ và vector hóa toàn bộ tài liệu .md...', 'success');
   try {
     const d = await fetchJSON('/admin/documents/sync', { method: 'POST' });
-    toast(`✅ Đã đồng bộ ${d.result?.total_files || 0} tài liệu vào Vector Index!`, 'success');
+    toast(`Đã đồng bộ ${d.result?.total_files || 0} tài liệu vào Vector Index!`, 'success');
     loadDocuments();
   } catch (e) { toast('Lỗi đồng bộ: ' + e.message, 'error'); }
 }
@@ -106,7 +115,7 @@ async function extractFaqFromDoc(docName, brand) {
       body: JSON.stringify({ document_name: docName, brand }),
     });
     if (d.faqs?.length) {
-      alert(`✅ AI đã trích xuất thành công ${d.faqs.length} cặp FAQ từ tài liệu!\n\nVí dụ:\n- Intent: ${d.faqs[0].intent}\n- Câu hỏi: ${d.faqs[0].question_examples}\n- Trả lời: ${d.faqs[0].answer}`);
+      alert(`AI đã trích xuất thành công ${d.faqs.length} cặp FAQ từ tài liệu!\n\nVí dụ:\n- Intent: ${d.faqs[0].intent}\n- Câu hỏi: ${d.faqs[0].question_examples}\n- Trả lời: ${d.faqs[0].answer}`);
     } else {
       toast('Không tìm thấy FAQ phù hợp trong tài liệu', 'error');
     }

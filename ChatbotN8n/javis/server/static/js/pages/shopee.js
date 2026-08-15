@@ -6,7 +6,7 @@ let _shopeeProducts = [];
 async function loadShopee() {
   const tbody = document.getElementById('shopee-table');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px"><span class="spinner"></span> Đang tải Shopee Catalog...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:36px"><span class="spinner"></span><span style="color:var(--text-muted);margin-left:8px">Đang tải Shopee Catalog...</span></td></tr>`;
   try {
     const d = await fetchJSON('/admin/shopee/catalog');
     _shopeeProducts = d.products || [];
@@ -17,28 +17,37 @@ async function loadShopee() {
     loadShopeeLastSync();
 
     if (!_shopeeProducts.length) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text3)">Chưa có sản phẩm trong Shopee Catalog. Bấm <b>"➕ Thêm Sản Phẩm"</b> để tạo mới!</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-dim)">Chưa có sản phẩm trong Shopee Catalog. Bấm <b>"Thêm Sản Phẩm"</b> để tạo mới!</td></tr>`;
+      refreshIcons();
       return;
     }
     tbody.innerHTML = _shopeeProducts.map((p, i) => `
       <tr>
-        <td><span class="badge ${p.brand === 'ZEO' ? 'badge-purple' : 'badge-blue'}">${p.brand}</span></td>
-        <td style="font-weight:600">${p.name}</td>
-        <td style="font-size:12px;color:var(--text2)">${p.variant || '—'}</td>
-        <td style="font-weight:700;color:var(--green)">${p.price || '—'}</td>
-        <td style="font-size:11.5px;color:var(--yellow)">${p.promotion || '—'}</td>
+        <td><span class="badge ${p.brand === 'ZEO' ? 'badge-green' : 'badge-blue'}">${p.brand}</span></td>
+        <td style="font-weight:600;color:var(--text-main)">${p.name}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${p.variant || '—'}</td>
+        <td style="font-weight:700;color:var(--success);font-family:'JetBrains Mono',monospace">${p.price || '—'}</td>
+        <td style="font-size:12px;color:var(--warning)">${p.promotion || '—'}</td>
         <td>
-          <a href="${p.shopee_url}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">🔗 Link</a>
+          <a href="${p.shopee_url}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;display:inline-flex;gap:4px">
+            <i data-lucide="external-link"></i>
+            <span>Shopee</span>
+          </a>
         </td>
-        <td>
-          <div style="display:flex;gap:4px">
-            <button class="btn btn-primary btn-sm" onclick="openEditShopeeModal(${p._idx !== undefined ? p._idx : i})">✏️ Sửa</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteShopeeProduct(${p._idx !== undefined ? p._idx : i})">🗑</button>
+        <td style="text-align:right">
+          <div style="display:inline-flex;gap:4px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-xs" onclick="openEditShopeeModal(${p._idx !== undefined ? p._idx : i})">
+              <i data-lucide="edit-3"></i>
+            </button>
+            <button class="btn btn-danger btn-xs" onclick="deleteShopeeProduct(${p._idx !== undefined ? p._idx : i})">
+              <i data-lucide="trash-2"></i>
+            </button>
           </div>
         </td>
       </tr>`).join('');
+    refreshIcons();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:16px">Lỗi tải Shopee catalog: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--danger);padding:24px;text-align:center">Lỗi tải Shopee catalog: ${e.message}</td></tr>`;
   }
 }
 
@@ -56,7 +65,7 @@ async function loadShopeeLastSync() {
 }
 
 function openAddShopeeModal() {
-  document.getElementById('shopee-modal-title').textContent = '➕ Thêm Sản Phẩm Shopee Mới';
+  document.getElementById('shopee-modal-title').innerHTML = `<i data-lucide="shopping-bag"></i><span>Thêm Sản Phẩm Shopee Mới</span>`;
   document.getElementById('shopee-edit-idx').value = '-1';
   document.getElementById('shopee-form-brand').value = 'ZEO';
   document.getElementById('shopee-form-name').value = '';
@@ -66,13 +75,14 @@ function openAddShopeeModal() {
   document.getElementById('shopee-form-url').value = '';
   document.getElementById('shopee-form-keywords').value = '';
   document.getElementById('shopee-modal').classList.add('open');
+  refreshIcons();
 }
 
 function openEditShopeeModal(idx) {
   const p = _shopeeProducts.find(item => (item._idx !== undefined ? item._idx : -1) === idx) || _shopeeProducts[idx];
   if (!p) return;
 
-  document.getElementById('shopee-modal-title').textContent = `✏️ Chỉnh Sửa Sản Phẩm — ${p.name}`;
+  document.getElementById('shopee-modal-title').innerHTML = `<i data-lucide="edit-3"></i><span>Chỉnh Sửa Sản Phẩm — ${p.name}</span>`;
   document.getElementById('shopee-edit-idx').value = idx;
   document.getElementById('shopee-form-brand').value = p.brand || 'ZEO';
   document.getElementById('shopee-form-name').value = p.name || '';
@@ -82,6 +92,7 @@ function openEditShopeeModal(idx) {
   document.getElementById('shopee-form-url').value = p.shopee_url || '';
   document.getElementById('shopee-form-keywords').value = (p.keywords || []).join(', ');
   document.getElementById('shopee-modal').classList.add('open');
+  refreshIcons();
 }
 
 function closeShopeeModal() {
@@ -116,21 +127,19 @@ async function saveShopeeProduct() {
 
   try {
     if (idx >= 0) {
-      // Update
       await fetchJSON(`/admin/shopee/products/${idx}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      toast(`✅ Đã cập nhật sản phẩm "${name}"!`, 'success');
+      toast(`Đã cập nhật sản phẩm "${name}"!`, 'success');
     } else {
-      // Add new
       await fetchJSON('/admin/shopee/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      toast(`✅ Đã thêm sản phẩm "${name}" vào Shopee Catalog!`, 'success');
+      toast(`Đã thêm sản phẩm "${name}" vào Shopee Catalog!`, 'success');
     }
     closeShopeeModal();
     loadShopee();
@@ -142,11 +151,11 @@ async function saveShopeeProduct() {
 async function deleteShopeeProduct(idx) {
   const p = _shopeeProducts.find(item => (item._idx !== undefined ? item._idx : -1) === idx) || _shopeeProducts[idx];
   const name = p?.name || 'sản phẩm này';
-  if (!confirm(`Xóa sản phẩm "${name}" khỏi Shopee Catalog?`)) return;
+  if (!confirm(`Xác nhận xóa sản phẩm "${name}" khỏi Shopee Catalog?`)) return;
 
   try {
     await fetchJSON(`/admin/shopee/products/${idx}`, { method: 'DELETE' });
-    toast(`✅ Đã xóa "${name}"!`, 'success');
+    toast(`Đã xóa "${name}"!`, 'success');
     loadShopee();
   } catch (e) {
     toast('Lỗi xóa sản phẩm: ' + e.message, 'error');
@@ -157,7 +166,7 @@ async function syncShopeeSheetNow() {
   toast('Đang đồng bộ danh mục Shopee từ Google Sheets...', 'success');
   try {
     const res = await fetchJSON('/admin/shopee/sync-sheet', { method: 'POST' });
-    toast(`✅ Sync thành công ${res.synced_count} sản phẩm từ Google Sheets!`, 'success');
+    toast(`Sync thành công ${res.synced_count} sản phẩm từ Google Sheets!`, 'success');
     loadShopee();
   } catch (e) {
     toast('Lỗi sync Google Sheets: ' + e.message, 'error');

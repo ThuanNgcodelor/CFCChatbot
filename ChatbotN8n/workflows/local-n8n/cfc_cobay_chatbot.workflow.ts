@@ -2,13 +2,15 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : CFC Co Bay Chatbot
-// Nodes   : 21  |  Connections: 27
+// Nodes   : 23  |  Connections: 30
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
 // MessengerTrigger                   facebookTrigger            [creds]
 // LocDauVao                          code
+// GoiFastApiChatPipeline             httpRequest                [onError→out(1)]
+// PrepareMessengerReply              code
 // GetCfcCustomerProfile              redis                      [onError→regular] [creds] [alwaysOutput]
 // MergeCfcCustomerProfile            code
 // GetCfcSession                      redis                      [onError→regular] [creds] [alwaysOutput]
@@ -33,32 +35,35 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // ──────────────────────────────────────────────────────────────────
 // MessengerTrigger
 //    → LocDauVao
-//      → GetCfcCustomerProfile
-//        → MergeCfcCustomerProfile
-//          → GetCfcSession
-//            → GoiCfcOllamaNluLocal
-//              → CfcDialogueManager
-//                → GetCfcKnowledgeSnapshot
-//                  → CfcRagTimKiem
-//                    → RouterCoNguon
-//                      → SaveCfcCustomerProfile
-//                      → SaveCfcSession
-//                        → NhanKhachAuto
-//                     .out(1) → GoiOllamaLocal
-//                        → KiemChung
-//                          → RouterGuardrail
-//                            → SaveCfcCustomerProfile (↩ loop)
-//                            → SaveCfcSession (↩ loop)
-//                           .out(1) → SaveCfcCustomerProfile (↩ loop)
-//                           .out(1) → SaveCfcSession (↩ loop)
-//                           .out(1) → QueueCfcLearningReview
-//                              → PrepareTelegramAlert
-//                                → NotifyTelegramOperations
-//                        → KiemChung (↩ loop)
-//                     .out(2) → SaveCfcCustomerProfile (↩ loop)
-//                     .out(2) → SaveCfcSession (↩ loop)
-//                     .out(2) → QueueCfcLearningReview (↩ loop)
-//              → CfcDialogueManager (↩ loop)
+//      → GoiFastApiChatPipeline
+//        → PrepareMessengerReply
+//          → NhanKhachAuto
+//        → GetCfcCustomerProfile
+//          → MergeCfcCustomerProfile
+//            → GetCfcSession
+//              → GoiCfcOllamaNluLocal
+//                → CfcDialogueManager
+//                  → GetCfcKnowledgeSnapshot
+//                    → CfcRagTimKiem
+//                      → RouterCoNguon
+//                        → SaveCfcCustomerProfile
+//                        → SaveCfcSession
+//                          → NhanKhachAuto (↩ loop)
+//                       .out(1) → GoiOllamaLocal
+//                          → KiemChung
+//                            → RouterGuardrail
+//                              → SaveCfcCustomerProfile (↩ loop)
+//                              → SaveCfcSession (↩ loop)
+//                             .out(1) → SaveCfcCustomerProfile (↩ loop)
+//                             .out(1) → SaveCfcSession (↩ loop)
+//                             .out(1) → QueueCfcLearningReview
+//                                → PrepareTelegramAlert
+//                                  → NotifyTelegramOperations
+//                          → KiemChung (↩ loop)
+//                       .out(2) → SaveCfcCustomerProfile (↩ loop)
+//                       .out(2) → SaveCfcSession (↩ loop)
+//                       .out(2) → QueueCfcLearningReview (↩ loop)
+//                → CfcDialogueManager (↩ loop)
 // </workflow-map>
 
 // =====================================================================
@@ -223,11 +228,58 @@ return [{
     };
 
     @node({
+        id: 'f3000001-0000-0000-0000-000000000001',
+        name: 'Goi Fast API Chat Pipeline',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4.2,
+        position: [448, 160],
+        onError: 'continueErrorOutput',
+    })
+    GoiFastApiChatPipeline = {
+        method: 'POST',
+        url: 'http://127.0.0.1:8000/api/chat-pipeline',
+        sendBody: true,
+        specifyBody: 'json',
+        jsonBody:
+            '={{ { brand: "cfc", sender_id: $json.senderId, text: $json.text, fb_name: $json.fb_name || "", message_id: $json.messageId || "" } }}',
+        options: {
+            timeout: 8000,
+        },
+    };
+
+    @node({
+        id: 'f3000001-0000-0000-0000-000000000002',
+        name: 'Prepare Messenger Reply',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [680, 160],
+    })
+    PrepareMessengerReply = {
+        jsCode: `
+const input = $('Loc Dau Vao').first().json;
+const pipelineRes = $input.first().json || {};
+const finalReply = pipelineRes.answer || "Dạ Cò Bay đã nhận được tin nhắn của bạn và sẽ phản hồi sớm nhất nhé ạ!";
+
+return [{
+  json: {
+    senderId: input.senderId,
+    finalReply: finalReply,
+    intent: pipelineRes.intent || 'unknown',
+    confidence: pipelineRes.confidence || 'medium',
+    score: pipelineRes.score || 0,
+    hasPhone: pipelineRes.has_phone || false,
+    latencyMs: pipelineRes.latency_ms || 0,
+  }
+}];
+`,
+    };
+
+    @node({
         id: '097d8f8d-f22d-4d85-931e-7859c2412376',
         name: 'Get CFC Customer Profile',
         type: 'n8n-nodes-base.redis',
         version: 1,
-        position: [448, 304],
+        position: [448, 380],
         credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
         onError: 'continueRegularOutput',
         alwaysOutputData: true,
@@ -1440,7 +1492,10 @@ return [{
     @links()
     defineRouting() {
         this.MessengerTrigger.out(0).to(this.LocDauVao.in(0));
-        this.LocDauVao.out(0).to(this.GetCfcCustomerProfile.in(0));
+        this.LocDauVao.out(0).to(this.GoiFastApiChatPipeline.in(0));
+        this.GoiFastApiChatPipeline.out(0).to(this.PrepareMessengerReply.in(0));
+        this.GoiFastApiChatPipeline.error().to(this.GetCfcCustomerProfile.in(0));
+        this.PrepareMessengerReply.out(0).to(this.NhanKhachAuto.in(0));
         this.GetCfcCustomerProfile.out(0).to(this.MergeCfcCustomerProfile.in(0));
         this.MergeCfcCustomerProfile.out(0).to(this.GetCfcSession.in(0));
         this.GetCfcSession.out(0).to(this.GoiCfcOllamaNluLocal.in(0));

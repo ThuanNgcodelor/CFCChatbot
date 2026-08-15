@@ -33,6 +33,15 @@
     </div>
 
     <nav class="sidebar-nav">
+      <!-- TRỢ LÝ ĐIỀU HÀNH -->
+      <div class="nav-group">
+        <div class="nav-group-label">Trợ Lý AI &amp; Điều Hành</div>
+        <div class="nav-item" data-page="assistant" onclick="switchPage('assistant', this)">
+          <i data-lucide="bot"></i>
+          <span>Trợ Lý Điều Hành</span>
+        </div>
+      </div>
+
       <!-- PHÂN TÍCH -->
       <div class="nav-group">
         <div class="nav-group-label">Phân Tích &amp; Báo Cáo</div>
@@ -123,6 +132,86 @@
         </button>
       </div>
     </header>
+
+    <!-- ── PAGE: Assistant (Trợ Lý AI & Quản Lý Hội Thoại) ── -->
+    <div id="page-assistant" class="page">
+      <div style="display:flex;gap:18px;height:calc(100vh - 140px);min-height:600px">
+
+        <!-- ── CỘT TRÁI: LỊCH SỬ PHIÊN HỘI THOẠI ── -->
+        <div class="card" style="width:280px;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border);border-radius:var(--r-md);flex-shrink:0">
+          <div style="padding:14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:10px;background:var(--bg-surface)">
+            <button class="btn btn-primary" onclick="createNewAssistantSession()" style="width:100%;justify-content:center;height:38px">
+              <i data-lucide="plus"></i>
+              <span>+ Hội thoại mới</span>
+            </button>
+            <div style="position:relative">
+              <input type="text" id="assistant-search-sessions" class="form-input" placeholder="Tìm trong mọi hội thoại..."
+                oninput="filterAssistantSessions(this.value)" style="height:34px;font-size:12px;padding-left:32px" />
+              <i data-lucide="search" style="position:absolute;left:10px;top:9px;width:14px;height:14px;color:var(--text-dim)"></i>
+            </div>
+          </div>
+
+          <div id="assistant-sessions-list" style="flex:1;overflow-y:auto;padding:8px 6px">
+            <!-- Danh sách phiên render bởi JS -->
+          </div>
+        </div>
+
+        <!-- ── CỘT PHẢI: KHUNG TRÒ CHUYỆN CHÍNH ── -->
+        <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border);border-radius:var(--r-md)">
+          
+          <!-- Topbar Hội Thoại -->
+          <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg-surface);flex-wrap:wrap;gap:10px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:34px;height:34px;border-radius:var(--r-full);background:linear-gradient(135deg,#6366F1,#10B981);display:flex;align-items:center;justify-content:center;color:#fff">
+                <i data-lucide="bot" style="width:18px;height:18px"></i>
+              </div>
+              <div>
+                <h3 style="font-size:14px;font-weight:700;color:var(--text-main);margin:0" id="assistant-active-session-title">Hội thoại mới</h3>
+                <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-dim);margin-top:2px">
+                  <span class="badge badge-blue" style="font-size:10px;padding:1px 6px">Groq · LLaMA 3.3 70B</span>
+                  <span>•</span>
+                  <span>Trợ Lý Điều Hành &amp; n8n Control</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="filter-tabs" id="assistant-brand-tabs">
+                <button class="filter-tab active" onclick="setAssistantBrand('all', this)">Tất cả</button>
+                <button class="filter-tab" onclick="setAssistantBrand('zeo', this)">ZeO</button>
+                <button class="filter-tab" onclick="setAssistantBrand('cfc', this)">CFC</button>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="clearAssistantMessages()" title="Làm mới tin nhắn phiên này">
+                <i data-lucide="trash-2"></i>
+                <span>Xóa Chat</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Khu Vực Tin Nhắn (Messages Scroll Area) -->
+          <div id="assistant-messages" style="flex:1;overflow-y:auto;padding:20px 24px;background:var(--bg-app)">
+            <!-- Messages render by JS -->
+          </div>
+
+          <!-- Quick Prompts Chips -->
+          <div style="display:flex;gap:8px;padding:8px 16px;background:var(--bg-surface);border-top:1px solid var(--border);overflow-x:auto;scrollbar-width:none" id="assistant-quick-prompts">
+            <!-- Rendered by JS -->
+          </div>
+
+          <!-- Thanh Nhập Tin Nhắn (Chat Input Bar) -->
+          <div style="padding:12px 18px;background:var(--bg-card);border-top:1px solid var(--border);display:flex;gap:10px;align-items:center">
+            <input type="text" id="assistant-input" class="form-input" style="flex:1;height:42px;font-size:13.5px"
+              placeholder="Nhắn tin với Trợ lý: hỏi chuyện, hỏi model, tra số liệu, hoặc 'Bật workflow Shopee'..." />
+            <button class="btn btn-primary" id="assistant-send-btn" onclick="submitAssistantChat()" style="height:42px;padding:0 20px;display:inline-flex;align-items:center;gap:8px">
+              <i data-lucide="send"></i>
+              <span>Gửi</span>
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
 
     <!-- ── PAGE: Dashboard ── -->
     <div id="page-dashboard" class="page active">
@@ -966,6 +1055,7 @@
      SCRIPTS — load theo thứ tự
 ══════════════════════════════════════════════ -->
 <script src="/static/js/core.js"></script>
+<script src="/static/js/pages/assistant.js"></script>
 <script src="/static/js/pages/dashboard.js"></script>
 <script src="/static/js/pages/n8n.js"></script>
 <script src="/static/js/pages/customers.js"></script>

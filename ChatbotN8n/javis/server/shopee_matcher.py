@@ -28,13 +28,21 @@ def _fold(text: str) -> str:
 def load_shopee_catalog() -> list[dict]:
     """Đọc danh mục sản phẩm Shopee từ file knowledge/shopee_catalog.json."""
     global _catalog_cache
-    catalog_path = Path(__file__).resolve().parents[2] / "knowledge" / "shopee_catalog.json"
-    if catalog_path.exists():
-        try:
-            _catalog_cache = json.loads(catalog_path.read_text(encoding="utf-8"))
-            return _catalog_cache
-        except Exception as e:
-            logger.warning("Lỗi đọc shopee_catalog.json: %s", e)
+    for p in [
+        Path(__file__).resolve().parent.parent / "knowledge" / "shopee_catalog.json",
+        Path(__file__).resolve().parents[2] / "knowledge" / "shopee_catalog.json",
+        Path(__file__).resolve().parent / "shopee_catalog.json",
+    ]:
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    _catalog_cache = data.get("products", [])
+                elif isinstance(data, list):
+                    _catalog_cache = data
+                return _catalog_cache or []
+            except Exception as e:
+                logger.warning("Lỗi đọc shopee_catalog.json (%s): %s", p, e)
     return _catalog_cache or []
 
 
@@ -102,7 +110,7 @@ def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
     if not best_match or highest_score < 2:
         # Nếu khách chỉ hỏi link Shopee chung chung
         if is_shopee_inquiry(query):
-            general_link = "https://shopee.vn/zeovietnam" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+            general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
             brand_display = "ZeO Vietnam" if brand.lower() == "zeo" else "Cò Bay"
             return {
                 "matched": True,

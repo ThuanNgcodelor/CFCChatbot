@@ -21,7 +21,9 @@ fi
 pkill -f "npx n8n" 2>/dev/null || true
 pkill -f "cloudflared" 2>/dev/null || true
 pkill -f "ollama serve" 2>/dev/null || true
-pkill -f "uvicorn|python main.py" 2>/dev/null || true
+pkill -f "uvicorn" 2>/dev/null || true
+pkill -f "python main.py" 2>/dev/null || true
+lsof -ti tcp:8000 | xargs kill -9 2>/dev/null || true
 
 echo ""
 echo "${GREEN}✅ Đã dừng xong.${NC}"

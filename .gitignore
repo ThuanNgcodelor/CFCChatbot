@@ -6,3 +6,15 @@ ChatbotN8n/workflows/local-n8n/.n8n-sync-events.jsonl
 ChatbotN8n/infra/redis/.env
 ChatbotN8n/infra/redis/redis-credential.local.json
 ChatbotN8n/infra/redis/data/
+
+# Python cache & virtualenv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+
+# Ignore local secrets
+ChatbotN8n/javis/server/settings.json
+ChatbotN8n/javis/server/settings.local.json
+ChatbotN8n/javis-test/settings.json
+ChatbotN8n/javis-test/settings.local.json

@@ -12,7 +12,7 @@ Tự động chuyển đổi dự phòng (Fallback Chain) khi gặp lỗi.
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import httpx
 
@@ -236,4 +236,169 @@ async def generate_ai_text(
         "success": False,
         "provider": "none",
         "text": "Không thể kết nối tới bất kỳ nhà cung cấp AI nào. Vui lòng kiểm tra API key hoặc Ollama.",
+    }
+
+
+def _should_enable_tools(message: str) -> bool:
+    """Kiểm tra xem câu hỏi của user có cần gọi công cụ hệ thống/CRM/n8n hay không."""
+    from shopee_matcher import _fold
+    folded = _fold(message).lower()
+    triggers = [
+        "n8n", "workflow", "flow", "bat", "tat", "activate", "deactivate", "toggle", "chay", "sync",
+        "lead", "khach", "sdt", "so dien thoai", "doanh thu", "ban hang", "thong ke", "bao cao",
+        "shopee", "san pham", "gia", "mua", "nuoc giat", "rua chen", "lau san", "phan bon", "co bay", "zeo",
+        "faq", "kich ban", "tra loi", "learning", "hang doi", "duyet",
+        "redis", "dung luong", "ram", "bo nho", "cpu", "server", "ollama", "token", "tai nguyen",
+        "kiem tra", "trang thai", "loi", "error", "execution", "status",
+        "lenh", "terminal", "bash", "shell", "o cung", "disk", "file", "doc file", "log", "curl",
+        "ping", "tien trinh", "process", "lich", "calendar", "mail", "email", "gui mail", "telegram", "webhook"
+    ]
+    return any(t in folded for t in triggers)
+
+
+async def run_assistant_agent_chat(
+    user_message: str,
+    history: Optional[List[dict]] = None,
+    brand: str = "all",
+    temperature: float = 0.4,
+) -> dict:
+    """
+    Chạy Agent Loop thông minh: Tán gẫu tự nhiên nếu là câu hỏi chung, chỉ gọi Tool khi cần thiết.
+    """
+    from ai_agent_tools import AGENT_TOOLS_SCHEMA, dispatch_tool_call
+
+    cfg = _load_settings().get("ai_providers", {})
+    groq_key = cfg.get("groq", {}).get("api_key", "")
+    groq_model = cfg.get("groq", {}).get("model", "llama-3.3-70b-versatile")
+    openrouter_key = cfg.get("openrouter", {}).get("api_key", "")
+    openrouter_model = cfg.get("openrouter", {}).get("model", "google/gemini-2.0-flash-exp:free")
+
+    system_prompt = (
+        f"Bạn là CFC AI Assistant — Trợ lý điều hành AI Vạn Năng (Universal Operations Assistant) cho hệ thống ZeO Vietnam và CFC Cò Bay.\n"
+        f"Model: {groq_model} qua Groq Cloud API siêu tốc.\n\n"
+        "BỘ VŨ KHÍ CỦA BẠN (UNIVERSAL TOOLS):\n"
+        "1. execute_system_command: Siêu công cụ thực thi lệnh Shell / Bash / CLI (vd: 'df -h' kiểm tra ổ đĩa, 'ps aux' kiểm tra tiến trình, 'redis-cli info' đọc Redis, 'curl -s wttr.in/...' xem thời tiết, 'cat /path' đọc file, 'grep' tìm log...). Bạn có thể tự do viết bất kỳ câu lệnh nào để phục vụ người dùng!\n"
+        "2. trigger_n8n_webhook: Kích hoạt các workflow n8n (Google Calendar, Gmail, Telegram, Zalo, Google Sheets).\n"
+        "3. list_n8n_workflows & toggle_n8n_workflow: Quản trị và bật/tắt workflow tự động hoá n8n.\n"
+        "4. get_business_stats & get_shopee_catalog_summary: Báo cáo CRM và tra cứu Shopee Mall.\n"
+        "5. get_system_status: Báo cáo nhanh sức khỏe Redis, RAM, Ollama, n8n.\n\n"
+        "TÍNH CÁCH & QUY TẮC:\n"
+        "- ĐA NĂNG & THÔNG MINH: Tự động chạy lệnh hoặc kích hoạt tool khi người dùng cần bất kỳ dữ liệu thực tế nào.\n"
+        "- Với câu hỏi đố vui, khoa học, triết học, lập trình, tán gẫu: Trả lời cuốn hút, hóm hỉnh, sâu sắc, KHÔNG gọi tool thừa.\n"
+        "- Khi chạy lệnh hệ thống: Giải thích ngắn gọn kết quả một cách thân thiện, chuyên nghiệp."
+    )
+
+    # Chuẩn bị hội thoại
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        for h in history[-8:]:  # Giữ tối đa 8 tin nhắn gần nhất
+            r = h.get("role", "user")
+            c = h.get("content", "")
+            if r in ("user", "assistant") and c:
+                messages.append({"role": r, "content": c})
+
+    messages.append({"role": "user", "content": user_message})
+
+    needs_tools = _should_enable_tools(user_message)
+
+    # Thử gọi qua Groq trước nếu có key
+    if groq_key:
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {groq_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": groq_model,
+                "messages": messages,
+                "temperature": temperature,
+            }
+            if needs_tools:
+                payload["tools"] = AGENT_TOOLS_SCHEMA
+                payload["tool_choice"] = "auto"
+
+            async with httpx.AsyncClient(timeout=35.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choice = data.get("choices", [{}])[0]
+                    msg = choice.get("message", {})
+
+                    tool_calls = msg.get("tool_calls", [])
+                    action_cards = []
+                    tools_used = []
+
+                    if tool_calls:
+                        # Append assistant message chứa tool_calls
+                        messages.append(msg)
+
+                        # Thực thi từng tool
+                        for tc in tool_calls:
+                            tc_id = tc.get("id", "call_1")
+                            fn_name = tc.get("function", {}).get("name", "")
+                            raw_args = tc.get("function", {}).get("arguments", "{}")
+                            try:
+                                fn_args = json.loads(raw_args)
+                            except Exception:
+                                fn_args = {}
+
+                            tools_used.append(fn_name)
+                            tool_result = await dispatch_tool_call(fn_name, fn_args)
+
+                            # Lưu action card cho giao diện
+                            action_cards.append({
+                                "tool": fn_name,
+                                "args": fn_args,
+                                "result": tool_result,
+                            })
+
+                            # Append tool response
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "name": fn_name,
+                                "content": json.dumps(tool_result, ensure_ascii=False),
+                            })
+
+                        # Gọi lần 2 để AI tổng hợp kết quả
+                        second_payload = {
+                            "model": groq_model,
+                            "messages": messages,
+                            "temperature": temperature,
+                        }
+                        resp2 = await client.post(url, headers=headers, json=second_payload)
+                        if resp2.status_code == 200:
+                            data2 = resp2.json()
+                            final_text = data2.get("choices", [{}])[0].get("message", {}).get("content", "")
+                            return {
+                                "success": True,
+                                "provider": "groq",
+                                "model": groq_model,
+                                "text": final_text,
+                                "tools_used": tools_used,
+                                "action_cards": action_cards,
+                            }
+                    else:
+                        # AI trả lời trực tiếp không cần tool
+                        return {
+                            "success": True,
+                            "provider": "groq",
+                            "model": groq_model,
+                            "text": msg.get("content", ""),
+                            "tools_used": [],
+                            "action_cards": [],
+                        }
+        except Exception as e:
+            logger.warning(f"Groq agent chat error: {e}")
+
+    # Fallback sang trả lời văn bản thông thường
+    fallback_res = await generate_ai_text(user_message, system_prompt)
+    return {
+        "success": fallback_res.get("success", False),
+        "provider": fallback_res.get("provider", "none"),
+        "model": "standard-fallback",
+        "text": fallback_res.get("text", "Không thể sinh phản hồi từ AI."),
+        "tools_used": [],
+        "action_cards": [],
     }

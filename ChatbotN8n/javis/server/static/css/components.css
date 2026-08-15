@@ -779,3 +779,42 @@ td {
   white-space: nowrap;
 }
 
+/* ════════════════════════════════════
+   ASSISTANT CHAT COMPONENT
+════════════════════════════════════ */
+.chat-msg-row {
+  animation: fadeIn 0.25s ease forwards;
+}
+
+.chat-msg-row.user-row .msg-content p,
+.chat-msg-row.user-row .msg-content strong {
+  color: #ffffff !important;
+}
+
+.chat-msg-row.assistant-row .msg-content {
+  color: var(--text-main);
+  line-height: 1.7;
+}
+
+.chat-msg-row.assistant-row .msg-content p {
+  margin-bottom: 8px;
+}
+
+.chat-msg-row.assistant-row .msg-content p:last-child {
+  margin-bottom: 0;
+}
+
+#assistant-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+#assistant-messages::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+#assistant-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+

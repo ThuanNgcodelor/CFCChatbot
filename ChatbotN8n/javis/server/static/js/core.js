@@ -123,6 +123,7 @@ function switchPage(page, el) {
   if (pageEl) pageEl.classList.add('active');
 
   const titles = {
+    assistant: 'Trợ Lý Điều Hành AI',
     dashboard: 'Dashboard',
     reports:   'Báo Cáo & AI Insights',
     documents: 'Nạp Tài Liệu & Tự Học',
@@ -145,6 +146,7 @@ function switchPage(page, el) {
 
 function loadPage(page) {
   switch (page) {
+    case 'assistant': if (typeof initAssistantPage === 'function') initAssistantPage(); break;
     case 'dashboard': loadStatus(); loadStats(); break;
     case 'reports':   loadReports(); break;
     case 'documents': loadDocuments(); break;

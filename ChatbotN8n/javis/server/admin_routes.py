@@ -1373,7 +1373,9 @@ async def test_telegram_endpoint(req: TelegramTestRequest):
 # ─────────────────────────────────────────────────────
 
 def _shopee_catalog_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "knowledge" / "shopee_catalog.json"
+    p = Path(__file__).resolve().parent.parent / "knowledge" / "shopee_catalog.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def _load_raw_catalog() -> list:
@@ -1729,6 +1731,7 @@ Traả về JSON array:
 
 Chỉ trả về JSON, không giải thích thêm."""
 
+    # pyrefly: ignore [unexpected-keyword]
     ai_raw = await generate_ai_text(prompt, max_tokens=2000)
     suggestions = []
     try:
@@ -1887,4 +1890,44 @@ async def generate_report_endpoint(send_telegram: bool = False):
     from ai_reporter import generate_daily_executive_report
     res = await generate_daily_executive_report(send_telegram=send_telegram)
     return res
+
+
+# ─────────────────────────────────────────────────────
+# MODULE: AI EXECUTIVE ASSISTANT & N8N CHAT CONTROL
+# ─────────────────────────────────────────────────────
+
+class AssistantChatRequest(BaseModel):
+    message: str
+    history: Optional[List[dict]] = []
+    brand: Optional[str] = "all"
+
+
+@router.post("/assistant/chat")
+async def assistant_chat_endpoint(req: AssistantChatRequest):
+    """Trò chuyện trực tiếp với AI Assistant để điều khiển n8n và tổng hợp số liệu."""
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Tin nhắn không được để trống")
+
+    from ai_engine import run_assistant_agent_chat
+    res = await run_assistant_agent_chat(
+        user_message=req.message.strip(),
+        history=req.history,
+        brand=req.brand or "all"
+    )
+    return res
+
+
+@router.get("/assistant/quick-prompts")
+async def assistant_quick_prompts():
+    """Danh sách các câu hỏi gợi ý nhanh cho Trợ lý điều hành."""
+    return {
+        "prompts": [
+            {"label": "📊 Báo cáo kinh doanh", "query": "Tổng hợp tình hình khách hàng và leads mới hôm nay cho anh"},
+            {"label": "⚡ Danh sách n8n", "query": "Liệt kê danh sách các workflow n8n và trạng thái hoạt động"},
+            {"label": "⚠️ Kiểm tra lỗi n8n", "query": "Kiểm tra xem có workflow n8n nào bị lỗi gần đây không?"},
+            {"label": "🛒 Danh mục Shopee", "query": "Tra cứu các sản phẩm Shopee Mall hiện có của ZeO và CFC"},
+            {"label": "🧠 Learning Queue", "query": "Tóm tắt các câu hỏi khách hàng đang chờ admin duyệt trong Learning Queue"}
+        ]
+    }
+
 

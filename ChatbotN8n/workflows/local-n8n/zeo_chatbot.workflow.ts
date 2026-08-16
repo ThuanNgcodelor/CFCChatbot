@@ -194,9 +194,9 @@ const isThanks = tokenCount <= 7 && /^(cam on|thanks|thank you|da cam on|ok cam 
 const isGoodbye = tokenCount <= 7 && /^(tam biet|bye|goodbye|hen gap lai|chao nhe|toi ve|minh ve|em ve|anh ve|chi ve|ok ve|oke ve|ve nhe|di day)(\\s|$)/.test(lower);
 const isAcknowledgement = tokenCount <= 4 && /^(ok|oke|okay|da|vang|uh|um|roi|duoc|biet roi|hieu roi)(\\s|$)/.test(lower);
 const isEmotional = /(^|\\s)(buon|met|chan|stress|ap luc)(\\s|$)/.test(lower);
-const isFollowUp = tokenCount <= 7 && /^(con |vay |the |loai do|san pham do|cai do|cai nay|no |dung sao|co thom|gia sao)/.test(lower);
+const isFollowUp = tokenCount <= 7 && /^(con |vay |the |loai do|san pham do|cai do|cai nay|no |dung sao|co thom|gia sao|it vay|it the|chi vay)/.test(lower);
 const isBotComplaint = /(do ngu|ngu ngu|sao ngu|bot ngu|may ngu|m ngu|cang dot|may dot|m dot|vl|vcl|vai lon|tra loi gi ky|tra loi ky|tra loi xam|xam xam|khong hieu|noi gi vay|sao tra loi|tra loi gi v|tra loi gi vay|toi chui|chui ban|lien quan gi|khong lien quan|cach dong|xuong dong|hoi mot dang tra loi mot neo|tra loi chan|chan ghe|hai ghe|hai vl|chua on|khong on|session.*chua on|khong co session|mat ngu canh|context sai|khong nho ngu canh)/.test(lower);
-const isCatalogQuestion = /(san pham gi|san pham nao|co san pham|co nhung gi|ban nhung gi|ban gi|co gi ban|danh muc san pham|cac san pham|mat hang gi|hang gi)/.test(lower);
+const isCatalogQuestion = /(san pham gi|san pham nao|co san pham|co nhung gi|ban nhung gi|ban gi|co gi ban|danh muc san pham|cac san pham|dong san pham|co dong nao|co nhom nao|mat hang gi|mat hang nao|hang gi)/.test(lower);
 const isWebsiteQuestion = /(website|web site|trang web|link web|link website|link cong ty|duong dan|xin link|gui.*link|zeo vn|zeo\\.vn)/.test(lower);
 const isShortCodQuestion = /(^|\\s)cod($|\\s)/.test(lower) || /(thanh toan khi nhan|giao hang thu tien|nhan hang tra tien|thu tien mat|tra tien mat)/.test(lower);
 const isShortDetergentQuestion = /(bot giat|nuoc giat|giat do|giat quan ao)/.test(lower);
@@ -872,12 +872,16 @@ const selectedHotlineBranch02 = /^(2|02)$/.test(normalizedInputText)
   && /(^|\\s)0?2(\\s|$)/.test(previousText);
 const isPurchaseIntent = /(mua|dat hang|dat mua|link mua|link shopee|shopee|tiki|lazada|tiktok shop|san thuong mai|cua hang|gio hang)/.test(normalizedInputText);
 const isPriceQuestion = /(^|\\s)(gia|bang gia|bao gia|xin gia|bao nhieu tien|nhieu tien|price)(\\s|$)/.test(normalizedInputText);
+const isUnderwhelmedCatalogFollowUp = /^(it vay|it the|it vay thoi|chi vay|chi co vay|co vay thoi)(\\s|$)/.test(normalizedInputText);
 const isDistributorAvailabilityQuestion = /(nha phan phoi|dai ly).*(chua|co khong|o dau|gan|khu vuc)|(^|\\s)[a-z0-9 ]+\\s+co\\s+(nha phan phoi|dai ly)\\s+chua/.test(normalizedInputText);
 const isDetailedCatalogQuestion = /(chi tiet|cu the|ke ro|danh sach|liet ke).*(san pham|mat hang|nhom)|san pham.*(chi tiet|cu the|gom nhung gi|co nhung dong)/.test(normalizedInputText);
 const isBroadCleaningProductQuestion = /^(nuoc )?tay rua$/.test(normalizedInputText)
   || /^(san pham |nhom )?tay rua$/.test(normalizedInputText)
   || ((/(\\bnuoc tay rua\\b|\\bsan pham tay rua\\b|\\bnhom tay rua\\b)/.test(normalizedInputText))
     && !/(javen|javel|toilet|bon cau|mau|kinh|da nang|rua chen|lau san)/.test(normalizedInputText));
+const isLaundryGroupQuestion = /(giat giu|nhom giat|do giat|giat quan ao|nuoc giat|bot giat).*(san pham|co nhung gi|gom nhung gi|loai nao|nhung loai nao|mat hang|co khong|co ko|co k)/
+  .test(normalizedInputText)
+  || /(san pham|mat hang|nhom).*(giat giu|giat quan ao|nuoc giat|bot giat)/.test(normalizedInputText);
 const distributorAreaMatch = input.text.match(/^\\s*(.+?)\\s+(có|co)\\s+(nhà phân phối|nha phan phoi|đại lý|dai ly)/i)
   || input.text.match(/(nhà phân phối|nha phan phoi|đại lý|dai ly).*(ở|o|tại|tai)\\s+(.+)/i);
 const requestedDistributorArea = distributorAreaMatch
@@ -931,8 +935,11 @@ if (!shouldUseRag) {
   forcedEntry = findByIntent('company_website', 'website', 'company_contact_information', 'online_purchase')
     || findByIntentIncludes('website', 'contact', 'purchase')
     || findByKnowledgeTerms('zeo.vn', 'website', 'trang web');
+} else if (isLaundryGroupQuestion) {
+  forcedEntry = findByIntent('zeo_laundry_product_overview')
+    || findByKnowledgeTerms('giat giu', 'nuoc giat', 'bot giat');
 } else if (input.isGenericDetergentQuestion) {
-  forcedEntry = findByIntent('zeo_detergent_usp', 'zeo_detergent_fragrance', 'zeo_detergent_technology')
+  forcedEntry = findByIntent('zeo_laundry_product_overview', 'zeo_detergent_usp', 'zeo_detergent_fragrance', 'zeo_detergent_technology')
     || findByIntentIncludes('detergent', 'laundry')
     || findByKnowledgeTerms('bot giat', 'nuoc giat', 'giat quan ao');
 } else if (input.isFloorCleanerQuestion) {
@@ -1064,6 +1071,12 @@ if (shouldIgnore) {
   } else {
     finalReply = 'Dạ, ZeO đã ghi nhận bạn muốn: ' + input.text + '. Bạn gửi thêm số điện thoại và khu vực/tỉnh thành để admin kiểm tra đúng sản phẩm, giá và hỗ trợ chốt đơn nha.';
   }
+} else if (isUnderwhelmedCatalogFollowUp) {
+  responseMode = 'direct';
+  fallbackReason = '';
+  matchedIntent = 'zeo_product_catalog_overview';
+  const catalogEntry = findByIntent('zeo_product_catalog_overview', 'catalog_overview');
+  finalReply = catalogEntry?.answer || 'Dạ không chỉ một nhóm đâu ạ. ZeO Vietnam hiện có 4 nhóm chính: Giặt giũ, Rửa chén, Lau sàn và Tẩy rửa vệ sinh. Bạn muốn mình liệt kê chi tiết nhóm nào trước nha?';
 } else if (isPriceQuestion || dialogue.intent === 'price_request') {
   responseMode = 'review';
   fallbackReason = 'price_unverified';
@@ -1116,11 +1129,18 @@ if (shouldIgnore) {
   fallbackReason = 'product_scope_clarification';
   matchedIntent = 'cleaning_product_group_clarification';
   finalReply = 'Dạ nhóm tẩy rửa của ZeO có nhiều loại như Javen, tẩy toilet, tẩy màu, lau kính và xịt tẩy đa năng PANO. Bạn muốn loại tẩy rửa cho quần áo, nhà vệ sinh, kính, bếp hay rửa chén ạ?';
+} else if (isLaundryGroupQuestion) {
+  responseMode = 'direct';
+  fallbackReason = '';
+  matchedIntent = 'zeo_laundry_product_overview';
+  const laundryEntry = findByIntent('zeo_laundry_product_overview');
+  finalReply = laundryEntry?.answer || 'Dạ nhóm giặt giũ hiện có Bột giặt & Nước giặt sinh học ZeO, PANO và Oplus. Bạn muốn mình tư vấn theo nhu cầu sạch sâu, thơm lâu, dịu nhẹ hay tiết kiệm hơn ạ?';
 } else if (asksPanoProductType) {
   responseMode = 'direct';
   fallbackReason = '';
   matchedIntent = 'pano_product_type';
-  finalReply = 'Dạ, PANO là dòng sản phẩm tẩy rửa gia dụng thuộc hệ ZeO/PANO/Oplus. Hiện dữ liệu ZeO có PANO cho nhóm giặt giũ, nước rửa chén và xịt tẩy đa năng; riêng nhóm giặt giũ có bột giặt/nước giặt PANO với nhiều mùi hương. Bạn muốn xem PANO giặt đồ, rửa chén hay xịt tẩy đa năng ạ?';
+  const panoEntry = findByIntent('pano_product_type');
+  finalReply = panoEntry?.answer || 'Dạ, PANO là dòng sản phẩm tẩy rửa gia dụng thuộc hệ ZeO/PANO/Oplus. Trong dữ liệu hiện có, PANO gồm sản phẩm giặt giũ, nước rửa chén và xịt tẩy đa năng. Nếu bạn hỏi riêng nhóm giặt giũ, PANO có bột giặt/nước giặt với nhiều lựa chọn hương.';
 } else if (websiteOnlyQuestion) {
   responseMode = 'direct';
   fallbackReason = '';

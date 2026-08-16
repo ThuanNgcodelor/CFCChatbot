@@ -46,6 +46,17 @@ def load_shopee_catalog() -> list[dict]:
     return _catalog_cache or []
 
 
+def is_promotion_inquiry(text: str) -> bool:
+    """Kiểm tra xem câu hỏi có chứa ý định hỏi về Sale / Khuyến Mãi / Giảm Giá / Ưu Đãi / Voucher không."""
+    folded = _fold(text)
+    triggers = [
+        "sale", "khuyen mai", "giam gia", "uu dai", "voucher", "ma giam",
+        "co giam", "co sale", "co khuyen mai", "dang sale", "dang giam", "deal",
+        "chiet khau", "tang kem", "qua tang", "combo", "gia re"
+    ]
+    return any(t in folded for t in triggers)
+
+
 def is_shopee_inquiry(text: str) -> bool:
     """Kiểm tra xem câu hỏi có chứa ý định mua qua Shopee / xin link mua hàng không."""
     folded = _fold(text)
@@ -57,11 +68,47 @@ def is_shopee_inquiry(text: str) -> bool:
     return any(t in folded for t in triggers)
 
 
+def match_promotions_and_deals(query: str, brand: str = "zeo") -> dict:
+    """
+    Trả lời trung thực về các chương trình Sale & Khuyến mãi hiện có của ZeO / CFC.
+    Không bịa giá — điều hướng xem trực tiếp tại Shopee Mall hoặc hỗ trợ qua nhân viên.
+    """
+    brand_display = "ZeO Vietnam" if brand.lower() == "zeo" else "CFC Cò Bay"
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+
+    if brand.lower() == "zeo":
+        reply = (
+            f"Dạ các chương trình khuyến mãi, Flash Sale và Voucher giảm giá độc quyền được {brand_display} "
+            f"cập nhật liên tục trực tiếp trên gian hàng chính hãng Shopee Mall:\n\n"
+            f"👉 {general_link}\n\n"
+            f"• Gian hàng đang hỗ trợ mã **Freeship Extra** toàn quốc cùng các mã giảm giá theo từng đợt khuyến mãi của sàn.\n"
+            f"• Bạn có thể bấm vào link trên để xem giá ưu đãi mới nhất hoặc nhắn tên dòng sản phẩm bạn quan tâm để mình hỗ trợ nhé! 💙"
+        )
+    else:
+        reply = (
+            f"Dạ các chương trình ưu đãi và chiết khấu phân bón {brand_display} được áp dụng theo từng vụ mùa và số lượng đặt hàng. "
+            f"Bạn vui lòng để lại Số Điện Thoại và Cây Trồng cần bón để kỹ sư Cò Bay liên hệ gửi chính sách ưu đãi tốt nhất cho mình nhé ạ!"
+        )
+
+    return {
+        "matched": True,
+        "intent": "promotion_deals",
+        "confidence": "high",
+        "score": 0.96,
+        "suggested_reply": reply,
+        "shopee_url": general_link
+    }
+
+
 def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
     """
     Khớp câu hỏi của khách với sản phẩm Shopee phù hợp nhất.
     Trả về thông tin sản phẩm và mẫu câu trả lời kèm link trực tiếp.
     """
+    # Nếu hỏi về khuyến mãi / sale trên Shopee -> Trả về deal khuyến mãi
+    if is_promotion_inquiry(query):
+        return match_promotions_and_deals(query, brand=brand)
+
     catalog = load_shopee_catalog()
     if not catalog:
         return None
@@ -128,7 +175,7 @@ def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
     # Tạo câu trả lời cụ thể cho sản phẩm
     reply = (
         f"Dạ, link mua **{best_match['name']}** chính hãng trên Shopee Mall đây nha bạn:\n\n"
-        f"👉 {best_match['shopee_url']}\n\n"
+        f"👉 {best_match.get('link_shopee') or best_match.get('shopee_url', '')}\n\n"
         f"• **Giá niêm yết:** {best_match.get('price', 'Ưu đãi')}\n"
         f"• **Ưu đãi:** {best_match.get('promotion', 'Freeship Extra toàn quốc')}\n\n"
         f"Bạn bấm vào link để đặt hàng giao tận nơi nhé! Cần hỗ trợ thêm bạn cứ nhắn mình nha. 💙"
@@ -139,8 +186,7 @@ def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
         "is_general_store": False,
         "product_id": best_match.get("id"),
         "product_name": best_match.get("name"),
-        "price": best_match.get("price"),
-        "shopee_url": best_match.get("shopee_url"),
-        "promotion": best_match.get("promotion"),
+        "shopee_url": best_match.get("link_shopee") or best_match.get("shopee_url", ""),
+        "matched_product": best_match,
         "suggested_reply": reply,
     }

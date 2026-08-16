@@ -56,6 +56,15 @@ def _cosine_to_confidence(distance: float) -> float:
     return round(max(0.0, min(1.0, similarity)), 4)
 
 
+def _normalize_vi_query(text: str) -> str:
+    import unicodedata
+    import re
+    t = unicodedata.normalize("NFD", str(text or ""))
+    t = re.sub(r"[\u0300-\u036f]", "", t)
+    t = t.replace("đ", "d").replace("Đ", "d")
+    return t.lower().strip()
+
+
 async def semantic_search(
     query: str,
     brand: str = "zeo",
@@ -64,26 +73,15 @@ async def semantic_search(
 ) -> dict:
     """
     Tìm FAQ gần nhất với câu hỏi `query` trong vector index của brand tương ứng.
-
-    Returns:
-    {
-        "query": "...",
-        "brand": "zeo",
-        "confidence": "high" | "medium" | "low",
-        "score": 0.92,
-        "intent": "shipping_methods",
-        "answer": "Dạ ZeO có giao hàng...",
-        "answer_mode": "rewrite",
-        "risk_level": "low",
-        "results": [...top_k results...]
-    }
     """
     cfg = _load_settings()
     rag_cfg = cfg["rag"]
     index_name = get_index_name(brand, cfg)
 
-    # 1. Tạo embedding cho câu hỏi
-    vec = await embed_text(query)
+    # 1. Tạo embedding cho câu hỏi (kết hợp cả có dấu và không dấu để tối ưu tiếng Việt)
+    norm_q = _normalize_vi_query(query)
+    embed_query = f"{query} | {norm_q}" if query.strip().lower() != norm_q else query
+    vec = await embed_text(embed_query)
     if vec is None:
         return {
             "error": "Không thể tạo embedding cho query — Ollama có thể đang không chạy",

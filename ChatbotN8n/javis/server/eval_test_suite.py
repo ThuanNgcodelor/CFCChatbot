@@ -122,6 +122,10 @@ TEST_CASES = [
     {"q": "hôm nay ngày mấy", "category": "regression_out_of_scope", "expected_intent": "out_of_scope_general_question"},
     {"q": "bây giờ mấy giờ rồi", "category": "regression_out_of_scope", "expected_intent": "out_of_scope_general_question"},
     {"q": "thời tiết hôm nay sao", "category": "regression_out_of_scope", "expected_intent": "out_of_scope_general_question"},
+    {"q": "tôi muốn mua oplis", "category": "regression_typo_purchase", "expected_intent": "oplus_purchase_clarify"},
+    {"q": "nước tẩy", "category": "regression_short_product", "expected_intent": "zeo_javen_bleach"},
+    {"q": "Soạn", "category": "regression_ui_noise", "expected_intent": "out_of_scope_general_question"},
+    {"q": "Viết cho ZeO VietNam", "category": "regression_ui_noise", "expected_intent": "out_of_scope_general_question"},
 ]
 
 
@@ -172,6 +176,24 @@ MULTI_TURN_CASES = [
         "turns": [
             {"q": "CFC có những dòng phân nào?", "expected_intent": "product_lines"},
             {"q": "cái thứ 2 bón bao nhiêu kg cho 1 công lúa?", "expected_intent": "cfc_dosage_usage_review"},
+        ],
+    },
+    {
+        "name": "zeo_technology_context_followups",
+        "brand": "zeo",
+        "turns": [
+            {"q": "Có giấy tờ chứng minh công nghệ đó không?", "expected_intent": "zeo_detergent_certification"},
+            {"q": "có công nghệ gì", "expected_intent": "contextual_technology_more_info"},
+            {"q": "còn công nghệ nào khác ko", "expected_intent": "contextual_technology_more_info"},
+            {"q": "còn gì nữa ko", "expected_intent": "contextual_product_more_info"},
+        ],
+    },
+    {
+        "name": "zeo_usage_context_followup",
+        "brand": "zeo",
+        "turns": [
+            {"q": "1kg bột giặt cho 5 bộ đồ được ko", "expected_intent": "zeo_usage_safety_review"},
+            {"q": "vậy 2 bộ thì sao", "expected_intent": "zeo_usage_safety_review"},
         ],
     },
 ]

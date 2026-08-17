@@ -2438,6 +2438,10 @@ Các case này dùng để kiểm tra các lỗi "hỏi một đằng trả lờ
 | 22 | ZeO | hôm nay ngày mấy | Không trả FAQ sản phẩm; báo ngoài phạm vi tư vấn sản phẩm/dịch vụ |
 | 23 | ZeO | bây giờ mấy giờ rồi | Không trả FAQ sản phẩm; báo ngoài phạm vi tư vấn sản phẩm/dịch vụ |
 | 24 | ZeO | thời tiết hôm nay sao | Không trả FAQ sản phẩm; báo ngoài phạm vi tư vấn sản phẩm/dịch vụ |
+| 25 | ZeO | tôi muốn mua oplis | Hiểu `oplis` là Oplus, hỏi rõ muốn mua Bột giặt Oplus hay Nước rửa chén Oplus, không báo giá bịa |
+| 26 | ZeO | nước tẩy | Trả đúng Nước tẩy Javen ZeO hoặc hỏi rõ nếu cần, không lạc sang chính sách/khuyến mãi |
+| 27 | ZeO | Soạn | Không đưa xuống RAG; báo ngoài phạm vi/tin nhắn không phải câu hỏi khách |
+| 28 | ZeO | Viết cho ZeO VietNam | Không đưa xuống RAG; báo ngoài phạm vi/tin nhắn không phải câu hỏi khách |
 
 ```bash
 awk '/^```jsonl$/{flag=1;next}/^```$/{if(flag){flag=0;exit}}flag' test.md > chatbot_eval_cases.jsonl
@@ -2456,3 +2460,6 @@ Các case này kiểm tra việc bot nhớ sản phẩm hoặc danh sách vừa 
 | 5 | ZeO | Dòng sản phẩm ZiF | nó giá sao? | Hiểu “nó” là ZIF/Nước rửa chén ZeO, không tự bịa giá |
 | 6 | CFC | CFC có những dòng phân nào? | cái thứ 2 giá sao? | Hiểu dòng thứ 2 là phân hữu cơ CFC, không bịa giá, xin SĐT/khu vực/loại cây |
 | 7 | CFC | CFC có những dòng phân nào? | cái thứ 2 bón bao nhiêu kg cho 1 công lúa? | Không bịa liều lượng, chuyển kỹ sư/admin tư vấn |
+| 8 | ZeO | Có giấy tờ chứng minh công nghệ đó không? | có công nghệ gì | Giữ ngữ cảnh Bột giặt ZeO, trả Enzyme Thụy Điển, không nhảy sang Oplus |
+| 9 | ZeO | có công nghệ gì | còn công nghệ nào khác ko | Không lặp sai Oplus; báo các công nghệ đang có trong Sheet, không bịa công nghệ khác |
+| 10 | ZeO | 1kg bột giặt cho 5 bộ đồ được ko | vậy 2 bộ thì sao | Vẫn giữ ngữ cảnh liều lượng/cách dùng, không nhảy sang đổi trả |

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 VIETNAMESE_ALIASES = {
     "k": "khong", "ko": "khong", "kh": "khong", "hok": "khong", "hem": "khong", "hong": "khong",
     "dc": "duoc", "dk": "duoc", "sp": "san pham", "ib": "nhan tin", "nt": "nhan tin",
-    "nhiu": "nhieu",
+    "nhiu": "nhieu", "oplis": "oplus", "oplus": "oplus",
     "bn": "bao nhieu", "mn": "minh", "ship": "giao hang", "cty": "cong ty",
     "web": "website", "wed": "website", "wep": "website",
     "sdt": "so dien thoai", "ssdt": "so dien thoai", "dt": "dien thoai", "npp": "nha phan phoi",
@@ -56,6 +56,30 @@ ZEO_COMPETITOR_PRODUCT_PATTERNS = [
 ]
 
 PRODUCT_MEMORY_BY_INTENT = {
+    "zeo_detergent_technology": [
+        {"name": "Bột giặt ZeO", "category": "laundry", "intent": "zeo_detergent_technology"},
+    ],
+    "zeo_detergent_certification": [
+        {"name": "Bột giặt ZeO", "category": "laundry", "intent": "zeo_detergent_certification"},
+    ],
+    "zeo_detergent_fragrance": [
+        {"name": "Bột giặt ZeO", "category": "laundry", "intent": "zeo_detergent_fragrance"},
+    ],
+    "oplus_detergent_ion_technology": [
+        {"name": "Bột giặt Oplus", "category": "laundry", "intent": "oplus_detergent_ion_technology"},
+    ],
+    "oplus_detergent_features": [
+        {"name": "Bột giặt Oplus", "category": "laundry", "intent": "oplus_detergent_features"},
+    ],
+    "oplus_detergent_usp": [
+        {"name": "Bột giặt Oplus", "category": "laundry", "intent": "oplus_detergent_usp"},
+    ],
+    "pano_laundry_fragrance_options": [
+        {"name": "Bột giặt & Nước giặt PANO", "category": "laundry", "intent": "pano_laundry_fragrance_options"},
+    ],
+    "pano_veilex_odor_control": [
+        {"name": "Bột giặt & Nước giặt PANO", "category": "laundry", "intent": "pano_veilex_odor_control"},
+    ],
     "zeo_product_catalog_overview": [
         {"name": "Giặt giũ ZeO/PANO/Oplus", "category": "laundry", "intent": "zeo_laundry_product_overview"},
         {"name": "Rửa chén ZeO/ZIF/PANO/Oplus", "category": "dishwashing", "intent": "zeo_dishwashing_product_overview"},
@@ -100,7 +124,31 @@ PRODUCT_MEMORY_BY_INTENT = {
     ],
 }
 
+TECH_CONTEXT_INTENTS = {
+    "zeo_detergent": {
+        "intents": {"zeo_detergent_technology", "zeo_detergent_certification", "zeo_detergent_fragrance"},
+        "product_pattern": r"bot giat zeo|\bzeo\b",
+        "technology_intent": "zeo_detergent_technology",
+        "related_intents": ["zeo_detergent_technology", "zeo_detergent_certification", "zeo_detergent_fragrance"],
+    },
+    "oplus_detergent": {
+        "intents": {"oplus_detergent_ion_technology", "oplus_detergent_features", "oplus_detergent_usp"},
+        "product_pattern": r"bot giat oplus|\boplus\b",
+        "technology_intent": "oplus_detergent_ion_technology",
+        "related_intents": ["oplus_detergent_ion_technology", "oplus_detergent_features", "oplus_detergent_usp"],
+    },
+    "pano_laundry": {
+        "intents": {"pano_product_type", "pano_laundry_fragrance_options", "pano_veilex_odor_control"},
+        "product_pattern": r"pano|nuoc giat pano|bot giat pano",
+        "technology_intent": "pano_veilex_odor_control",
+        "related_intents": ["pano_veilex_odor_control", "pano_laundry_fragrance_options", "pano_product_type"],
+    },
+}
+
 PRODUCT_ENTITY_PATTERNS = [
+    ("zeo_detergent_technology", "Bột giặt ZeO", "laundry", r"bot giat zeo|enzyme thuy dien"),
+    ("pano_product_type", "Bột giặt & Nước giặt PANO", "laundry", r"bot giat pano|nuoc giat pano"),
+    ("oplus_detergent_features", "Bột giặt Oplus", "laundry", r"bot giat oplus"),
     ("zeo_zif_dishwashing_liquid", "Nước rửa chén ZeO/ZIF", "dishwashing", r"\bzif\b|nuoc rua chen zeo|rua chen zeo"),
     ("pano_product_type", "PANO", "product_family", r"\bpano\b"),
     ("oplus_detergent_features", "Oplus", "product_family", r"\boplus\b"),
@@ -343,6 +391,83 @@ def _looks_like_availability_request(norm_text: str) -> bool:
     return _has_any(norm_text, [
         r"(con hang|het hang|con khong|con hong|con ko|co san|ton kho|het chua|con nua khong|con nua hong)",
     ])
+
+
+def _active_product_context_key(conversation_state: dict[str, Any], previous_intent: str = "") -> str:
+    active = conversation_state.get("active_entities") or {}
+    candidates = [
+        str(active.get("product_intent", "")),
+        previous_intent,
+        str(active.get("product", "")),
+    ]
+    products = conversation_state.get("last_products_shown") or []
+    if len(products) == 1 and isinstance(products[0], dict):
+        candidates.extend([str(products[0].get("intent", "")), str(products[0].get("name", ""))])
+
+    combined = _normalize_vn(" ".join(candidates))
+    for context_key, spec in TECH_CONTEXT_INTENTS.items():
+        if any(intent in candidates for intent in spec["intents"]):
+            return context_key
+        if re.search(spec["product_pattern"], combined):
+            return context_key
+    return ""
+
+
+def _detect_contextual_technology_request(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"^(co )?cong nghe gi$",
+        r"(cong nghe).{0,20}(gi|nao|khac|them|nua)",
+        r"(co).{0,20}(cong nghe).{0,20}(khong|ko|hong)",
+    ])
+
+
+def _detect_vague_more_followup(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"^(con gi nua|con gi nua khong|con gi nua ko|con gi nua hong|con nua khong|con nua hong|con nua ko|co gi nua|co gi nua khong|them gi nua|nua khong|nua ko)$",
+        r"^(con.*khac.*khong|con.*khac.*ko|con.*khac.*hong)$",
+        r"^(ngoai ra.*gi|ngoai.*cai.*do.*con.*gi)$",
+    ])
+
+
+async def _build_contextual_more_info_answer(brand: str, context_key: str, only_technology: bool = False) -> tuple[str, str, str]:
+    if brand.lower() != "zeo" or context_key not in TECH_CONTEXT_INTENTS:
+        return "", "", ""
+
+    spec = TECH_CONTEXT_INTENTS[context_key]
+    intents = [spec["technology_intent"]] if only_technology else spec["related_intents"]
+    items = await asyncio.gather(*(get_faq_by_intent(brand, intent) for intent in intents), return_exceptions=True)
+
+    bullets = []
+    for item in items:
+        if isinstance(item, Exception):
+            continue
+        answer = str(item.get("answer", "")).strip()
+        if answer:
+            bullets.append(answer)
+
+    if not bullets:
+        return "", "", ""
+
+    product_name = {
+        "zeo_detergent": "Bột giặt ZeO",
+        "oplus_detergent": "Bột giặt Oplus",
+        "pano_laundry": "Bột giặt & Nước giặt PANO",
+    }.get(context_key, "sản phẩm này")
+
+    if only_technology:
+        msg = (
+            f"Dạ với {product_name}, hiện hệ thống đang có thông tin công nghệ đã xác nhận là:\n\n"
+            + "\n".join(f"{idx}. {answer}" for idx, answer in enumerate(bullets, 1))
+            + "\n\nMình chưa thấy dữ liệu xác nhận công nghệ khác ngoài các thông tin trên, nên mình không tự bổ sung thêm nha."
+        )
+        return msg, "contextual_technology_more_info", spec["technology_intent"]
+
+    msg = (
+        f"Dạ với {product_name}, hiện hệ thống đang có các thông tin đã xác nhận:\n\n"
+        + "\n".join(f"{idx}. {answer}" for idx, answer in enumerate(bullets, 1))
+        + "\n\nBạn muốn mình kiểm tra tiếp giá, quy cách hay cách mua hàng cho sản phẩm này không ạ?"
+    )
+    return msg, "contextual_product_more_info", spec["technology_intent"]
 
 
 def _product_memory_for_intent(intent: str, answer: str, brand: str) -> list[dict[str, str]]:
@@ -602,6 +727,13 @@ def _detect_language_request(norm_text: str) -> bool:
 
 def _detect_out_of_scope_general_question(norm_text: str) -> bool:
     """Chặn câu hỏi đời sống/chung chung để RAG không kéo nhầm sang FAQ sản phẩm."""
+    if _has_any(norm_text, [
+        r"^soan$",
+        r"^viet cho (zeo|zeo vietnam|zeo viet nam|cfc|co bay|cfc co bay)$",
+        r"^(viet|soan) (tin|bai|noi dung)$",
+    ]):
+        return True
+
     in_scope_words = [
         "shop", "admin", "zeo", "pano", "oplus", "cfc", "co bay", "san pham", "phan bon",
         "nuoc giat", "bot giat", "nuoc rua chen", "lau san", "javen", "toilet", "npk",
@@ -618,6 +750,22 @@ def _detect_out_of_scope_general_question(norm_text: str) -> bool:
         r"\b(thoi tiet|mua khong|nang khong|nhiet do)\b",
         r"\b(tin tuc|bong da|xo so|ket qua xo so|lich am|ngay le)\b",
         r"\b(ke chuyen|hat bai|lam tho|giai toan|dich cau nay)\b",
+    ])
+
+
+def _detect_purchase_signal(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"\b(muon mua|can mua|dat hang|chot don|lay hang|lay \d+|mua \d+|cho minh \d+|cho toi \d+)\b",
+        r"\b(mua|dat|lay)\s+(oplus|pano|zeo|zif|javen|nuoc giat|bot giat|nuoc rua chen|nuoc tay|lau san|toilet)\b",
+    ])
+
+
+def _detect_contextual_dosage_followup(norm_text: str, previous_intent: str) -> bool:
+    if previous_intent not in {"zeo_usage_safety_review", "cfc_dosage_usage_review"}:
+        return False
+    return _has_any(norm_text, [
+        r"^(vay|the|neu vay).{0,20}\d+\s*(bo|kg|lit|ml|cong|bao)",
+        r"^\d+\s*(bo|kg|lit|ml|cong|bao).{0,30}(sao|duoc khong|duoc ko|thi sao)?$",
     ])
 
 
@@ -661,7 +809,7 @@ def _detect_usage_safety_gap(norm_text: str, brand: str) -> bool:
             r"(\bbon\b|\bpha\b|\btron\b|lieu luong|bao nhieu kg|cong lua|thuoc sau|tri benh|dao on)",
         ])
     return _has_any(norm_text, [
-        r"(lieu luong|cach dung|dung bao nhieu|bao nhieu ml|bao nhieu kg|may bo do|\d+\s*(kg|lit|ml).{0,20}(bo do|quan ao))",
+        r"(lieu luong|cach dung|dung bao nhieu|bao nhieu ml|bao nhieu kg|may bo do|\d+\s*(bo|kg|lit|ml).{0,20}(bo do|bo|quan ao))",
         r"(uong duoc|vao mat|dinh vao mat|nuot phai|an phai)",
     ])
 
@@ -699,6 +847,12 @@ def _detect_specific_product_intent(norm_text: str, brand: str) -> Optional[str]
         if re.search(r"(chung nhan|pasteur|kiem dinh|kiem nghiem|giay to|chung minh)", norm_text):
             return "zeo_detergent_certification"
         return "zeo_detergent_technology"
+    if re.search(r"(tay toilet|bon cau|nuoc tay bon cau)", norm_text):
+        return "zeo_toilet_cleaner"
+    if re.search(r"(tay mau|tay quan ao mau|ao trang bi o vang)", norm_text):
+        return "zeo_color_bleach"
+    if re.search(r"(javen|nuoc tay|thuoc tay|tay trang)", norm_text):
+        return "zeo_javen_bleach"
     return None
 
 
@@ -1126,6 +1280,34 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         )
         return _fast_response(msg, "new_product_unverified", brand, start_time, lead_stage="browsing_catalog")
 
+    if brand == "zeo" and _detect_purchase_signal(norm_text) and re.search(r"\boplus\b", norm_text) and not re.search(r"(bot giat|nuoc rua chen|rua chen|lau san)", norm_text):
+        msg = (
+            "Dạ mình hiểu bạn muốn mua Oplus. Hiện dữ liệu hệ thống có Bột giặt Oplus và Nước rửa chén Oplus. "
+            "Bạn muốn mua loại nào, quy cách bao nhiêu, và khu vực giao hàng ở đâu để admin kiểm tra đúng đơn giúp mình nha?"
+        )
+        return _fast_response_remember(msg, "oplus_purchase_clarify", stage="collecting_contact")
+
+    context_key = _active_product_context_key(conversation_state, previous_intent)
+    if context_key and _detect_contextual_technology_request(norm_text):
+        msg, response_intent, source_intent = await _build_contextual_more_info_answer(
+            brand,
+            context_key,
+            only_technology=True,
+        )
+        if msg:
+            _remember_response(msg, response_intent, "browsing_catalog", source_id=source_intent)
+            return _fast_response(msg, response_intent, brand, start_time, lead_stage="browsing_catalog")
+
+    if context_key and _detect_vague_more_followup(norm_text):
+        msg, response_intent, source_intent = await _build_contextual_more_info_answer(
+            brand,
+            context_key,
+            only_technology=False,
+        )
+        if msg:
+            _remember_response(msg, response_intent, "browsing_catalog", source_id=source_intent)
+            return _fast_response(msg, response_intent, brand, start_time, lead_stage="browsing_catalog")
+
     proof_intent = _detect_proof_or_certification_intent(norm_text, brand, previous_intent)
     if proof_intent:
         return await _sheet_response_remember(proof_intent, stage="browsing_catalog")
@@ -1195,7 +1377,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             )
             return _fast_response_remember(msg, "context_reference_clarify", stage="browsing_catalog")
 
-    if _detect_usage_safety_gap(norm_text, brand):
+    if _detect_contextual_dosage_followup(norm_text, previous_intent) or _detect_usage_safety_gap(norm_text, brand):
         if brand == "cfc":
             usage_intent = "cfc_dosage_usage_review"
             return await _sheet_response_remember(usage_intent, stage="collecting_contact")

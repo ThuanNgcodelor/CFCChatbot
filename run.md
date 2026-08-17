@@ -14,7 +14,7 @@ ollama serve
 
 
 
-cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/CFCAI/server
+cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis/server
 source .venv/bin/activate
 python main.py
 # Mở trình duyệt truy cập Admin Dashboard: http://localhost:8000/admin

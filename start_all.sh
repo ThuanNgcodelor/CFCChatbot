@@ -58,7 +58,7 @@ if [[ "$MODE" == "1" ]]; then
   sleep 2
 
   echo "${BLUE}▶ [4/4]${NC} Khởi động ${BOLD}Python FastAPI (Admin Dashboard)${NC}..."
-  open_tab "🐍 Python API :8000" "cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/CFCAI/server && source .venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload; exec zsh"
+  open_tab "🐍 Python API :8000" "cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis/server && source .venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload; exec zsh"
 
   echo ""
   echo "${GREEN}${BOLD}✅ Đã mở 4 tab Terminal:${NC}"
@@ -106,7 +106,7 @@ else
   sleep 2
 
   echo "${BLUE}▶ [4/4]${NC} Khởi động ${BOLD}Python FastAPI${NC} → log: $LOG_DIR/python_api.log"
-  (cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/CFCAI/server && \
+  (cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis/server && \
    source .venv/bin/activate && \
    uvicorn main:app --host 0.0.0.0 --port 8000 --reload) > "$LOG_DIR/python_api.log" 2>&1 &
   PY_PID=$!

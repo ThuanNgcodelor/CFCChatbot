@@ -1,9 +1,9 @@
 {
-  "venvPath": "ChatbotN8n/CFCAI/server",
+  "venvPath": "ChatbotN8n/javis/server",
   "venv": ".venv",
   "extraPaths": [
-    "ChatbotN8n/CFCAI/server",
-    "ChatbotN8n/CFCAI",
-    "ChatbotN8n/CFCAI/server/.venv/lib/python3.9/site-packages"
+    "ChatbotN8n/javis/server",
+    "ChatbotN8n/javis",
+    "ChatbotN8n/javis/server/.venv/lib/python3.9/site-packages"
   ]
 }

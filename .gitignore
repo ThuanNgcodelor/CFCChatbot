@@ -14,7 +14,7 @@ __pycache__/
 .venv/
 
 # Ignore local secrets
-ChatbotN8n/CFCAI/server/settings.json
-ChatbotN8n/CFCAI/server/settings.local.json
-ChatbotN8n/CFCAI-test/settings.json
-ChatbotN8n/CFCAI-test/settings.local.json
+ChatbotN8n/javis/server/settings.json
+ChatbotN8n/javis/server/settings.local.json
+ChatbotN8n/javis-test/settings.json
+ChatbotN8n/javis-test/settings.local.json

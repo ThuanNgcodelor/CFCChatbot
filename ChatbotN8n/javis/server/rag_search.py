@@ -186,6 +186,7 @@ async def semantic_search(
     high_thresh = rag_cfg["high_confidence_threshold"]
     med_thresh = rag_cfg["medium_confidence_threshold"]
 
+    confidence = "low"
     if best_score >= high_thresh and margin >= 0.05:
         confidence = "high"
     elif best_score >= med_thresh:
@@ -237,4 +238,47 @@ async def semantic_search(
         "risk_level": best["risk_level"],
         "category": best["category"],
         "results": parsed_results,
+    }
+
+
+async def get_faq_by_intent(brand: str, intent: str) -> dict:
+    """
+    Lấy đúng một FAQ đã sync từ Google Sheet/Redis theo intent.
+    Dùng cho các router regex có intent rõ ràng để tránh hardcode câu trả lời.
+    """
+    cfg = _load_settings()
+    index_name = get_index_name(brand, cfg)
+    r = await get_redis()
+
+    def _decode(value):
+        return value.decode("utf-8") if isinstance(value, bytes) else value
+
+    try:
+        async for key in r.scan_iter(match=f"{index_name}:doc:*:{intent}", count=100):
+            fields_raw = await r.hgetall(key)
+            fields = {_decode(k): _decode(v) for k, v in fields_raw.items()}
+            if fields.get("intent") != intent or not fields.get("answer"):
+                continue
+            return {
+                "brand": brand,
+                "intent": fields.get("intent", ""),
+                "answer": fields.get("answer", ""),
+                "answer_mode": fields.get("answer_mode", "direct"),
+                "risk_level": fields.get("risk_level", "low"),
+                "category": fields.get("category", "faq"),
+                "source_id": fields.get("source_id", ""),
+                "score": 1.0,
+            }
+    except Exception as e:
+        logger.warning("Redis intent lookup error (%s/%s): %s", brand, intent, e)
+
+    return {
+        "brand": brand,
+        "intent": intent,
+        "answer": "",
+        "answer_mode": "direct",
+        "risk_level": "low",
+        "category": "faq",
+        "source_id": "",
+        "score": 0.0,
     }

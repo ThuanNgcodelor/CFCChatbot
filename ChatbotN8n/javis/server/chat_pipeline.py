@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 import redis.asyncio as aioredis
 from pydantic import BaseModel
 
-from rag_search import get_redis, semantic_search
+from rag_search import get_redis, get_faq_by_intent, semantic_search
 from shopee_matcher import match_shopee_product, is_shopee_inquiry
 from telegram_notifier import notify_new_lead, notify_admin_unanswered
 
@@ -439,24 +439,17 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     # PATH 3.8: GENERAL CATALOG OVERVIEW INQUIRY (< 15ms)
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(cac san pham|nhung san pham|danh muc san pham|co san pham gi|co san pham nao|san pham nao|co nhung gi|co nhung loai nao|cac dong san pham|dong san pham nao|dong san pham|co dong nao|co nhom nao|gioi thieu san pham|hoi ve cac san pham|ban nhung gi|nhom san pham|mat hang nao)", norm_text):
-        if brand.lower() == "zeo":
-            catalog_reply = (
-                "Dạ ZeO Vietnam hiện có 4 nhóm sản phẩm chăm sóc gia đình chính:\n\n"
-                "1. 🧺 **Giặt giũ:** Bột giặt & Nước giặt sinh học ZeO, PANO (Nâng niu cảm xúc), Oplus (Công nghệ ION tẩy trắng).\n"
-                "2. 🍽️ **Rửa chén:** Nước rửa chén ZeO/ZIF 100% nước cốt chanh, PANO Chanh, PANO Vitamin E dưỡng da tay, Oplus.\n"
-                "3. 🌿 **Lau sàn:** Nước lau sàn sinh học ZeO & Oplus đậm đặc 2X (Hương Quế, Y Lan, Bạc Hà, Sả Chanh, Baby).\n"
-                "4. 🧼 **Tẩy rửa vệ sinh:** Javen ZeO, Tẩy Toilet diệt khuẩn 99.9%, Tẩy màu ZeO, Lau kính ZeO & Xịt tẩy đa năng PANO.\n\n"
-                "👉 Bạn đang quan tâm nhóm sản phẩm nào để mình gửi thông tin và ưu đãi chi tiết nha! 💙"
-            )
-        else:
-            catalog_reply = (
-                "Dạ Phân bón CFC Cò Bay Cần Thơ có các dòng sản phẩm chính phục vụ nông nghiệp:\n\n"
-                "1. 🌾 **Dinh dưỡng cây trồng cao cấp CFC Cò Bay** (Can 5L)\n"
-                "2. 🌱 **Phân bón hữu cơ sinh học CFC Cò Bay Cần Thơ** (Bao 25kg)\n"
-                "3. 🌿 **Phân bón NPK chuyên dùng cho lúa, cây ăn trái và rau màu**\n\n"
-                "👉 Bạn đang cần tư vấn phân bón cho loại cây trồng nào để kỹ sư nông nghiệp bên mình hỗ trợ chi tiết ạ!"
-            )
-        return _fast_response(catalog_reply, "catalog_overview", brand, start_time, lead_stage="browsing_catalog")
+        catalog_intent = "zeo_product_catalog_overview" if brand.lower() == "zeo" else "product_lines"
+        catalog_item = await get_faq_by_intent(brand, catalog_intent)
+        catalog_reply = catalog_item.get("answer", "").strip()
+        if catalog_reply:
+            return _fast_response(catalog_reply, catalog_intent, brand, start_time, lead_stage="browsing_catalog")
+
+        fallback_msg = (
+            "Dạ hiện danh mục sản phẩm chưa tải được từ hệ thống kiến thức. "
+            "Bạn nhắn rõ nhóm sản phẩm muốn xem, hoặc admin sẽ kiểm tra lại dữ liệu giúp mình nha."
+        )
+        return _fast_response(fallback_msg, "catalog_overview_unavailable", brand, start_time, lead_stage="browsing_catalog")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.9: OPENING HOURS (< 15ms)

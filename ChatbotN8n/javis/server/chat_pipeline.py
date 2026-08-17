@@ -18,7 +18,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import redis.asyncio as aioredis
 from pydantic import BaseModel
@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 VIETNAMESE_ALIASES = {
     "k": "khong", "ko": "khong", "kh": "khong", "hok": "khong", "hem": "khong", "hong": "khong",
     "dc": "duoc", "dk": "duoc", "sp": "san pham", "ib": "nhan tin", "nt": "nhan tin",
-    "bn": "ban", "mn": "minh", "ship": "giao hang", "cty": "cong ty",
+    "nhiu": "nhieu",
+    "bn": "bao nhieu", "mn": "minh", "ship": "giao hang", "cty": "cong ty",
     "web": "website", "wed": "website", "wep": "website",
     "sdt": "so dien thoai", "ssdt": "so dien thoai", "dt": "dien thoai", "npp": "nha phan phoi",
 }
@@ -48,6 +49,68 @@ AREA_KEYWORDS = [
 
 SENSITIVE_KEYWORDS = [
     "hoan tien", "doi tra", "khieu nai", "lua dao", "san pham loi", "hang gia", "tai khoan ngan hang", "chuyen khoan", "so tai khoan"
+]
+
+ZEO_COMPETITOR_PRODUCT_PATTERNS = [
+    r"\bomo\b", r"\bariel\b", r"\btide\b", r"\bsurf\b", r"\baba\b", r"\blix\b", r"\bnet\b", r"\bdowny\b", r"\bcomfort\b",
+]
+
+PRODUCT_MEMORY_BY_INTENT = {
+    "zeo_product_catalog_overview": [
+        {"name": "Giặt giũ ZeO/PANO/Oplus", "category": "laundry", "intent": "zeo_laundry_product_overview"},
+        {"name": "Rửa chén ZeO/ZIF/PANO/Oplus", "category": "dishwashing", "intent": "zeo_dishwashing_product_overview"},
+        {"name": "Lau sàn ZeO/Oplus", "category": "floor_cleaner", "intent": "zeo_floor_cleaner_product_overview"},
+        {"name": "Tẩy rửa vệ sinh ZeO/PANO", "category": "cleaning_hygiene", "intent": "zeo_cleaning_hygiene_product_overview"},
+    ],
+    "zeo_laundry_product_overview": [
+        {"name": "Bột giặt ZeO", "category": "laundry", "intent": "zeo_detergent_technology"},
+        {"name": "Bột giặt Oplus", "category": "laundry", "intent": "oplus_detergent_features"},
+        {"name": "Bột giặt & Nước giặt PANO", "category": "laundry", "intent": "pano_product_type"},
+    ],
+    "zeo_dishwashing_product_overview": [
+        {"name": "Nước rửa chén ZeO/ZIF", "category": "dishwashing", "intent": "zeo_zif_dishwashing_liquid"},
+        {"name": "PANO Rửa Chén Chanh", "category": "dishwashing", "intent": "pano_dishwashing_lemon_and_vitamin_e"},
+        {"name": "PANO Rửa Chén Vitamin E", "category": "dishwashing", "intent": "pano_dishwashing_lemon_and_vitamin_e"},
+        {"name": "Oplus Rửa Chén", "category": "dishwashing", "intent": "oplus_dishwashing_liquid"},
+    ],
+    "zeo_floor_cleaner_product_overview": [
+        {"name": "Nước lau sàn ZeO", "category": "floor_cleaner", "intent": "zeo_floor_cleaner_product_overview"},
+        {"name": "Nước lau sàn Oplus", "category": "floor_cleaner", "intent": "zeo_floor_cleaner_product_overview"},
+    ],
+    "zeo_cleaning_hygiene_product_overview": [
+        {"name": "Javen ZeO", "category": "cleaning_hygiene", "intent": "zeo_cleaning_hygiene_product_overview"},
+        {"name": "Tẩy Toilet ZeO", "category": "cleaning_hygiene", "intent": "zeo_cleaning_hygiene_product_overview"},
+        {"name": "Tẩy màu ZeO", "category": "cleaning_hygiene", "intent": "zeo_cleaning_hygiene_product_overview"},
+        {"name": "Lau kính ZeO", "category": "cleaning_hygiene", "intent": "zeo_cleaning_hygiene_product_overview"},
+        {"name": "Xịt tẩy đa năng PANO", "category": "cleaning_hygiene", "intent": "pano_multipurpose_cleaner"},
+    ],
+    "pano_product_type": [
+        {"name": "Bột giặt & Nước giặt PANO", "category": "laundry", "intent": "pano_product_type"},
+        {"name": "Nước rửa chén PANO", "category": "dishwashing", "intent": "pano_dishwashing_lemon_and_vitamin_e"},
+        {"name": "Xịt tẩy đa năng PANO", "category": "cleaning_hygiene", "intent": "pano_multipurpose_cleaner"},
+    ],
+    "pano_dishwashing_lemon_and_vitamin_e": [
+        {"name": "PANO Rửa Chén Chanh", "category": "dishwashing", "intent": "pano_dishwashing_lemon_and_vitamin_e"},
+        {"name": "PANO Rửa Chén Vitamin E", "category": "dishwashing", "intent": "pano_dishwashing_lemon_and_vitamin_e"},
+    ],
+    "product_lines": [
+        {"name": "Dinh dưỡng cây trồng cao cấp CFC Cò Bay", "category": "fertilizer", "intent": "product_lines"},
+        {"name": "Phân bón hữu cơ sinh học CFC Cò Bay", "category": "fertilizer", "intent": "cfc_organic_fertilizer_info"},
+        {"name": "Phân bón NPK CFC Cò Bay", "category": "fertilizer", "intent": "cfc_npk_product_info"},
+    ],
+}
+
+PRODUCT_ENTITY_PATTERNS = [
+    ("zeo_zif_dishwashing_liquid", "Nước rửa chén ZeO/ZIF", "dishwashing", r"\bzif\b|nuoc rua chen zeo|rua chen zeo"),
+    ("pano_product_type", "PANO", "product_family", r"\bpano\b"),
+    ("oplus_detergent_features", "Oplus", "product_family", r"\boplus\b"),
+    ("zeo_laundry_product_overview", "Giặt giũ ZeO/PANO/Oplus", "laundry", r"giat giu|nuoc giat|bot giat|giat quan ao"),
+    ("zeo_dishwashing_product_overview", "Rửa chén ZeO/ZIF/PANO/Oplus", "dishwashing", r"nuoc rua chen|rua chen|rua bat"),
+    ("zeo_floor_cleaner_product_overview", "Lau sàn ZeO/Oplus", "floor_cleaner", r"nuoc lau san|lau san|lau nha"),
+    ("zeo_cleaning_hygiene_product_overview", "Tẩy rửa vệ sinh ZeO/PANO", "cleaning_hygiene", r"javen|toilet|bon cau|tay rua|ve sinh|lau kinh|xit tay|tay mau"),
+    ("cfc_npk_product_info", "Phân bón NPK CFC Cò Bay", "fertilizer", r"\bnpk\b"),
+    ("cfc_organic_fertilizer_info", "Phân bón hữu cơ sinh học CFC Cò Bay", "fertilizer", r"huu co|sinh hoc"),
+    ("product_lines", "Phân bón CFC Cò Bay", "fertilizer", r"phan bon|co bay|cfc"),
 ]
 
 
@@ -101,6 +164,280 @@ def _extract_phone_and_area(text: str, norm: str) -> Tuple[str, str]:
     return phone, area
 
 
+def _default_conversation_state(brand: str) -> dict[str, Any]:
+    return {
+        "brand": brand.upper(),
+        "conversation_topic": "",
+        "current_intent": "",
+        "active_entities": {
+            "product": "",
+            "product_intent": "",
+            "category": "",
+        },
+        "last_products_shown": [],
+        "customer_constraints": {},
+        "recent_turns": [],
+        "conversation_summary": "",
+        "last_source_id": "",
+        "updated_at": "",
+    }
+
+
+def _load_conversation_state(existing_session: dict, brand: str) -> dict[str, Any]:
+    raw_state = existing_session.get("conversation_state") or {}
+    if isinstance(raw_state, str):
+        try:
+            raw_state = json.loads(raw_state)
+        except Exception:
+            raw_state = {}
+    if not isinstance(raw_state, dict):
+        raw_state = {}
+
+    state = _default_conversation_state(brand)
+    state.update({k: v for k, v in raw_state.items() if v not in (None, "")})
+    active_entities = state.get("active_entities") if isinstance(state.get("active_entities"), dict) else {}
+    state["active_entities"] = {
+        "product": active_entities.get("product") or existing_session.get("current_product", ""),
+        "product_intent": active_entities.get("product_intent") or active_entities.get("intent", ""),
+        "category": active_entities.get("category") or existing_session.get("current_category", ""),
+    }
+    if not isinstance(state.get("last_products_shown"), list):
+        state["last_products_shown"] = []
+    if not isinstance(state.get("customer_constraints"), dict):
+        state["customer_constraints"] = {}
+    if not isinstance(state.get("recent_turns"), list):
+        state["recent_turns"] = []
+    return state
+
+
+def _copy_product_item(item: dict) -> dict[str, str]:
+    return {
+        "name": str(item.get("name", "")).strip(),
+        "category": str(item.get("category", "")).strip(),
+        "intent": str(item.get("intent", "")).strip(),
+    }
+
+
+def _extract_query_entities(norm_text: str, brand: str) -> dict[str, Any]:
+    matched_entities = []
+    brand_l = brand.lower()
+    for intent, name, category, pattern in PRODUCT_ENTITY_PATTERNS:
+        if brand_l == "zeo" and (intent.startswith("cfc_") or name.startswith("Phân bón CFC")):
+            continue
+        if brand_l == "cfc" and (
+            intent.startswith("zeo_")
+            or intent.startswith("pano_")
+            or intent.startswith("oplus_")
+            or name in {"PANO", "Oplus"}
+        ):
+            continue
+        if re.search(pattern, norm_text):
+            matched_entities.append({
+                "product": name,
+                "product_intent": intent,
+                "category": category,
+            })
+
+    primary = matched_entities[0] if matched_entities else {}
+    return {
+        "product": primary.get("product", ""),
+        "product_intent": primary.get("product_intent", ""),
+        "category": primary.get("category", ""),
+        "matched_entities": matched_entities,
+    }
+
+
+def _has_reference_signal(norm_text: str) -> bool:
+    tokens = norm_text.split()
+    if _has_any(norm_text, [
+        r"\b(cai|loai|dong|san pham|phan|mon)\s+(nay|do|tren|hoi nay|vua roi|vua noi)\b",
+        r"\b(no|do|nay|tren)\s+(gia|bao nhieu|nhieu tien|ship|giao hang|con hang|con khong|con)\b",
+        r"\b(cai|loai|dong|san pham|phan)\s+(dau tien|thu nhat|thu hai|thu ba|thu tu|thu 1|thu 2|thu 3|thu 4|so 1|so 2|so 3|so 4|\d)\b",
+        r"\b(dau tien|thu nhat|thu hai|thu ba|thu tu|thu 1|thu 2|thu 3|thu 4|so 1|so 2|so 3|so 4)\b",
+        r"\b(vua hoi|vua noi|hoi nay|luc nay|o tren)\b",
+    ]):
+        return True
+    return len(tokens) <= 5 and any(t in {"no", "do", "nay", "tren"} for t in tokens)
+
+
+def _ordinal_reference_index(norm_text: str) -> Optional[int]:
+    ordinal_patterns = [
+        (0, r"\b(dau tien|thu nhat|thu 1|so 1|muc 1|loai 1|cai 1|1)\b"),
+        (1, r"\b(thu hai|thu 2|so 2|muc 2|loai 2|cai 2|2)\b"),
+        (2, r"\b(thu ba|thu 3|so 3|muc 3|loai 3|cai 3|3)\b"),
+        (3, r"\b(thu tu|thu 4|so 4|muc 4|loai 4|cai 4|4)\b"),
+    ]
+    for idx, pattern in ordinal_patterns:
+        if re.search(pattern, norm_text):
+            return idx
+    return None
+
+
+def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[str, Any]) -> dict[str, Any]:
+    if not _has_reference_signal(norm_text):
+        return {
+            "references_previous_turn": False,
+            "resolved": False,
+            "product": "",
+            "product_intent": "",
+            "category": "",
+            "resolved_query": raw_text,
+            "reason": "no_reference",
+        }
+
+    products = [
+        _copy_product_item(item)
+        for item in (conversation_state.get("last_products_shown") or [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    active = conversation_state.get("active_entities") or {}
+    idx = _ordinal_reference_index(norm_text)
+    chosen: dict[str, str] = {}
+    reason = "unresolved"
+
+    if idx is not None and 0 <= idx < len(products):
+        chosen = products[idx]
+        reason = "ordinal"
+    elif active.get("product"):
+        chosen = {
+            "name": str(active.get("product", "")),
+            "intent": str(active.get("product_intent", "")),
+            "category": str(active.get("category", "")),
+        }
+        reason = "active_entity"
+    elif len(products) == 1:
+        chosen = products[0]
+        reason = "single_last_product"
+
+    if not chosen:
+        return {
+            "references_previous_turn": True,
+            "resolved": False,
+            "product": "",
+            "product_intent": "",
+            "category": "",
+            "resolved_query": raw_text,
+            "reason": reason,
+        }
+
+    product = chosen.get("name", "").strip()
+    return {
+        "references_previous_turn": True,
+        "resolved": True,
+        "product": product,
+        "product_intent": chosen.get("intent", ""),
+        "category": chosen.get("category", ""),
+        "resolved_query": f"{raw_text} ({product})" if product else raw_text,
+        "reason": reason,
+    }
+
+
+def _looks_like_shipping_request(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"(giao hang|van chuyen|gui hang|giao ve|ship|phi ship|cuoc|cod|thanh toan khi nhan)",
+        r"(ve|toi|den).{0,30}(tinh|tp|thanh pho|huyen|quan|can tho|tphcm|ha noi|da nang|long an|dong nai|binh duong)",
+    ])
+
+
+def _looks_like_availability_request(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"(con hang|het hang|con khong|con hong|con ko|co san|ton kho|het chua|con nua khong|con nua hong)",
+    ])
+
+
+def _product_memory_for_intent(intent: str, answer: str, brand: str) -> list[dict[str, str]]:
+    if intent in PRODUCT_MEMORY_BY_INTENT:
+        return [_copy_product_item(item) for item in PRODUCT_MEMORY_BY_INTENT[intent]]
+
+    norm_answer = _normalize_vn(answer)
+    if not norm_answer:
+        return []
+
+    products = []
+    for entity_intent, name, category, pattern in PRODUCT_ENTITY_PATTERNS:
+        if brand.lower() == "zeo" and (entity_intent.startswith("cfc_") or name.startswith("Phân bón CFC")):
+            continue
+        if brand.lower() == "cfc" and (
+            entity_intent.startswith("zeo_")
+            or entity_intent.startswith("pano_")
+            or entity_intent.startswith("oplus_")
+            or name in {"PANO", "Oplus"}
+        ):
+            continue
+        if entity_intent == intent or re.search(pattern, norm_answer):
+            item = {"name": name, "category": category, "intent": entity_intent}
+            if item not in products:
+                products.append(item)
+    return products[:8]
+
+
+def _build_next_conversation_state(
+    previous_state: dict[str, Any],
+    *,
+    brand: str,
+    user_message: str,
+    bot_reply: str,
+    intent: str,
+    lead_stage: str,
+    query_entities: dict[str, Any],
+    reference_resolution: dict[str, Any],
+    source_id: str = "",
+) -> dict[str, Any]:
+    state = _load_conversation_state({"conversation_state": previous_state}, brand)
+    now_str = datetime.now(timezone.utc).isoformat()
+    products = _product_memory_for_intent(intent, bot_reply, brand)
+
+    if products:
+        state["last_products_shown"] = products
+    elif query_entities.get("product"):
+        state["last_products_shown"] = [{
+            "name": query_entities.get("product", ""),
+            "category": query_entities.get("category", ""),
+            "intent": query_entities.get("product_intent", ""),
+        }]
+
+    active_product = query_entities.get("product") or reference_resolution.get("product") or ""
+    active_intent = query_entities.get("product_intent") or reference_resolution.get("product_intent") or ""
+    active_category = query_entities.get("category") or reference_resolution.get("category") or ""
+    if active_product:
+        state["active_entities"] = {
+            "product": active_product,
+            "product_intent": active_intent,
+            "category": active_category,
+        }
+    elif len(state.get("last_products_shown", [])) == 1:
+        only_product = state["last_products_shown"][0]
+        state["active_entities"] = {
+            "product": only_product.get("name", ""),
+            "product_intent": only_product.get("intent", ""),
+            "category": only_product.get("category", ""),
+        }
+
+    if area_match := re.search(r"\b(o|tai|ve|den)\s+(.{2,40})$", _normalize_vn(user_message)):
+        state["customer_constraints"]["last_area_hint"] = area_match.group(2).strip()
+
+    state["brand"] = brand.upper()
+    state["current_intent"] = intent
+    state["conversation_topic"] = active_category or state.get("conversation_topic", "")
+    state["last_source_id"] = source_id or state.get("last_source_id", "")
+    state["updated_at"] = now_str
+    state["conversation_summary"] = (
+        f"Intent gần nhất: {intent}; "
+        f"sản phẩm/ngữ cảnh: {state.get('active_entities', {}).get('product') or 'chưa rõ'}; "
+        f"lead_stage: {lead_stage}."
+    )
+
+    recent_turns = state.get("recent_turns") or []
+    recent_turns.append({
+        "user": user_message,
+        "bot": bot_reply[:600],
+        "intent": intent,
+        "timestamp": now_str,
+    })
+    state["recent_turns"] = recent_turns[-6:]
+    return state
+
+
 def _format_inline_numbered_list(answer: str) -> str:
     """Chuyển danh sách đánh số viết liền trong Sheet thành từng dòng dễ đọc."""
     matches = list(re.finditer(r"(?<!\d)(\d{1,2})\.\s+", answer))
@@ -149,7 +486,7 @@ def _prettify_answer(answer: str) -> str:
 
 def _has_product_view_action(norm_text: str) -> bool:
     return bool(re.search(
-        r"(muon xem|xem ve|xem dong|cho.*xem|tim hieu|hoi ve|thong tin ve|tu van|can xem|gui.*thong tin|co.*gi|co.*loai nao|gom nhung gi)",
+        r"(muon xem|xem ve|xem dong|cho.*xem|tim hieu|hoi ve|thong tin ve|tu van|can xem|gui.*thong tin|co.*gi|co.*loai nao|co.*dong nao|co.*dong phan|gom nhung gi|dong san pham|san pham nao|san pham gi)",
         norm_text,
     ))
 
@@ -173,7 +510,7 @@ def _detect_product_group_intent(norm_text: str, brand: str) -> Optional[str]:
             return "cfc_npk_product_info"
         if re.search(r"(huu co|sinh hoc)\b", norm_text):
             return "cfc_organic_fertilizer_info"
-        if re.search(r"(phan bon|phan co bay|cac loai phan|dong phan|san pham cfc|san pham co bay)", norm_text):
+        if re.search(r"(phan bon|phan co bay|cac loai phan|dong phan|dong phan nao|san pham cfc|san pham co bay)", norm_text):
             return "product_lines"
         return None
 
@@ -188,6 +525,180 @@ def _detect_product_group_intent(norm_text: str, brand: str) -> Optional[str]:
     for intent, pattern in zeo_groups:
         if re.search(pattern, norm_text):
             return intent
+    return None
+
+
+def _has_any(norm_text: str, patterns: list[str]) -> bool:
+    return any(re.search(pattern, norm_text) for pattern in patterns)
+
+
+def _is_internal_content_request(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"\b(noi dung|bai dang|kich ban|script|mau|caption|video|reels|quang cao)\b",
+        r"(viet.*(bai|noi dung|caption|kich ban))",
+    ])
+
+
+def _detect_company_overview_intent(norm_text: str, brand: str) -> Optional[str]:
+    if _has_any(norm_text, [
+        r"(gioi thieu|so luoc|thong tin).{0,30}(cong ty|cty|thuong hieu|zeo|pano|oplus|cfc|co bay)",
+        r"(cong ty|cty|thuong hieu).{0,30}(la gi|lam gi|thuoc|cua ai|san xuat|thanh lap|bao nhieu nam)",
+        r"(zeo|pano|oplus|cfc|co bay).{0,30}(thuoc cong ty|la cua cong ty|la thuong hieu gi)",
+        r"(cfc homecare|homecare).{0,40}(cong ty|cty|thuoc|cua)",
+    ]):
+        return "company_overview"
+    return None
+
+
+def _detect_address_intent(norm_text: str, brand: str) -> Optional[str]:
+    if _has_any(norm_text, [
+        r"(dia chi|nha may|tru so|van phong).{0,40}(o dau|tai dau|cho nao|cong ty|cty|shop)?",
+        r"(cong ty|cty|shop|nha may|tru so).{0,25}(o dau|tai dau|nam o dau|dia chi)",
+        r"\b(cty|cong ty) o dau\b",
+    ]):
+        return "company_address" if brand.lower() == "zeo" else "address"
+    return None
+
+
+def _detect_contact_intent(norm_text: str, brand: str) -> Optional[str]:
+    if _has_any(norm_text, [
+        r"^(so dien thoai|dien thoai|hotline|tong dai|lien he)$",
+        r"(so dien thoai|hotline|tong dai|so lien he|lien he).{0,30}(cong ty|cong tu|cty|shop|admin|ben minh)?",
+        r"(cong ty|cong tu|cty|shop|admin|ben minh).{0,30}(so dien thoai|hotline|tong dai|so lien he|lien he)",
+    ]):
+        return "company_contact_information" if brand.lower() == "zeo" else "cfc_company_website"
+    return None
+
+
+def _detect_official_channel_request(norm_text: str) -> Optional[str]:
+    if "shopee" in norm_text or "sopi" in norm_text or "shoppe" in norm_text:
+        return None
+    has_channel = re.search(r"(tiktok|tik tok|lazada|zalo|facebook|fb)", norm_text)
+    if has_channel and (len(norm_text.split()) <= 4 or re.search(r"(zeo|pano|oplus|cfc|co bay|cong ty|cty)", norm_text)):
+        return "official_channel_unverified"
+    if _has_any(norm_text, [
+        r"^(tiktok|tik tok|lazada|zalo|facebook|fb)$",
+        r"(link|kenh|trang|shop|official|chinh thuc).{0,30}(tiktok|tik tok|lazada|zalo|facebook|fb)",
+        r"(tiktok|tik tok|lazada|zalo|facebook|fb).{0,30}(link|kenh|trang|shop|official|chinh thuc|co khong|ko)",
+    ]):
+        return "official_channel_unverified"
+    return None
+
+
+def _detect_customer_correction(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"(sai|khong dung|chua dung|nham).{0,40}(dia chi|thong tin|tra loi|noi dung|so dien thoai|hotline)",
+        r"(de toi|toi|minh).{0,20}(chinh|sua|cap nhat).{0,30}(lai|cho)",
+        r"(dia chi|so dien thoai|hotline).{0,30}(moi|dung|phai la)",
+    ])
+
+
+def _detect_language_request(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"(noi|tra loi|tu van).{0,20}(tieng trung|tieng anh|english|chinese|mandarin)",
+        r"^(tieng trung|tieng anh|english|chinese)$",
+    ])
+
+
+def _detect_out_of_scope_general_question(norm_text: str) -> bool:
+    """Chặn câu hỏi đời sống/chung chung để RAG không kéo nhầm sang FAQ sản phẩm."""
+    in_scope_words = [
+        "shop", "admin", "zeo", "pano", "oplus", "cfc", "co bay", "san pham", "phan bon",
+        "nuoc giat", "bot giat", "nuoc rua chen", "lau san", "javen", "toilet", "npk",
+        "gia", "ship", "giao hang", "mua", "dat hang", "hotline", "dia chi", "mo cua", "lam viec",
+    ]
+    if any(word in norm_text for word in in_scope_words):
+        return False
+
+    return _has_any(norm_text, [
+        r"^(hom nay )?(thu may|ngay may)$",
+        r"\bhom nay\s+(la\s+)?(thu may|ngay may|ngay gi)\b",
+        r"\b(bay gio|gio nay|luc nay)\s+(la\s+)?(may gio|gio nao)\b",
+        r"^(may gio roi|ngay may roi|thu may roi)$",
+        r"\b(thoi tiet|mua khong|nang khong|nhiet do)\b",
+        r"\b(tin tuc|bong da|xo so|ket qua xo so|lich am|ngay le)\b",
+        r"\b(ke chuyen|hat bai|lam tho|giai toan|dich cau nay)\b",
+    ])
+
+
+def _detect_new_product_request(norm_text: str) -> bool:
+    return _has_any(norm_text, [
+        r"(san pham|hang|dong).{0,20}(moi ra mat|moi nhat|moi ve|moi co)",
+        r"(moi ra mat|moi nhat).{0,20}(san pham|hang|dong)",
+    ])
+
+
+def _detect_competitor_product(norm_text: str, brand: str) -> bool:
+    if brand.lower() != "zeo":
+        return False
+    return any(re.search(pattern, norm_text) for pattern in ZEO_COMPETITOR_PRODUCT_PATTERNS)
+
+
+def _detect_cfc_cross_brand(norm_text: str, brand: str) -> bool:
+    if brand.lower() != "cfc":
+        return False
+    return _has_any(norm_text, [
+        r"(nuoc giat|bot giat|nuoc rua chen|rua chen|lau san|nuoc lau san|tay toilet|javen|xit tay|nuoc tay|pano|oplus|zeo)",
+    ])
+
+
+def _detect_proof_or_certification_intent(norm_text: str, brand: str, previous_intent: str = "") -> Optional[str]:
+    if brand.lower() != "zeo":
+        return None
+    asks_proof = _has_any(norm_text, [
+        r"(giay to|chung minh|chung nhan|kiem dinh|kiem nghiem|bang chung|co so nao|tai lieu).{0,40}(cong nghe|diet khuan|san pham|bot giat|zeo|do)",
+        r"(pasteur|singapore|chung nhan|kiem dinh|kiem nghiem)",
+    ])
+    follows_tech = previous_intent in {"zeo_detergent_technology", "zeo_detergent_certification"}
+    if asks_proof or ("cong nghe do" in norm_text and follows_tech):
+        return "zeo_detergent_certification"
+    return None
+
+
+def _detect_usage_safety_gap(norm_text: str, brand: str) -> bool:
+    if brand.lower() == "cfc":
+        return _has_any(norm_text, [
+            r"(\bbon\b|\bpha\b|\btron\b|lieu luong|bao nhieu kg|cong lua|thuoc sau|tri benh|dao on)",
+        ])
+    return _has_any(norm_text, [
+        r"(lieu luong|cach dung|dung bao nhieu|bao nhieu ml|bao nhieu kg|may bo do|\d+\s*(kg|lit|ml).{0,20}(bo do|quan ao))",
+        r"(uong duoc|vao mat|dinh vao mat|nuot phai|an phai)",
+    ])
+
+
+def _detect_specific_product_intent(norm_text: str, brand: str) -> Optional[str]:
+    if brand.lower() == "cfc":
+        if re.search(r"\bnpk\b", norm_text):
+            return "cfc_npk_product_info"
+        if re.search(r"(huu co|sinh hoc)", norm_text):
+            return "cfc_organic_fertilizer_info"
+        return None
+
+    if re.search(r"\bzif\b", norm_text):
+        return "zeo_zif_dishwashing_liquid"
+    if "pano" in norm_text:
+        if re.search(r"(rua chen|rua bat)", norm_text):
+            return "pano_dishwashing_lemon_and_vitamin_e"
+        if re.search(r"(mui|huong|mau)", norm_text):
+            return "pano_laundry_fragrance_options"
+        if re.search(r"(quy cach|tui|can|dong goi)", norm_text):
+            return "pano_laundry_packaging_and_segment"
+        if re.search(r"(nuoc giat|bot giat|giat)", norm_text):
+            return "pano_product_type"
+        return "pano_product_type"
+    if "oplus" in norm_text:
+        if re.search(r"(rua chen|rua bat)", norm_text):
+            return "oplus_dishwashing_liquid"
+        if re.search(r"(cong nghe|ion)", norm_text):
+            return "oplus_detergent_ion_technology"
+        if re.search(r"(nuoc xa|xa vai)", norm_text):
+            return "oplus_fabric_softener_unverified"
+        if re.search(r"(bot giat|giat)", norm_text):
+            return "oplus_detergent_features"
+    if re.search(r"(bot giat|nuoc giat).{0,20}\bzeo\b|\bzeo\b.{0,20}(bot giat|nuoc giat)", norm_text):
+        if re.search(r"(chung nhan|pasteur|kiem dinh|kiem nghiem|giay to|chung minh)", norm_text):
+            return "zeo_detergent_certification"
+        return "zeo_detergent_technology"
     return None
 
 
@@ -297,6 +808,92 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         area = stored_area
 
     lead_stage = existing_profile.get("lead_stage", "new")
+    previous_intent = existing_session.get("last_intent", "")
+    conversation_state = _load_conversation_state(existing_session, brand)
+    query_entities = _extract_query_entities(norm_text, brand)
+    reference_resolution = _resolve_reference(raw_text, norm_text, conversation_state)
+    if reference_resolution.get("resolved") and not query_entities.get("product"):
+        query_entities = {
+            "product": reference_resolution.get("product", ""),
+            "product_intent": reference_resolution.get("product_intent", ""),
+            "category": reference_resolution.get("category", ""),
+            "matched_entities": [{
+                "product": reference_resolution.get("product", ""),
+                "product_intent": reference_resolution.get("product_intent", ""),
+                "category": reference_resolution.get("category", ""),
+            }],
+        }
+
+    def _remember_response(
+        answer: str,
+        intent: str,
+        stage: str,
+        *,
+        confidence: str = "high",
+        score: float = 1.0,
+        source_id: str = "",
+        fallback_reason: str = "",
+    ) -> None:
+        next_state = _build_next_conversation_state(
+            conversation_state,
+            brand=brand,
+            user_message=raw_text,
+            bot_reply=answer,
+            intent=intent,
+            lead_stage=stage,
+            query_entities=query_entities,
+            reference_resolution=reference_resolution,
+            source_id=source_id,
+        )
+        trace = {
+            "normalized_text": norm_text,
+            "resolved_query": reference_resolution.get("resolved_query", raw_text),
+            "reference": {
+                "used": bool(reference_resolution.get("references_previous_turn")),
+                "resolved": bool(reference_resolution.get("resolved")),
+                "reason": reference_resolution.get("reason", ""),
+                "product": reference_resolution.get("product", ""),
+            },
+            "query_entities": query_entities,
+            "source_id": source_id,
+            "confidence": confidence,
+            "score": score,
+            "fallback_reason": fallback_reason,
+        }
+        asyncio.create_task(_async_save_session(
+            brand=brand,
+            sender_id=sender_id,
+            user_message=raw_text,
+            bot_reply=_prettify_answer(answer),
+            intent=intent,
+            lead_stage=stage,
+            conversation_state=next_state,
+            trace=trace,
+        ))
+
+    async def _sheet_response_remember(
+        intent: str,
+        *,
+        stage: str = "new",
+        unavailable_intent: Optional[str] = None,
+        unavailable_answer: Optional[str] = None,
+    ) -> ChatPipelineResponse:
+        item = await get_faq_by_intent(brand, intent)
+        answer = item.get("answer", "").strip()
+        response_intent = intent
+        source_id = item.get("source_id", "")
+        if not answer:
+            response_intent = unavailable_intent or f"{intent}_unavailable"
+            answer = unavailable_answer or (
+                "Dạ hiện mục thông tin này chưa tải được từ hệ thống kiến thức. "
+                "Admin sẽ kiểm tra lại dữ liệu và phản hồi bạn chính xác hơn nha."
+            )
+        _remember_response(answer, response_intent, stage, source_id=source_id)
+        return _fast_response(answer, response_intent, brand, start_time, lead_stage=stage)
+
+    def _fast_response_remember(answer: str, intent: str, *, stage: str = "new") -> ChatPipelineResponse:
+        _remember_response(answer, intent, stage)
+        return _fast_response(answer, intent, brand, start_time, lead_stage=stage)
 
     # ─────────────────────────────────────────────────────────────
     # FAST-PATH 1: KHÁCH ĐỂ LẠI SỐ ĐIỆN THOẠI & ĐỊA CHỈ (< 20ms)
@@ -475,6 +1072,144 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         return _fast_response(complaint_msg, "bot_complaint_escalate", brand, start_time, lead_stage="escalated")
 
     # ─────────────────────────────────────────────────────────────
+    # PATH 3.4: INTENT-FIRST ROUTER CHỐNG RAG BẮT NHẦM (< 15ms)
+    # ─────────────────────────────────────────────────────────────
+    brand_display = "ZeO Vietnam" if brand == "zeo" else "CFC Cò Bay"
+
+    if _detect_language_request(norm_text):
+        msg = (
+            f"Dạ hiện {brand_display} hỗ trợ tư vấn chính bằng tiếng Việt để đảm bảo thông tin sản phẩm, giá và chính sách không bị sai lệch. "
+            "Bạn cứ nhắn nhu cầu bằng tiếng Việt, mình sẽ hỗ trợ đúng theo dữ liệu hệ thống nha."
+        )
+        return _fast_response(msg, "language_support_vi", brand, start_time)
+
+    if _detect_out_of_scope_general_question(norm_text):
+        msg = (
+            f"Dạ câu này nằm ngoài dữ liệu tư vấn sản phẩm/dịch vụ của {brand_display}, "
+            "nên mình không dùng FAQ để đoán trả lời. "
+            "Bạn cần xem sản phẩm, giá, giao hàng hay thông tin liên hệ bên mình không ạ?"
+        )
+        return _fast_response_remember(msg, "out_of_scope_general_question", stage=lead_stage)
+
+    if _detect_customer_correction(norm_text):
+        msg = (
+            "Dạ mình ghi nhận góp ý/cập nhật thông tin của bạn rồi ạ. "
+            "Phần này mình sẽ chuyển admin kiểm tra với dữ liệu chính thức trước khi cập nhật, để tránh tự sửa sai hoặc trả lời nhầm cho khách khác nha."
+        )
+        asyncio.create_task(notify_admin_unanswered(brand=brand, query=raw_text, sender_id=sender_id, score=0.0))
+        return _fast_response(msg, "customer_correction_review", brand, start_time, lead_stage="escalated")
+
+    if _detect_competitor_product(norm_text, brand):
+        msg = (
+            "Dạ hiện dữ liệu ZeO chưa có thông tin sản phẩm/thương hiệu bạn vừa hỏi. "
+            "ZeO Vietnam đang có các nhóm giặt giũ, rửa chén, lau sàn và tẩy rửa vệ sinh thuộc hệ ZeO/PANO/Oplus. "
+            "Bạn muốn mình gửi danh mục ZeO hiện có để chọn đúng sản phẩm không ạ?"
+        )
+        return _fast_response(msg, "competitor_product_unavailable", brand, start_time, lead_stage="browsing_catalog")
+
+    if _detect_cfc_cross_brand(norm_text, brand):
+        return await _sheet_fast_response(
+            brand,
+            start_time,
+            "cfc_cross_brand_out_of_scope",
+            lead_stage="browsing_catalog",
+            unavailable_answer=(
+                "Dạ CFC Cò Bay hiện là thương hiệu phân bón nông nghiệp. "
+                "Các sản phẩm tẩy rửa gia dụng như nước giặt/nước rửa chén/lau sàn thuộc hệ ZeO/PANO/Oplus nha."
+            ),
+        )
+
+    if _detect_new_product_request(norm_text):
+        msg = (
+            f"Dạ hiện hệ thống kiến thức của {brand_display} chưa có mục xác nhận sản phẩm mới nhất/mới ra mắt. "
+            "Để tránh báo sai, bạn cho mình biết nhóm sản phẩm đang quan tâm hoặc để lại số điện thoại, admin sẽ kiểm tra thông tin mới nhất giúp mình nha."
+        )
+        return _fast_response(msg, "new_product_unverified", brand, start_time, lead_stage="browsing_catalog")
+
+    proof_intent = _detect_proof_or_certification_intent(norm_text, brand, previous_intent)
+    if proof_intent:
+        return await _sheet_response_remember(proof_intent, stage="browsing_catalog")
+
+    contact_intent = _detect_contact_intent(norm_text, brand)
+    if contact_intent:
+        return await _sheet_response_remember(
+            contact_intent,
+            stage="browsing_catalog",
+            unavailable_intent="company_contact_information_unavailable",
+            unavailable_answer=(
+                f"Dạ hiện dữ liệu chưa có số hotline chính thức của {brand_display} để mình báo chắc chắn. "
+                "Bạn để lại số điện thoại hoặc nhu cầu, admin sẽ kiểm tra và phản hồi thông tin liên hệ chính xác nha."
+            ),
+        )
+
+    company_overview_intent = _detect_company_overview_intent(norm_text, brand)
+    if company_overview_intent:
+        return await _sheet_response_remember(company_overview_intent, stage="browsing_catalog")
+
+    address_intent = _detect_address_intent(norm_text, brand)
+    if address_intent:
+        return await _sheet_response_remember(address_intent, stage="browsing_catalog")
+
+    official_channel_intent = _detect_official_channel_request(norm_text)
+    if official_channel_intent and not _is_internal_content_request(norm_text):
+        msg = (
+            f"Dạ hiện hệ thống kiến thức của {brand_display} chưa có link chính thức cho kênh bạn vừa hỏi. "
+            "Để tránh gửi nhầm link giả, bạn có thể dùng website chính thức hoặc để lại nhu cầu, admin sẽ kiểm tra và gửi đúng kênh chính thức nha."
+        )
+        return _fast_response(msg, official_channel_intent, brand, start_time, lead_stage="browsing_catalog")
+
+    if reference_resolution.get("references_previous_turn"):
+        resolved_product = reference_resolution.get("product", "")
+        if reference_resolution.get("resolved") and _has_price_signal(norm_text):
+            msg = (
+                f"Dạ mình hiểu bạn đang hỏi giá của {resolved_product}. "
+                "Hiện hệ thống chưa có giá chính xác cho sản phẩm/nhóm này nên mình không tự báo giá để tránh sai. "
+                "Bạn gửi thêm quy cách cần mua hoặc số điện thoại/khu vực, admin sẽ kiểm tra báo giá đúng cho mình nha."
+            )
+            return _fast_response_remember(msg, "contextual_price_unverified", stage="browsing_catalog")
+
+        if reference_resolution.get("resolved") and _looks_like_availability_request(norm_text):
+            msg = (
+                f"Dạ mình hiểu bạn đang hỏi {resolved_product} còn hàng không. "
+                "Hiện hệ thống chat chưa có dữ liệu tồn kho realtime, nên mình chưa xác nhận chắc được. "
+                "Bạn để lại số điện thoại/khu vực hoặc nhắn quy cách cần mua, admin sẽ kiểm tra tồn kho chính xác giúp mình nha."
+            )
+            return _fast_response_remember(msg, "contextual_availability_unverified", stage="collecting_contact")
+
+        if reference_resolution.get("resolved") and _looks_like_shipping_request(norm_text):
+            shipping_intent = "nationwide_shipping_no_cod" if brand.lower() == "zeo" else "shipping_methods"
+            item = await get_faq_by_intent(brand, shipping_intent)
+            sheet_answer = item.get("answer", "").strip()
+            if sheet_answer:
+                msg = f"Dạ mình đang hiểu bạn hỏi giao hàng cho {resolved_product}.\n\n{sheet_answer}"
+                _remember_response(msg, "contextual_shipping", "browsing_catalog", source_id=item.get("source_id", ""))
+                return _fast_response(msg, "contextual_shipping", brand, start_time, lead_stage="browsing_catalog")
+            return await _sheet_response_remember(shipping_intent, stage="browsing_catalog")
+
+        if not reference_resolution.get("resolved") and (
+            _has_price_signal(norm_text) or _looks_like_availability_request(norm_text) or _looks_like_shipping_request(norm_text)
+        ):
+            msg = (
+                "Dạ bạn đang hỏi sản phẩm/nhóm nào trong danh sách vừa rồi ạ? "
+                "Bạn nhắn tên sản phẩm hoặc số thứ tự như số 1, số 2 để mình kiểm tra đúng thông tin nha."
+            )
+            return _fast_response_remember(msg, "context_reference_clarify", stage="browsing_catalog")
+
+    if _detect_usage_safety_gap(norm_text, brand):
+        if brand == "cfc":
+            usage_intent = "cfc_dosage_usage_review"
+            return await _sheet_response_remember(usage_intent, stage="collecting_contact")
+        msg = (
+            "Dạ phần liều lượng/cách dùng hoặc tình huống an toàn cần kiểm tra theo đúng sản phẩm và hướng dẫn trên bao bì. "
+            "Hiện hệ thống chưa có đủ dữ liệu để mình tự hướng dẫn chi tiết. Bạn gửi tên sản phẩm hoặc số điện thoại, admin sẽ tư vấn chính xác hơn nha."
+        )
+        return _fast_response_remember(msg, "zeo_usage_safety_review", stage="collecting_contact")
+
+    specific_product_intent = _detect_specific_product_intent(norm_text, brand)
+    if specific_product_intent and not (_has_price_signal(norm_text) or any(k in norm_text for k in ["ship", "giao hang", "phi", "doi tra", "bao hanh", "loi", "hong"])):
+        return await _sheet_response_remember(specific_product_intent, stage="browsing_catalog")
+
+    # ─────────────────────────────────────────────────────────────
     # PATH 3.5: PROMOTIONS, DEALS & VOUCHERS (< 15ms)
     # ─────────────────────────────────────────────────────────────
     from shopee_matcher import is_promotion_inquiry, match_promotions_and_deals
@@ -500,35 +1235,34 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(website|web site|trang web|link website|link web|xin link website|xin link web|co link website|co link web|zeo vn|zeo\.vn|cfc web|co bay web|cfccobay|cfc co bay)\b", norm_text):
         website_intent = "company_website" if brand.lower() == "zeo" else "cfc_company_website"
-        return await _sheet_fast_response(brand, start_time, website_intent, lead_stage="browsing_catalog")
+        return await _sheet_response_remember(website_intent, stage="browsing_catalog")
 
     if re.search(r"(hotline|so dien thoai cong ty|tong dai|so hotline|lien he so nao)\b", norm_text):
         hotline_intent = "company_contact_information" if brand.lower() == "zeo" else "cfc_company_website"
-        return await _sheet_fast_response(
-            brand,
-            start_time,
+        return await _sheet_response_remember(
             hotline_intent,
+            stage="browsing_catalog",
             unavailable_intent="company_contact_information_unavailable",
             unavailable_answer="Dạ hiện dữ liệu chưa có số hotline chính thức để mình báo chắc chắn. Bạn để lại số điện thoại hoặc nhu cầu, admin sẽ kiểm tra và phản hồi thông tin liên hệ chính xác nha.",
         )
 
     if re.search(r"(gia(?: .{1,80})? bao nhieu|bao nhieu tien|bang gia|xin gia|gia ban|gia ca|nhieu tien|bao gia)\b", norm_text) and not any(k in norm_text for k in ["ship", "phi", "van chuyen", "cuoc"]):
         price_intent = "zeo_price_inquiry_general" if brand.lower() == "zeo" else "cfc_price_unverified"
-        return await _sheet_fast_response(brand, start_time, price_intent, lead_stage="browsing_catalog")
+        return await _sheet_response_remember(price_intent, stage="browsing_catalog")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.7: WHOLESALE & DISTRIBUTOR INQUIRY (< 15ms)
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(lay si|muon lam dai ly|dang ky dai ly|nhap hang|phan phoi|chinh sach si|nhap so luong lon|kinh doanh zeo|dai li)\b", norm_text):
         wholesale_intent = "wholesale_inquiry" if brand.lower() == "zeo" else "wholesale_dealer"
-        return await _sheet_fast_response(brand, start_time, wholesale_intent, lead_stage="collecting_contact")
+        return await _sheet_response_remember(wholesale_intent, stage="collecting_contact")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.7.5: PRODUCT GROUP VIEW INQUIRY (< 15ms)
     # ─────────────────────────────────────────────────────────────
     product_group_intent = _detect_product_group_intent(norm_text, brand)
-    if product_group_intent and not (_has_price_signal(norm_text) or any(k in norm_text for k in ["ship", "phi", "doi tra", "bao hanh", "loi", "hong"])):
-        return await _sheet_fast_response(brand, start_time, product_group_intent, lead_stage="browsing_catalog")
+    if product_group_intent and not (_has_price_signal(norm_text) or any(k in norm_text for k in ["ship", "giao hang", "phi", "doi tra", "bao hanh", "loi", "hong"])):
+        return await _sheet_response_remember(product_group_intent, stage="browsing_catalog")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.8: GENERAL CATALOG OVERVIEW INQUIRY (< 15ms)
@@ -538,35 +1272,36 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         catalog_item = await get_faq_by_intent(brand, catalog_intent)
         catalog_reply = catalog_item.get("answer", "").strip()
         if catalog_reply:
+            _remember_response(catalog_reply, catalog_intent, "browsing_catalog", source_id=catalog_item.get("source_id", ""))
             return _fast_response(catalog_reply, catalog_intent, brand, start_time, lead_stage="browsing_catalog")
 
         fallback_msg = (
             "Dạ hiện danh mục sản phẩm chưa tải được từ hệ thống kiến thức. "
             "Bạn nhắn rõ nhóm sản phẩm muốn xem, hoặc admin sẽ kiểm tra lại dữ liệu giúp mình nha."
         )
-        return _fast_response(fallback_msg, "catalog_overview_unavailable", brand, start_time, lead_stage="browsing_catalog")
+        return _fast_response_remember(fallback_msg, "catalog_overview_unavailable", stage="browsing_catalog")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.9: OPENING HOURS (< 15ms)
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(mo cua|dong cua|may gio|gio mo cua|gio lam viec|cuoi tuan|mo cua luc|lam viec den may gio)\b", norm_text) and not (_has_price_signal(norm_text) or any(k in norm_text for k in ["ship", "phi", "doi tra"])):
         hours_intent = "shop_opening_hours" if brand.lower() == "zeo" else "opening_hours"
-        return await _sheet_fast_response(brand, start_time, hours_intent)
+        return await _sheet_response_remember(hours_intent)
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.10: PANO FRAGRANCES & TECH FAST-PATH (< 15ms)
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(mui huong|huong gi|may mau|do xanh hong cam tim|chon huong|tuy chon huong)\b", norm_text) and "pano" in norm_text:
         if brand.lower() == "zeo":
-            return await _sheet_fast_response(brand, start_time, "pano_laundry_fragrance_options", lead_stage="browsing_catalog")
+            return await _sheet_response_remember("pano_laundry_fragrance_options", stage="browsing_catalog")
 
     if re.search(r"(enzyme|thuy dien|cong nghe gi|cong nghe lam sach|tay vet ban|diet khuan)\b", norm_text) and any(k in norm_text for k in ["zeo", "bot giat", "nuoc giat"]):
         if brand.lower() == "zeo":
-            return await _sheet_fast_response(brand, start_time, "zeo_detergent_technology", lead_stage="browsing_catalog")
+            return await _sheet_response_remember("zeo_detergent_technology", stage="browsing_catalog")
 
     if re.search(r"(chinh sach doi tra|quy trinh doi tra|thoi han doi tra|doi tra nhu the nao|duoc doi tra khong|doi tra ap dung|kenh nao duoc doi tra)\b", norm_text):
         if brand.lower() == "zeo":
-            return await _sheet_fast_response(brand, start_time, "return_policy_scope", lead_stage="browsing_catalog")
+            return await _sheet_response_remember("return_policy_scope", stage="browsing_catalog")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 4: SHOPEE LINK & PRODUCT MATCHER (< 20ms)
@@ -593,7 +1328,8 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     # ─────────────────────────────────────────────────────────────
     # PATH 5: REDISEARCH SEMANTIC VECTOR SEARCH (< 50ms)
     # ─────────────────────────────────────────────────────────────
-    rag_result = await semantic_search(query=raw_text, brand=brand, top_k=5)
+    rag_query = reference_resolution.get("resolved_query") if reference_resolution.get("resolved") else raw_text
+    rag_result = await semantic_search(query=rag_query or raw_text, brand=brand, top_k=10)
     best_score = rag_result.get("score", 0.0)
     intent = rag_result.get("intent", "general_faq")
     raw_answer = rag_result.get("answer", "")
@@ -615,7 +1351,9 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             return any(k in query_norm for k in ["gio", "mo cua", "dong cua", "may gio", "cuoi tuan", "thoi gian"])
         # 4. Địa chỉ
         if "address" in target_intent or "location" in target_intent:
-            return any(k in query_norm for k in ["dia chi", "o dau", "cong ty", "nha may", "tru so", "van phong", "tai dau"])
+            if _detect_company_overview_intent(query_norm, brand):
+                return False
+            return any(k in query_norm for k in ["dia chi", "o dau", "nha may", "tru so", "van phong", "tai dau"])
         # 5. Đại lý sỉ
         if "wholesale" in target_intent or "dealer" in target_intent:
             return any(k in query_norm for k in ["si", "dai ly", "nhap hang", "phan phoi", "so luong lon", "hop tac"])
@@ -625,6 +1363,8 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         # 7. Thông tin liên hệ / Hotline
         if "contact" in target_intent or "hotline" in target_intent:
             return any(k in query_norm for k in ["hotline", "so dien thoai", "lien he", "tong dai", "sdt", "call"])
+        if "tiktok" in target_intent or "zalo" in target_intent:
+            return _is_internal_content_request(query_norm)
         return True
 
     is_guardrail_passed = _check_intent_guardrails(intent, norm_text)
@@ -683,19 +1423,52 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     # ASYNC SAVE SESSION & CHAT HISTORY (Không làm chậm response)
     # ─────────────────────────────────────────────────────────────
     final_answer = _prettify_answer(final_answer)
+    final_intent = intent if confidence in {"high", "medium"} else "unanswered_query"
+    final_state = _build_next_conversation_state(
+        conversation_state,
+        brand=brand,
+        user_message=raw_text,
+        bot_reply=final_answer,
+        intent=final_intent,
+        lead_stage=lead_stage,
+        query_entities=query_entities,
+        reference_resolution=reference_resolution,
+        source_id=rag_result.get("source_id", ""),
+    )
+    trace = {
+        "normalized_text": norm_text,
+        "rag_query": rag_query,
+        "matched_intent": intent,
+        "final_intent": final_intent,
+        "score": best_score,
+        "vector_score": rag_result.get("vector_score"),
+        "rerank_adjustment": rag_result.get("rerank_adjustment"),
+        "source_id": rag_result.get("source_id", ""),
+        "guardrail_passed": is_guardrail_passed,
+        "confidence": confidence,
+        "reference": {
+            "used": bool(reference_resolution.get("references_previous_turn")),
+            "resolved": bool(reference_resolution.get("resolved")),
+            "reason": reference_resolution.get("reason", ""),
+            "product": reference_resolution.get("product", ""),
+        },
+        "query_entities": query_entities,
+    }
     asyncio.create_task(_async_save_session(
         brand=brand,
         sender_id=sender_id,
         user_message=raw_text,
         bot_reply=final_answer,
-        intent=intent if confidence == "high" else "unanswered_query",
+        intent=final_intent,
         lead_stage=lead_stage,
+        conversation_state=final_state,
+        trace=trace,
     ))
 
     elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
     return ChatPipelineResponse(
         answer=final_answer,
-        intent=intent if confidence == "high" else "unanswered_query",
+        intent=final_intent,
         confidence=confidence,
         score=best_score,
         brand=brand.upper(),
@@ -738,7 +1511,16 @@ async def _async_save_profile_and_notify(brand: str, sender_id: str, profile: di
         logger.warning("Error in _async_save_profile_and_notify: %s", e)
 
 
-async def _async_save_session(brand: str, sender_id: str, user_message: str, bot_reply: str, intent: str, lead_stage: str):
+async def _async_save_session(
+    brand: str,
+    sender_id: str,
+    user_message: str,
+    bot_reply: str,
+    intent: str,
+    lead_stage: str,
+    conversation_state: Optional[dict[str, Any]] = None,
+    trace: Optional[dict[str, Any]] = None,
+):
     """Lưu session và lịch sử hội thoại trong nền."""
     try:
         r = await get_redis()
@@ -755,6 +1537,18 @@ async def _async_save_session(brand: str, sender_id: str, user_message: str, bot
             "lead_stage": lead_stage,
             "last_seen_at": now_str,
         }
+        if conversation_state:
+            active_entities = conversation_state.get("active_entities", {})
+            session_data.update({
+                "conversation_state": conversation_state,
+                "current_product": active_entities.get("product", ""),
+                "current_category": active_entities.get("category", ""),
+                "last_products_shown": conversation_state.get("last_products_shown", []),
+                "conversation_summary": conversation_state.get("conversation_summary", ""),
+                "last_source_id": conversation_state.get("last_source_id", ""),
+            })
+        if trace:
+            session_data["last_trace"] = trace
         await r.set(session_key, json.dumps(session_data, ensure_ascii=False))
 
         # Lưu 10 tin nhắn gần nhất vào chat history
@@ -762,6 +1556,7 @@ async def _async_save_session(brand: str, sender_id: str, user_message: str, bot
             "user_message": user_message,
             "bot_reply": bot_reply,
             "intent": intent,
+            "trace": trace or {},
             "timestamp": now_str,
         }, ensure_ascii=False)
         await r.rpush(history_key, msg_record)

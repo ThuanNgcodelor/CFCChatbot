@@ -2408,6 +2408,51 @@ Each line follows the eval schema: `id`, `brand`, `message`, `expected_intent`, 
 
 ## Quick Extraction Command
 
+## Regression Pack: Intent-First RAG
+
+Các case này dùng để kiểm tra các lỗi "hỏi một đằng trả lời một nẻo" sau khi nâng cấp router/RAG.
+
+| # | Brand | Câu test | Kỳ vọng |
+|---|---|---|---|
+| 1 | ZeO | Dòng sản phẩm ZiF | Trả lời đúng về ZIF/Nước rửa chén ZeO, không trả catalog tổng |
+| 2 | ZeO | Nước giặt Pano | Trả lời đúng PANO, không lạc qua giặt giũ tổng nếu không cần |
+| 3 | ZeO | Giới thiệu cty đi | Trả lời tổng quan công ty, không trả địa chỉ |
+| 4 | ZeO | Sơ lược về cty | Trả lời tổng quan công ty, không trả địa chỉ |
+| 5 | ZeO | CFC homecare là của cty luôn đúng không | Trả lời theo company overview, không trả địa chỉ |
+| 6 | ZeO | Sdt | Trả hotline/thông tin liên hệ công ty |
+| 7 | ZeO | Sdt công tu | Vẫn hiểu là hỏi SĐT công ty dù gõ sai |
+| 8 | ZeO | Có bột giặt Omo không | Không nhận vơ OMO là ZeO; báo chưa có dữ liệu/thương hiệu này |
+| 9 | ZeO | Tiktok | Không trả nội dung TikTok nội bộ; báo chưa có link chính thức nếu Sheet chưa có |
+| 10 | ZeO | Zalo | Không trả catalog; báo chưa có link chính thức nếu Sheet chưa có |
+| 11 | ZeO | Sản phẩm mới nhất của cty | Không tự bịa sản phẩm mới; yêu cầu admin kiểm tra |
+| 12 | ZeO | Sai địa chỉ rồi | Ghi nhận góp ý, chuyển admin duyệt, không tự sửa |
+| 13 | ZeO | Để tôi chỉnh lại cho | Ghi nhận góp ý, chuyển admin duyệt, không tự sửa |
+| 14 | ZeO | Có giấy tờ chứng minh công nghệ đó không | Trả chứng nhận/kiểm định nếu có trong Sheet |
+| 15 | ZeO | 1kg bột cho 5 bộ đồ | Không bịa liều lượng; hỏi rõ sản phẩm/chuyển admin |
+| 16 | CFC | Giới thiệu cty Cò Bay đi | Trả tổng quan CFC, không trả địa chỉ đơn thuần |
+| 17 | CFC | Cty Cò Bay ở đâu | Trả đúng địa chỉ CFC |
+| 18 | CFC | Bón bao nhiêu kg cho 1 công lúa | Chuyển kỹ sư/admin, không tự bịa liều lượng |
+| 19 | CFC | Nước giặt CFC có không | Không lẫn ZeO; trả cross-brand/out-of-scope |
+| 20 | CFC | Zalo Cò Bay | Không trả nội dung Zalo nội bộ; báo chưa có link chính thức nếu Sheet chưa có |
+| 21 | ZeO | hôm nay thứ mấy | Không trả FAQ sản phẩm; báo ngoài phạm vi tư vấn sản phẩm/dịch vụ |
+| 22 | ZeO | hôm nay ngày mấy | Không trả FAQ sản phẩm; báo ngoài phạm vi tư vấn sản phẩm/dịch vụ |
+| 23 | ZeO | bây giờ mấy giờ rồi | Không trả FAQ sản phẩm; báo ngoài phạm vi tư vấn sản phẩm/dịch vụ |
+| 24 | ZeO | thời tiết hôm nay sao | Không trả FAQ sản phẩm; báo ngoài phạm vi tư vấn sản phẩm/dịch vụ |
+
 ```bash
 awk '/^```jsonl$/{flag=1;next}/^```$/{if(flag){flag=0;exit}}flag' test.md > chatbot_eval_cases.jsonl
 ```
+
+## Regression Pack: Context Memory / Hội Thoại Nhiều Lượt
+
+Các case này kiểm tra việc bot nhớ sản phẩm hoặc danh sách vừa trả lời. Kỳ vọng quan trọng: bot không tự bịa giá/tồn kho, nhưng phải hiểu “cái đầu tiên”, “loại đó”, “còn không” đang nói về ngữ cảnh vừa rồi.
+
+| # | Brand | Lượt 1 | Lượt 2 | Kỳ vọng |
+|---|---|---|---|---|
+| 1 | ZeO | ZeO có những sản phẩm gì? | cái đầu tiên giá nhiu? | Hiểu “cái đầu tiên” là nhóm giặt giũ, báo chưa có giá chính xác, xin quy cách/SĐT/khu vực |
+| 2 | ZeO | Tôi muốn xem về nước rửa chén | cái thứ 2 còn không? | Hiểu “cái thứ 2” là PANO Rửa Chén Chanh, không bịa tồn kho, chuyển admin kiểm tra |
+| 3 | ZeO | PANO có những loại nào? | loại đó ship về Cần Thơ được không? | Hiểu đang hỏi PANO, trả chính sách giao hàng từ Sheet |
+| 4 | ZeO | ZeO có những sản phẩm gì? | cái đó còn hàng không? | Vì danh sách có nhiều mục mà không chỉ rõ số/tên, bot phải hỏi lại sản phẩm nào |
+| 5 | ZeO | Dòng sản phẩm ZiF | nó giá sao? | Hiểu “nó” là ZIF/Nước rửa chén ZeO, không tự bịa giá |
+| 6 | CFC | CFC có những dòng phân nào? | cái thứ 2 giá sao? | Hiểu dòng thứ 2 là phân hữu cơ CFC, không bịa giá, xin SĐT/khu vực/loại cây |
+| 7 | CFC | CFC có những dòng phân nào? | cái thứ 2 bón bao nhiêu kg cho 1 công lúa? | Không bịa liều lượng, chuyển kỹ sư/admin tư vấn |

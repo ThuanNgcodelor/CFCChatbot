@@ -101,11 +101,84 @@ TEST_CASES = [
     {"q": "Shop có xuất hóa đơn đỏ VAT cho công ty không?", "category": "unindexed", "expected_intent": "unanswered_query"},
     {"q": "Có ship hỏa tốc 2 giờ tại Sài Gòn không?", "category": "unindexed", "expected_intent": "unanswered_query"},
     {"q": "Có can 20 lít không bạn?", "category": "unindexed", "expected_intent": "unanswered_query"},
+
+    # ─── 12. REGRESSION: CÁC CÂU HỎI THẬT DỄ BỊ RAG BẮT NHẦM ───
+    {"q": "Dòng sản phẩm ZiF", "category": "regression_specific_product", "expected_intent": "zeo_zif_dishwashing_liquid"},
+    {"q": "Nước giặt Pano", "category": "regression_specific_product", "expected_intent": "pano_product_type"},
+    {"q": "Giới thiệu cty đi", "category": "regression_company", "expected_intent": "company_overview"},
+    {"q": "Sơ lược về cty", "category": "regression_company", "expected_intent": "company_overview"},
+    {"q": "CFC homecare là của cty luôn đúng không", "category": "regression_company", "expected_intent": "company_overview"},
+    {"q": "Sdt", "category": "regression_contact", "expected_intent": "company_contact_information"},
+    {"q": "Sdt công tu", "category": "regression_contact", "expected_intent": "company_contact_information"},
+    {"q": "Có bột giặt Omo không", "category": "regression_unsupported", "expected_intent": "competitor_product_unavailable"},
+    {"q": "Tiktok", "category": "regression_channel", "expected_intent": "official_channel_unverified"},
+    {"q": "Zalo", "category": "regression_channel", "expected_intent": "official_channel_unverified"},
+    {"q": "Sản phẩm mới nhất của cty", "category": "regression_unverified", "expected_intent": "new_product_unverified"},
+    {"q": "Sai địa chỉ rồi", "category": "regression_feedback", "expected_intent": "customer_correction_review"},
+    {"q": "Để tôi chỉnh lại cho", "category": "regression_feedback", "expected_intent": "customer_correction_review"},
+    {"q": "Có giấy tờ chứng minh công nghệ đó không", "category": "regression_proof", "expected_intent": "zeo_detergent_certification"},
+    {"q": "1kg bột cho 5 bộ đồ", "category": "regression_usage", "expected_intent": "zeo_usage_safety_review"},
+    {"q": "hôm nay thứ mấy", "category": "regression_out_of_scope", "expected_intent": "out_of_scope_general_question"},
+    {"q": "hôm nay ngày mấy", "category": "regression_out_of_scope", "expected_intent": "out_of_scope_general_question"},
+    {"q": "bây giờ mấy giờ rồi", "category": "regression_out_of_scope", "expected_intent": "out_of_scope_general_question"},
+    {"q": "thời tiết hôm nay sao", "category": "regression_out_of_scope", "expected_intent": "out_of_scope_general_question"},
+]
+
+
+MULTI_TURN_CASES = [
+    {
+        "name": "zeo_catalog_then_ordinal_price",
+        "brand": "zeo",
+        "turns": [
+            {"q": "ZeO có những sản phẩm gì?", "expected_intent": "zeo_product_catalog_overview"},
+            {"q": "cái đầu tiên giá nhiu?", "expected_intent": "contextual_price_unverified"},
+        ],
+    },
+    {
+        "name": "zeo_dishwashing_then_availability",
+        "brand": "zeo",
+        "turns": [
+            {"q": "Tôi muốn xem về nước rửa chén", "expected_intent": "zeo_dishwashing_product_overview"},
+            {"q": "cái thứ 2 còn không?", "expected_intent": "contextual_availability_unverified"},
+        ],
+    },
+    {
+        "name": "zeo_pano_then_shipping",
+        "brand": "zeo",
+        "turns": [
+            {"q": "PANO có những loại nào?", "expected_intent": "pano_product_type"},
+            {"q": "loại đó ship về Cần Thơ được không?", "expected_intent": "contextual_shipping"},
+        ],
+    },
+    {
+        "name": "zeo_unresolved_reference_clarify",
+        "brand": "zeo",
+        "turns": [
+            {"q": "ZeO có những sản phẩm gì?", "expected_intent": "zeo_product_catalog_overview"},
+            {"q": "cái đó còn hàng không?", "expected_intent": "context_reference_clarify"},
+        ],
+    },
+    {
+        "name": "cfc_catalog_then_ordinal_price",
+        "brand": "cfc",
+        "turns": [
+            {"q": "CFC có những dòng phân nào?", "expected_intent": "product_lines"},
+            {"q": "cái thứ 2 giá sao?", "expected_intent": "contextual_price_unverified"},
+        ],
+    },
+    {
+        "name": "cfc_catalog_then_dosage_guardrail",
+        "brand": "cfc",
+        "turns": [
+            {"q": "CFC có những dòng phân nào?", "expected_intent": "product_lines"},
+            {"q": "cái thứ 2 bón bao nhiêu kg cho 1 công lúa?", "expected_intent": "cfc_dosage_usage_review"},
+        ],
+    },
 ]
 
 
 async def run_eval():
-    print(f"🚀 BẮT ĐẦU CHẠY BỘ ĐÁNH GIÁ CHATBOT ({len(TEST_CASES)} TEST CASES)...")
+    print(f"🚀 BẮT ĐẦU CHẠY BỘ ĐÁNH GIÁ CHATBOT ({len(TEST_CASES)} SINGLE-TURN + {len(MULTI_TURN_CASES)} MULTI-TURN)...")
     print("=" * 80)
 
     passed = 0
@@ -153,11 +226,40 @@ async def run_eval():
         print(f"   A: {res.answer[:120]}...\n")
 
     print("=" * 80)
+    print("🧠 KIỂM TRA HỘI THOẠI NHIỀU LƯỢT / CONTEXT MEMORY:")
+    for case_idx, case in enumerate(MULTI_TURN_CASES, 1):
+        sender_id = f"eval_context_user_{case_idx}_{int(time.time() * 1000)}"
+        case_passed = True
+        print(f"\n[{case_idx:02d}/{len(MULTI_TURN_CASES)}] {case['name']}")
+        for turn_idx, turn in enumerate(case["turns"], 1):
+            req = ChatPipelineRequest(brand=case["brand"], sender_id=sender_id, text=turn["q"])
+            t0 = time.perf_counter()
+            res = await process_chat_pipeline(req)
+            latency = (time.perf_counter() - t0) * 1000
+            total_latency += latency
+            matched = res.intent == turn["expected_intent"]
+            case_passed = case_passed and matched
+            print(
+                f"   Turn {turn_idx}: {'✅' if matched else '❌'} "
+                f"Got={res.intent} Expected={turn['expected_intent']} | {latency:.1f}ms"
+            )
+            print(f"      Q: \"{turn['q']}\"")
+            print(f"      A: {res.answer[:120]}...")
+            await asyncio.sleep(0.08)
+
+        if case_passed:
+            passed += 1
+        else:
+            failed += 1
+
+    print("=" * 80)
     print("📊 BẢNG TỔNG KẾT ĐÁNH GIÁ CHẤT LƯỢNG NLU:")
-    print(f"• Tổng số test cases: {len(TEST_CASES)}")
-    print(f"• Thành công: {passed}/{len(TEST_CASES)} ({passed/len(TEST_CASES)*100:.1f}%)")
-    print(f"• Thất bại: {failed}/{len(TEST_CASES)}")
-    print(f"• Tốc độ trung bình: {total_latency/len(TEST_CASES):.1f}ms/câu")
+    total_cases = len(TEST_CASES) + len(MULTI_TURN_CASES)
+    total_latency_divisor = len(TEST_CASES) + sum(len(case["turns"]) for case in MULTI_TURN_CASES)
+    print(f"• Tổng số test cases: {total_cases}")
+    print(f"• Thành công: {passed}/{total_cases} ({passed/total_cases*100:.1f}%)")
+    print(f"• Thất bại: {failed}/{total_cases}")
+    print(f"• Tốc độ trung bình: {total_latency/total_latency_divisor:.1f}ms/câu")
     print("\nChi tiết theo nhóm:")
     for cat, stat in results_by_cat.items():
         pct = (stat['passed'] / stat['total']) * 100

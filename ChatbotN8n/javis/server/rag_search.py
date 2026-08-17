@@ -35,6 +35,15 @@ VI_QUERY_ALIASES = {
     "web": "website",
     "wed": "website",
     "wep": "website",
+    "shoppe": "shopee",
+    "sopi": "shopee",
+    "tiktok": "tik tok",
+}
+
+VI_STOPWORDS = {
+    "a", "ạ", "anh", "chi", "em", "toi", "minh", "ban", "shop", "ad", "admin", "ben", "nay",
+    "la", "co", "khong", "duoc", "cho", "xin", "hoi", "ve", "gi", "nao", "nhe", "nha", "voi",
+    "muon", "can", "xem", "thong", "tin", "tu", "van", "hien", "tai", "cua", "do", "kia",
 }
 
 
@@ -82,6 +91,107 @@ def _normalize_vi_query(text: str) -> str:
     t = re.sub(r"[^a-zA-Z0-9\s]", " ", t).lower()
     tokens = [VI_QUERY_ALIASES.get(token, token) for token in t.split() if token]
     return " ".join(tokens).strip()
+
+
+def _tokenize_vi(text: str) -> set[str]:
+    return {token for token in _normalize_vi_query(text).split() if len(token) > 1 and token not in VI_STOPWORDS}
+
+
+def _has(pattern: str, text: str) -> bool:
+    return bool(re.search(pattern, text))
+
+
+def _is_customer_query_for_agent_content(norm_q: str) -> bool:
+    return not _has(r"\b(noi dung|bai dang|kich ban|caption|video|reels|mau|viet bai|quang cao)\b", norm_q)
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(str(value or default))
+    except Exception:
+        return default
+
+
+def _clamp_score(score: float) -> float:
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def _rerank_results(query: str, brand: str, parsed_results: list[dict]) -> list[dict]:
+    """Rerank top-k bằng lexical/entity hints để vector gần nghĩa không bắt nhầm intent."""
+    norm_q = _normalize_vi_query(query)
+    q_tokens = _tokenize_vi(query)
+
+    for idx, item in enumerate(parsed_results):
+        combined = " ".join(str(item.get(field, "")) for field in [
+            "intent", "category", "question_examples", "learning_tags", "answer", "source_id"
+        ])
+        combined_norm = _normalize_vi_query(combined)
+        combined_tokens = _tokenize_vi(combined)
+
+        adjustment = 0.0
+        overlap = q_tokens & combined_tokens
+        if q_tokens:
+            adjustment += min(0.10, len(overlap) / max(len(q_tokens), 1) * 0.12)
+
+        intent = item.get("intent", "")
+        category = item.get("category", "")
+        audience = item.get("audience", "")
+
+        if audience == "agent" and _is_customer_query_for_agent_content(norm_q):
+            adjustment -= 0.18
+
+        # Product/entity anchors: tên riêng phải thắng câu catalog tổng quan.
+        entity_rules = [
+            ("zif", "zif", "zeo_product_catalog_overview"),
+            ("pano", "pano", "zeo_product_catalog_overview"),
+            ("oplus", "oplus", "zeo_product_catalog_overview"),
+            ("npk", "npk", "product_lines"),
+            ("huu co", "organic|huu_co|huu co", "product_lines"),
+        ]
+        for query_anchor, positive_pattern, broad_intent in entity_rules:
+            if query_anchor in norm_q:
+                if re.search(positive_pattern, combined_norm):
+                    adjustment += 0.14
+                if intent == broad_intent:
+                    adjustment -= 0.10
+
+        if _has(r"(gioi thieu|so luoc|cong ty la gi|cty la gi|thuoc cong ty|homecare)", norm_q):
+            if "company_overview" in intent:
+                adjustment += 0.16
+            if "address" in intent or "location" in intent:
+                adjustment -= 0.18
+
+        if _has(r"(dia chi|o dau|nha may|tru so|van phong|tai dau)", norm_q):
+            if "address" in intent or "location" in intent:
+                adjustment += 0.14
+            if "company_overview" in intent and not _has(r"(gioi thieu|so luoc|la gi|thuoc)", norm_q):
+                adjustment -= 0.06
+
+        if _has(r"(so dien thoai|hotline|tong dai|lien he|call)", norm_q):
+            if "contact" in intent or "hotline" in intent or "website" in intent:
+                adjustment += 0.12
+            if "address" in intent:
+                adjustment -= 0.08
+
+        if _has(r"(tik tok|tiktok|zalo|lazada|facebook)", norm_q) and _is_customer_query_for_agent_content(norm_q):
+            if audience == "agent" or "content_style" in intent or "reels" in intent:
+                adjustment -= 0.25
+
+        if _has(r"(gia|bao gia|bang gia|bao nhieu tien|nhieu tien)", norm_q):
+            if "price" in intent or "sales" in category:
+                adjustment += 0.10
+            if "product_catalog" in intent:
+                adjustment -= 0.08
+
+        # Priority trong Sheet là tie-break, không được lấn át semantic score.
+        adjustment += min(0.03, _safe_int(item.get("priority"), 0) / 1000)
+        adjustment -= idx * 0.005
+
+        item["vector_score"] = item["score"]
+        item["rerank_adjustment"] = round(adjustment, 4)
+        item["score"] = _clamp_score(item["score"] + adjustment)
+
+    return sorted(parsed_results, key=lambda row: (row["score"], _safe_int(row.get("priority"))), reverse=True)
 
 
 def _build_vi_embedding_query(query: str) -> str:
@@ -156,7 +266,7 @@ async def semantic_search(
             "FT.SEARCH", index_name,
             f"({filter_str})=>[KNN {top_k} @embedding $vec AS __score]",
             "PARAMS", "2", "vec", query_bytes,
-            "RETURN", "8", "intent", "answer", "answer_mode", "risk_level", "category", "source_id", "priority", "__score",
+            "RETURN", "11", "intent", "answer", "answer_mode", "risk_level", "category", "source_id", "priority", "question_examples", "learning_tags", "audience", "__score",
             "SORTBY", "__score", "ASC",
             "DIALECT", "2",
         )
@@ -217,6 +327,9 @@ async def semantic_search(
             "category": fields.get("category", "faq"),
             "source_id": fields.get("source_id", ""),
             "priority": fields.get("priority", "0"),
+            "question_examples": fields.get("question_examples", ""),
+            "learning_tags": fields.get("learning_tags", ""),
+            "audience": fields.get("audience", ""),
             "score": score,
         })
 
@@ -230,6 +343,8 @@ async def semantic_search(
             "answer": "",
             "results": [],
         }
+
+    parsed_results = _rerank_results(query, brand, parsed_results)
 
     best = parsed_results[0]
     best_score = best["score"]
@@ -292,6 +407,8 @@ async def semantic_search(
         "category": best["category"],
         "source_id": best.get("source_id", ""),
         "priority": best.get("priority", "0"),
+        "vector_score": best.get("vector_score", best_score),
+        "rerank_adjustment": best.get("rerank_adjustment", 0.0),
         "results": parsed_results,
     }
 

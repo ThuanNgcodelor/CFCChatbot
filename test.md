@@ -92,6 +92,10 @@ PASS khi response có `confidence` không thấp cho câu rõ nghĩa, `intent` �
 | Z13 | chính sách đổi trả áp dụng sản phẩm nào | `return_policy_scope` | đổi trả | catalog sản phẩm chung |
 | Z14 | tôi muốn lấy sỉ sản phẩm | `wholesale_inquiry` | số điện thoại/khu vực hoặc admin liên hệ | tự báo chiết khấu |
 | Z15 | shop có nước xả vải không | fallback/unverified | chưa có dữ liệu hoặc hỏi admin | khẳng định có nếu Sheet không có |
+| Z16 | tôi muốn xem về nước rửa chén | `zeo_dishwashing_product_overview` | rửa chén | fallback chung |
+| Z17 | cho mình xem dòng giặt giũ | `zeo_laundry_product_overview` | giặt giũ | báo giá |
+| Z18 | tìm hiểu nước lau sàn bên mình | `zeo_floor_cleaner_product_overview` | lau sàn | fallback chung |
+| Z19 | tôi muốn xem về tẩy rửa vệ sinh | `zeo_cleaning_hygiene_product_overview` | tẩy rửa/vệ sinh | fallback chung |
 
 ### 3. ZeO - Giá không được bịa
 
@@ -131,6 +135,9 @@ Dùng cùng một `sender_id`, ví dụ `manual-zeo-memory-001`.
 | C08 | ship phân bón về tỉnh được không | shipping/clarify | khu vực/nhân viên kiểm tra | phí ship cụ thể nếu Sheet không có |
 | C09 | CFC có link website không | `cfc_company_website` | website theo Sheet | `zeo.vn` nếu không phải Sheet CFC |
 | C10 | Cò Bay mở cửa đến mấy giờ | `opening_hours` | giờ mở cửa theo Sheet | giá cụ thể |
+| C11 | tôi muốn xem về phân bón Cò Bay | `product_lines` | phân bón | nước giặt/PANO |
+| C12 | tôi muốn xem về NPK | `cfc_npk_product_info` | NPK | ZeO/PANO |
+| C13 | tôi muốn xem về phân hữu cơ | `cfc_organic_fertilizer_info` | hữu cơ | nước rửa chén |
 
 ### 6. CFC - Nông nghiệp phải an toàn
 

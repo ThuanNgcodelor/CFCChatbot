@@ -101,6 +101,52 @@ def _extract_phone_and_area(text: str, norm: str) -> Tuple[str, str]:
     return phone, area
 
 
+def _format_inline_numbered_list(answer: str) -> str:
+    """Chuyển danh sách đánh số viết liền trong Sheet thành từng dòng dễ đọc."""
+    matches = list(re.finditer(r"(?<!\d)(\d{1,2})\.\s+", answer))
+    if len(matches) < 2 or "\n" in answer:
+        return answer
+
+    prefix = answer[:matches[0].start()].strip()
+    items = []
+    tail = ""
+
+    for idx, match in enumerate(matches):
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(answer)
+        item = answer[match.end():end].strip(" ;")
+
+        if idx == len(matches) - 1:
+            tail_match = re.search(
+                r"(?<!\d)\.\s+(Bạn|Anh/chị|Anh chị|Nếu|Mình|Dạ bạn)\b",
+                item,
+            )
+            if tail_match:
+                tail = item[tail_match.start() + 2:].strip()
+                item = item[:tail_match.start() + 1].strip()
+
+        items.append(f"{match.group(1)}. {item}")
+
+    parts = []
+    if prefix:
+        parts.append(prefix)
+    parts.append("\n".join(items))
+    if tail:
+        parts.append(tail)
+    return "\n\n".join(parts)
+
+
+def _prettify_answer(answer: str) -> str:
+    """Chuẩn hóa output Messenger: gọn khoảng trắng, xuống dòng danh sách rõ ràng."""
+    text = str(answer or "").strip()
+    if not text:
+        return text
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = _format_inline_numbered_list(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 class ChatPipelineRequest(BaseModel):
     brand: str = "zeo"                  # "zeo" hoặc "cfc"
     sender_id: str                      # Messenger PSID
@@ -124,6 +170,27 @@ class ChatPipelineResponse(BaseModel):
     latency_ms: float = 0.0
 
 
+async def _sheet_fast_response(
+    brand: str,
+    start_time: float,
+    intent: str,
+    *,
+    lead_stage: str = "new",
+    unavailable_intent: Optional[str] = None,
+    unavailable_answer: Optional[str] = None,
+) -> ChatPipelineResponse:
+    item = await get_faq_by_intent(brand, intent)
+    answer = item.get("answer", "").strip()
+    if answer:
+        return _fast_response(answer, intent, brand, start_time, lead_stage=lead_stage)
+
+    fallback = unavailable_answer or (
+        "Dạ hiện mục thông tin này chưa tải được từ hệ thống kiến thức. "
+        "Admin sẽ kiểm tra lại dữ liệu và phản hồi bạn chính xác hơn nha."
+    )
+    return _fast_response(fallback, unavailable_intent or f"{intent}_unavailable", brand, start_time, lead_stage=lead_stage)
+
+
 async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineResponse:
     start_time = time.perf_counter()
     brand = req.brand.lower()
@@ -133,7 +200,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     
     if not raw_text:
         return ChatPipelineResponse(
-            answer="Dạ bạn cần bên mình hỗ trợ thông tin gì ạ?",
+            answer=_prettify_answer("Dạ bạn cần bên mình hỗ trợ thông tin gì ạ?"),
             intent="empty_input",
             confidence="high",
             score=1.0,
@@ -230,7 +297,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         ))
 
         return ChatPipelineResponse(
-            answer=final_reply,
+            answer=_prettify_answer(final_reply),
             intent="contact_phone_provided",
             confidence="high",
             score=1.0,
@@ -293,7 +360,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             final_reply = f"Dạ hiện {brand_display} chưa thấy có đủ thông tin của bạn trong hồ sơ chat này. Bạn gửi lại số điện thoại và khu vực/tỉnh thành giúp mình nha."
 
         return ChatPipelineResponse(
-            answer=final_reply,
+            answer=_prettify_answer(final_reply),
             intent="customer_profile_lookup",
             confidence="high",
             score=1.0,
@@ -371,7 +438,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         promo_res = match_promotions_and_deals(raw_text, brand=brand)
         if promo_res:
             return ChatPipelineResponse(
-                answer=promo_res["suggested_reply"],
+                answer=_prettify_answer(promo_res["suggested_reply"]),
                 intent="promotion_deals",
                 confidence="high",
                 score=0.96,
@@ -387,58 +454,35 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     # ─────────────────────────────────────────────────────────────
     # PATH 3.6: HOTLINE & PRICE INQUIRY (< 15ms)
     # ─────────────────────────────────────────────────────────────
-    if re.search(r"(website|web site|trang web|link website|link web|xin link website|xin link web|co link website|co link web|zeo vn|zeo\.vn)\b", norm_text):
-        if brand.lower() == "zeo":
-            website_msg = (
-                "Dạ website chính thức của ZeO Vietnam là:\n\n"
-                "👉 https://zeo.vn/\n\n"
-                "Bạn có thể vào website để xem thông tin thương hiệu và sản phẩm chính thức nha."
-            )
-        else:
-            website_msg = (
-                "Dạ website chính thức của CFC Cò Bay là:\n\n"
-                "👉 https://cfccobay.com\n\n"
-                "Bạn có thể vào website để xem thông tin thương hiệu và sản phẩm chính thức nha."
-            )
-        return _fast_response(website_msg, "company_website", brand, start_time)
+    if re.search(r"(website|web site|trang web|link website|link web|xin link website|xin link web|co link website|co link web|zeo vn|zeo\.vn|cfc web|co bay web|cfccobay|cfc co bay)\b", norm_text):
+        website_intent = "company_website" if brand.lower() == "zeo" else "cfc_company_website"
+        return await _sheet_fast_response(brand, start_time, website_intent, lead_stage="browsing_catalog")
 
     if re.search(r"(hotline|so dien thoai cong ty|tong dai|so hotline|lien he so nao)\b", norm_text):
-        hotline_msg = (
-            "Dạ hotline hỗ trợ chính thức của ZeO Vietnam là:\n\n"
-            "📞 **1900 5307** (Chọn phím nhánh số 02)\n"
-            "📞 Hotline CSKH: **0907 902 546** (Hỗ trợ từ 8:00 đến 21:00 mỗi ngày)\n\n"
-            "Bạn có thể gọi trực tiếp hoặc nhắn tin tại đây để được hỗ trợ nhanh nhất nhé ạ! 💙"
+        hotline_intent = "company_contact_information" if brand.lower() == "zeo" else "cfc_company_website"
+        return await _sheet_fast_response(
+            brand,
+            start_time,
+            hotline_intent,
+            unavailable_intent="company_contact_information_unavailable",
+            unavailable_answer="Dạ hiện dữ liệu chưa có số hotline chính thức để mình báo chắc chắn. Bạn để lại số điện thoại hoặc nhu cầu, admin sẽ kiểm tra và phản hồi thông tin liên hệ chính xác nha.",
         )
-        return _fast_response(hotline_msg, "company_contact_information", brand, start_time)
 
-    if re.search(r"(gia bao nhieu|bao nhieu tien|bang gia|xin gia|gia ban|gia ca|nhieu tien|bao gia)\b", norm_text) and not any(k in norm_text for k in ["ship", "phi", "van chuyen", "cuoc"]):
-        if brand.lower() == "zeo":
-            price_msg = (
-                "Dạ hiện tại giá bán lẻ chi tiết của từng sản phẩm cùng các mã giảm giá được niêm yết trực tiếp trên gian hàng chính thức Shopee Mall:\n\n"
-                "👉 https://shopee.vn/zeovietnamofficial\n\n"
-                "Bạn có thể vào link trên để xem giá ưu đãi và đặt hàng giao tận nơi. Nếu bạn cần báo giá sỉ hoặc mua số lượng lớn, bạn gửi giúp mình Số Điện Thoại và Khu Vực để nhân viên kinh doanh liên hệ báo giá tốt nhất nhé ạ! 💙"
-            )
-        else:
-            price_msg = (
-                "Dạ giá các dòng phân bón CFC Cò Bay Cần Thơ tùy thuộc vào quy cách (Can 5L, Bao 25kg, Bao 50kg) và số lượng đặt hàng. "
-                "Bạn gửi giúp mình Số Điện Thoại và Cây Trồng cần bón để kỹ sư Cò Bay báo giá tốt nhất cho mình nhé ạ!"
-            )
-        return _fast_response(price_msg, "zeo_price_inquiry_general", brand, start_time, lead_stage="browsing_catalog")
+    if re.search(r"(gia(?: .{1,80})? bao nhieu|bao nhieu tien|bang gia|xin gia|gia ban|gia ca|nhieu tien|bao gia)\b", norm_text) and not any(k in norm_text for k in ["ship", "phi", "van chuyen", "cuoc"]):
+        price_intent = "zeo_price_inquiry_general" if brand.lower() == "zeo" else "cfc_price_unverified"
+        return await _sheet_fast_response(brand, start_time, price_intent, lead_stage="browsing_catalog")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.7: WHOLESALE & DISTRIBUTOR INQUIRY (< 15ms)
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(lay si|muon lam dai ly|dang ky dai ly|nhap hang|phan phoi|chinh sach si|nhap so luong lon|kinh doanh zeo|dai li)\b", norm_text):
-        wholesale_msg = (
-            "Dạ bạn vui lòng để lại **Số Điện Thoại** và **Khu Vực** muốn kinh doanh nhé. "
-            "Admin sẽ chuyển thông tin đến nhà phân phối hoặc nhân viên phụ trách khu vực để liên hệ gửi bảng giá sỉ và điều kiện hợp tác sớm nhất ạ! 💙"
-        )
-        return _fast_response(wholesale_msg, "wholesale_inquiry", brand, start_time, lead_stage="collecting_contact")
+        wholesale_intent = "wholesale_inquiry" if brand.lower() == "zeo" else "wholesale_dealer"
+        return await _sheet_fast_response(brand, start_time, wholesale_intent, lead_stage="collecting_contact")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.8: GENERAL CATALOG OVERVIEW INQUIRY (< 15ms)
     # ─────────────────────────────────────────────────────────────
-    if re.search(r"(cac san pham|nhung san pham|danh muc san pham|co san pham gi|co san pham nao|san pham nao|co nhung gi|co nhung loai nao|cac dong san pham|dong san pham nao|dong san pham|co dong nao|co nhom nao|gioi thieu san pham|hoi ve cac san pham|ban nhung gi|nhom san pham|mat hang nao)", norm_text):
+    if re.search(r"(cac san pham|nhung san pham|danh muc san pham|co san pham gi|co san pham nao|san pham nao|co nhung gi|co nhung loai nao|cac dong san pham|dong san pham|co dong nao|co nhom nao|gioi thieu san pham|hoi ve cac san pham|ban nhung gi|nhom san pham|mat hang nao|co phan bon gi|phan bon gi|phan bon nao|cac loai phan bon)", norm_text) and not any(k in norm_text for k in ["doi tra", "doi", "tra", "bao hanh", "chinh sach", "loi", "hong", "hoan tien"]):
         catalog_intent = "zeo_product_catalog_overview" if brand.lower() == "zeo" else "product_lines"
         catalog_item = await get_faq_by_intent(brand, catalog_intent)
         catalog_reply = catalog_item.get("answer", "").strip()
@@ -455,23 +499,23 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     # PATH 3.9: OPENING HOURS (< 15ms)
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(mo cua|dong cua|may gio|gio mo cua|gio lam viec|cuoi tuan|mo cua luc|lam viec den may gio)\b", norm_text) and not any(k in norm_text for k in ["gia", "ship", "phi", "doi tra"]):
-        hours_msg = "Dạ shop mở cửa từ 8:00 đến 21:00 mỗi ngày nha bạn. Bạn cần hỗ trợ gì cứ nhắn tin cho shop nhé! 💙"
-        return _fast_response(hours_msg, "shop_opening_hours", brand, start_time)
+        hours_intent = "shop_opening_hours" if brand.lower() == "zeo" else "opening_hours"
+        return await _sheet_fast_response(brand, start_time, hours_intent)
 
     # ─────────────────────────────────────────────────────────────
     # PATH 3.10: PANO FRAGRANCES & TECH FAST-PATH (< 15ms)
     # ─────────────────────────────────────────────────────────────
     if re.search(r"(mui huong|huong gi|may mau|do xanh hong cam tim|chon huong|tuy chon huong)\b", norm_text) and "pano" in norm_text:
-        pano_frag_msg = "Dạ bột giặt và nước giặt PANO có nhiều tùy chọn hương được nhận diện theo các màu Đỏ, Xanh, Hồng, Cam và Tím, phù hợp với sở thích của từng gia đình nha bạn."
-        return _fast_response(pano_frag_msg, "pano_laundry_fragrance_options", brand, start_time)
+        if brand.lower() == "zeo":
+            return await _sheet_fast_response(brand, start_time, "pano_laundry_fragrance_options", lead_stage="browsing_catalog")
 
     if re.search(r"(enzyme|thuy dien|cong nghe gi|cong nghe lam sach|tay vet ban|diet khuan)\b", norm_text) and any(k in norm_text for k in ["zeo", "bot giat", "nuoc giat"]):
-        tech_msg = "Dạ bột giặt và nước giặt ZeO sử dụng Enzyme Thụy Điển, giúp tẩy sạch sâu các vết bẩn cứng đầu như dầu mỡ, bùn đất và mồ hôi, kể cả khi giặt bằng nước lạnh nha bạn."
-        return _fast_response(tech_msg, "zeo_detergent_technology", brand, start_time)
+        if brand.lower() == "zeo":
+            return await _sheet_fast_response(brand, start_time, "zeo_detergent_technology", lead_stage="browsing_catalog")
 
     if re.search(r"(chinh sach doi tra|quy trinh doi tra|thoi han doi tra|doi tra nhu the nao|duoc doi tra khong|doi tra ap dung|kenh nao duoc doi tra)\b", norm_text):
-        policy_msg = "Dạ chính sách đổi trả áp dụng cho các sản phẩm PANO, ZeO và Oplus được bán qua cửa hàng đại lý, TikTok Shop, Shopee, Tiki và kênh phân phối trực tiếp của Công ty nha bạn. Thời hạn tiếp nhận đổi trả là trong vòng 7 ngày làm việc ạ."
-        return _fast_response(policy_msg, "return_policy_scope", brand, start_time)
+        if brand.lower() == "zeo":
+            return await _sheet_fast_response(brand, start_time, "return_policy_scope", lead_stage="browsing_catalog")
 
     # ─────────────────────────────────────────────────────────────
     # PATH 4: SHOPEE LINK & PRODUCT MATCHER (< 20ms)
@@ -482,7 +526,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         shopee_match = match_shopee_product(raw_text, brand=brand)
         if shopee_match:
             return ChatPipelineResponse(
-                answer=shopee_match["suggested_reply"],
+                answer=_prettify_answer(shopee_match["suggested_reply"]),
                 intent=shopee_match.get("intent", "shopee_product_link"),
                 confidence="high",
                 score=0.95,
@@ -552,21 +596,21 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         # Thực sự không có trong FAQ (< 0.52) hoặc bị Guardrail chặn bắt nhầm -> Fallback trung thực
         confidence = "low"
         brand_display = "ZeO Vietnam" if brand.lower() == "zeo" else "CFC Cò Bay"
-        shopee_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
 
         if any(w in norm_text for w in ["gia", "mua", "ban", "can", "chai", "lit", "kg", "bao nhieu"]) and not any(w in norm_text for w in ["co nhung", "cac san pham", "san pham nao", "dong san pham", "gioi thieu"]):
-            final_answer = (
-                f"Dạ hiện tại thông tin chi tiết về sản phẩm này chưa có sẵn trong danh mục tra cứu nhanh của {brand_display}. "
-                f"Bạn có thể ghé xem toàn bộ sản phẩm chính hãng, bảng giá niêm yết và mã giảm giá tại gian hàng Shopee Mall:\n"
-                f"👉 {shopee_link}\n\n"
-                f"Hoặc bạn nhắn rõ tên sản phẩm/dung tích cụ thể để mình kiểm tra và báo giá ngay cho bạn nhé ạ! 💙"
+            fallback_intent = "zeo_price_request_needs_product" if brand.lower() == "zeo" else "cfc_price_unverified"
+            fallback_item = await get_faq_by_intent(brand, fallback_intent)
+            final_answer = fallback_item.get("answer", "").strip() or (
+                f"Dạ hiện dữ liệu chưa đủ để báo chính xác. Bạn nhắn rõ tên sản phẩm và nhu cầu cụ thể, "
+                f"hoặc gửi số điện thoại/khu vực để admin {brand_display} kiểm tra và phản hồi nha."
             )
             lead_stage = "browsing_catalog"
         elif any(w in norm_text for w in ["dai ly", "si", "nhap", "hop tac", "npp", "phan phoi"]):
-            final_answer = (
-                f"Dạ về chính sách đại lý & giá sỉ số lượng lớn của {brand_display}, "
-                f"bạn gửi giúp mình Số Điện Thoại và Khu Vực dự kiến kinh doanh nhé. "
-                f"Phòng kinh doanh sẽ liên hệ gửi bảng giá chiết khấu và điều kiện hợp tác chi tiết cho bạn ngay ạ!"
+            fallback_intent = "wholesale_inquiry" if brand.lower() == "zeo" else "wholesale_dealer"
+            fallback_item = await get_faq_by_intent(brand, fallback_intent)
+            final_answer = fallback_item.get("answer", "").strip() or (
+                f"Dạ bạn gửi giúp mình số điện thoại và khu vực dự kiến kinh doanh. "
+                f"Admin {brand_display} sẽ kiểm tra thông tin phù hợp và phản hồi chính xác nha."
             )
             lead_stage = "collecting_contact"
         else:
@@ -583,6 +627,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
     # ─────────────────────────────────────────────────────────────
     # ASYNC SAVE SESSION & CHAT HISTORY (Không làm chậm response)
     # ─────────────────────────────────────────────────────────────
+    final_answer = _prettify_answer(final_answer)
     asyncio.create_task(_async_save_session(
         brand=brand,
         sender_id=sender_id,
@@ -609,7 +654,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
 
 def _fast_response(answer: str, intent: str, brand: str, start_time: float, lead_stage: str = "new") -> ChatPipelineResponse:
     return ChatPipelineResponse(
-        answer=answer,
+        answer=_prettify_answer(answer),
         intent=intent,
         confidence="high",
         score=1.0,

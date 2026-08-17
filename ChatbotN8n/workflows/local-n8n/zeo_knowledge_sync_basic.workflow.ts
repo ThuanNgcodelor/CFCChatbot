@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : Zeo Knowledge
-// Nodes   : 6  |  Connections: 5
+// Nodes   : 7  |  Connections: 6
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -13,6 +13,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // NormalizeKnowledge                 code
 // WriteRedisSnapshot                 redis                      [creds]
 // WriteRedisSyncMetadata             redis                      [creds]
+// RebuildZeoVectorIndex              httpRequest                [onError→regular]
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //      → NormalizeKnowledge
 //        → WriteRedisSnapshot
 //          → WriteRedisSyncMetadata
+//            → RebuildZeoVectorIndex
 // ScheduleTrigger
 //    → ReadFaqRows (↩ loop)
 // </workflow-map>
@@ -262,6 +264,31 @@ return [{
         value: '={{ JSON.stringify({ snapshot_key: $("Normalize Knowledge").first().json.snapshot_key, knowledge_count: $("Normalize Knowledge").first().json.knowledge_count, excluded_internal_count: $("Normalize Knowledge").first().json.excluded_internal_count, updated_at: $("Normalize Knowledge").first().json.updated_at, schema_version: $("Normalize Knowledge").first().json.schema_version, snapshot_hash: $("Normalize Knowledge").first().json.snapshot_hash }) }}',
     };
 
+    @node({
+        id: 'a23ad1aa-bb2e-4b2c-9b30-9017e0010101',
+        name: 'Rebuild ZeO Vector Index',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4.2,
+        position: [1264, 256],
+        onError: 'continueRegularOutput',
+    })
+    RebuildZeoVectorIndex = {
+        method: 'POST',
+        url: 'http://127.0.0.1:8000/sync',
+        sendQuery: true,
+        queryParameters: {
+            parameters: [
+                {
+                    name: 'brand',
+                    value: 'zeo',
+                },
+            ],
+        },
+        options: {
+            timeout: 120000,
+        },
+    };
+
     // =====================================================================
     // ROUTAGE ET CONNEXIONS
     // =====================================================================
@@ -273,5 +300,6 @@ return [{
         this.ReadFaqRows.out(0).to(this.NormalizeKnowledge.in(0));
         this.NormalizeKnowledge.out(0).to(this.WriteRedisSnapshot.in(0));
         this.WriteRedisSnapshot.out(0).to(this.WriteRedisSyncMetadata.in(0));
+        this.WriteRedisSyncMetadata.out(0).to(this.RebuildZeoVectorIndex.in(0));
     }
 }

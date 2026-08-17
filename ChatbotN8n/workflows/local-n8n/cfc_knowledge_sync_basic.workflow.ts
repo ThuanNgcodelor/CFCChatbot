@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : CFC Co Bay Knowledge
-// Nodes   : 6  |  Connections: 5
+// Nodes   : 7  |  Connections: 6
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -13,6 +13,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // NormalizeCfcKnowledge              code
 // WriteCfcRedisSnapshot              redis                      [creds]
 // WriteCfcRedisSyncMetadata          redis                      [creds]
+// RebuildCfcVectorIndex              httpRequest                [onError→regular]
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //      → NormalizeCfcKnowledge
 //        → WriteCfcRedisSnapshot
 //          → WriteCfcRedisSyncMetadata
+//            → RebuildCfcVectorIndex
 // ScheduleTrigger
 //    → ReadCfcFaqRows (↩ loop)
 // </workflow-map>
@@ -218,6 +220,31 @@ return [{
         value: '={{ JSON.stringify({ snapshot_key: $("Normalize CFC Knowledge").first().json.snapshot_key, knowledge_count: $("Normalize CFC Knowledge").first().json.knowledge_count, excluded_internal_count: $("Normalize CFC Knowledge").first().json.excluded_internal_count, updated_at: $("Normalize CFC Knowledge").first().json.updated_at, schema_version: $("Normalize CFC Knowledge").first().json.schema_version, snapshot_hash: $("Normalize CFC Knowledge").first().json.snapshot_hash }) }}',
     };
 
+    @node({
+        id: 'a23ad1aa-bb2e-4b2c-9b30-9017cfc00101',
+        name: 'Rebuild CFC Vector Index',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4.2,
+        position: [1280, 256],
+        onError: 'continueRegularOutput',
+    })
+    RebuildCfcVectorIndex = {
+        method: 'POST',
+        url: 'http://127.0.0.1:8000/sync',
+        sendQuery: true,
+        queryParameters: {
+            parameters: [
+                {
+                    name: 'brand',
+                    value: 'cfc',
+                },
+            ],
+        },
+        options: {
+            timeout: 120000,
+        },
+    };
+
     // =====================================================================
     // ROUTAGE ET CONNEXIONS
     // =====================================================================
@@ -229,5 +256,6 @@ return [{
         this.ReadCfcFaqRows.out(0).to(this.NormalizeCfcKnowledge.in(0));
         this.NormalizeCfcKnowledge.out(0).to(this.WriteCfcRedisSnapshot.in(0));
         this.WriteCfcRedisSnapshot.out(0).to(this.WriteCfcRedisSyncMetadata.in(0));
+        this.WriteCfcRedisSyncMetadata.out(0).to(this.RebuildCfcVectorIndex.in(0));
     }
 }

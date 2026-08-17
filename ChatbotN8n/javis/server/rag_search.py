@@ -105,7 +105,7 @@ async def semantic_search(
             "FT.SEARCH", index_name,
             f"({filter_str})=>[KNN {top_k} @embedding $vec AS __score]",
             "PARAMS", "2", "vec", query_bytes,
-            "RETURN", "6", "intent", "answer", "answer_mode", "risk_level", "category", "__score",
+            "RETURN", "8", "intent", "answer", "answer_mode", "risk_level", "category", "source_id", "priority", "__score",
             "SORTBY", "__score", "ASC",
             "DIALECT", "2",
         )
@@ -164,6 +164,8 @@ async def semantic_search(
             "answer_mode": fields.get("answer_mode", "direct"),
             "risk_level": fields.get("risk_level", "low"),
             "category": fields.get("category", "faq"),
+            "source_id": fields.get("source_id", ""),
+            "priority": fields.get("priority", "0"),
             "score": score,
         })
 
@@ -237,6 +239,8 @@ async def semantic_search(
         "answer_mode": best["answer_mode"],
         "risk_level": best["risk_level"],
         "category": best["category"],
+        "source_id": best.get("source_id", ""),
+        "priority": best.get("priority", "0"),
         "results": parsed_results,
     }
 
@@ -256,7 +260,12 @@ async def get_faq_by_intent(brand: str, intent: str) -> dict:
     try:
         async for key in r.scan_iter(match=f"{index_name}:doc:*:{intent}", count=100):
             fields_raw = await r.hgetall(key)
-            fields = {_decode(k): _decode(v) for k, v in fields_raw.items()}
+            fields = {}
+            for k, v in fields_raw.items():
+                field_name = _decode(k)
+                if field_name == "embedding":
+                    continue
+                fields[field_name] = _decode(v)
             if fields.get("intent") != intent or not fields.get("answer"):
                 continue
             return {
@@ -267,6 +276,11 @@ async def get_faq_by_intent(brand: str, intent: str) -> dict:
                 "risk_level": fields.get("risk_level", "low"),
                 "category": fields.get("category", "faq"),
                 "source_id": fields.get("source_id", ""),
+                "question_examples": fields.get("question_examples", ""),
+                "learning_tags": fields.get("learning_tags", ""),
+                "profile_slots": fields.get("profile_slots", ""),
+                "escalation_policy": fields.get("escalation_policy", ""),
+                "priority": fields.get("priority", "0"),
                 "score": 1.0,
             }
     except Exception as e:

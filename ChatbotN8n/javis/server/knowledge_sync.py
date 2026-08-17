@@ -162,6 +162,7 @@ async def sync_brand(brand: str = "zeo") -> dict:
         synced = 0
         skipped = 0
         errors = 0
+        active_doc_keys = set()
         
         for item in items:
             # Lọc bỏ item không active, không có answer, audience=internal
@@ -176,6 +177,9 @@ async def sync_brand(brand: str = "zeo") -> dict:
                 skipped += 1
                 continue
 
+            doc_key = f"{index_name}:doc:{item.get('source_id', 'faq')}:{item.get('intent', 'unknown')}"
+            active_doc_keys.add(doc_key)
+
             embed_text_str = build_embed_text(item)
             vec = await embed_text(embed_text_str)
             
@@ -183,8 +187,6 @@ async def sync_brand(brand: str = "zeo") -> dict:
                 logger.warning("Không lấy được embedding cho intent: %s", item.get("intent"))
                 errors += 1
                 continue
-
-            doc_key = f"{index_name}:doc:{item.get('source_id', 'faq')}:{item.get('intent', 'unknown')}"
             
             mapping = {
                 "embedding": vec_to_bytes(vec),
@@ -195,6 +197,10 @@ async def sync_brand(brand: str = "zeo") -> dict:
                 "answer_mode": str(item.get("answer_mode", "direct")),
                 "risk_level": str(item.get("risk_level", "low")),
                 "source_id": str(item.get("source_id", "")),
+                "question_examples": json.dumps(item.get("question_examples", ""), ensure_ascii=False),
+                "learning_tags": json.dumps(item.get("learning_tags", ""), ensure_ascii=False),
+                "profile_slots": json.dumps(item.get("profile_slots", ""), ensure_ascii=False),
+                "escalation_policy": str(item.get("escalation_policy", "")),
                 "priority": int(item.get("priority", 0)),
             }
             
@@ -202,12 +208,22 @@ async def sync_brand(brand: str = "zeo") -> dict:
             synced += 1
             logger.info("✓ [%s] %s", brand.upper(), item.get("intent"))
 
+        deleted_stale = 0
+        async for key in r.scan_iter(match=f"{index_name}:doc:*", count=200):
+            key_str = key.decode("utf-8") if isinstance(key, bytes) else str(key)
+            if key_str in active_doc_keys:
+                continue
+            await r.delete(key)
+            deleted_stale += 1
+            logger.info("✕ [%s] stale doc removed: %s", brand.upper(), key_str)
+
         return {
             "brand": brand,
             "index": index_name,
             "synced": synced,
             "skipped": skipped,
             "errors": errors,
+            "deleted_stale": deleted_stale,
             "total": len(items),
         }
     finally:

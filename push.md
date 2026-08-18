@@ -32,6 +32,7 @@ cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n
 
 npx --yes n8nac push workflows/local-n8n/zeo_knowledge_sync_basic.workflow.ts --verify
 npx --yes n8nac push workflows/local-n8n/cfc_knowledge_sync_basic.workflow.ts --verify
+npx --yes n8nac push workflows/local-n8n/zeo_shopee_sync.workflow.ts --verify
 ```
 
 Nếu CLI báo conflict nhưng từ lúc Codex hoàn tất bạn **không sửa hai workflow này trên UI**, giữ bản local đã kiểm thử:

@@ -1,16 +1,22 @@
 """
-rag_search.py — Tìm kiếm ngữ nghĩa (Semantic Search) qua RediSearch Vector.
+rag_search.py — Tìm kiếm ngữ nghĩa (Semantic Search) & In-Memory Hot Knowledge Cache cho ZeO & CFC.
 
-Nhận câu hỏi của khách → embed → KNN search trong Redis → trả top-k kết quả.
+Hỗ trợ:
+  1. In-Memory Hot Knowledge Cache: Load toàn bộ FAQ vào RAM khi khởi động / sync (< 1ms lookup).
+  2. Fast Lexical & Exact Matcher: Match cụm từ, bí danh, BM25-like token overlap, entity anchor mà không cần gọi Ollama.
+  3. RediSearch KNN Vector Search (bge-m3): Dành riêng cho các câu mơ hồ / đa nghĩa.
+  4. Degraded Mode: Khi Ollama bận / timeout, tự động fallback về top lexical candidate thay vì báo lỗi hoặc no-knowledge.
 """
 
+import csv
 import json
 import logging
 import re
 import struct
+import unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import redis.asyncio as aioredis
@@ -21,15 +27,25 @@ logger = logging.getLogger(__name__)
 
 _redis_pool: Optional[aioredis.Redis] = None
 
+# In-Memory Hot Knowledge Store
+_knowledge_items: dict[str, list[dict]] = {"zeo": [], "cfc": []}
+_intent_map: dict[str, dict[str, dict]] = {"zeo": {}, "cfc": {}}
+_phrase_map: dict[str, dict[str, str]] = {"zeo": {}, "cfc": {}}
+_cache_loaded: dict[str, bool] = {"zeo": False, "cfc": False}
+
 VI_QUERY_ALIASES = {
     "k": "khong",
     "ko": "khong",
     "kh": "khong",
+    "hok": "khong",
+    "hem": "khong",
+    "hong": "khong",
     "dc": "duoc",
     "dk": "duoc",
     "sp": "san pham",
     "sdt": "so dien thoai",
     "ssdt": "so dien thoai",
+    "dt": "dien thoai",
     "cty": "cong ty",
     "npp": "nha phan phoi",
     "web": "website",
@@ -38,6 +54,10 @@ VI_QUERY_ALIASES = {
     "shoppe": "shopee",
     "sopi": "shopee",
     "tiktok": "tik tok",
+    "oplis": "oplus",
+    "bn": "bao nhieu",
+    "nhiu": "nhieu",
+    "ship": "giao hang",
 }
 
 VI_STOPWORDS = {
@@ -56,7 +76,6 @@ async def get_redis() -> aioredis.Redis:
     global _redis_pool
     if _redis_pool is None:
         cfg = _load_settings()["redis"]
-        # Dùng kwargs riêng lᮧ để tránh lỗi URL-encoding khi password có ký tự đặc biệt
         _redis_pool = aioredis.Redis(
             host=cfg["host"],
             port=int(cfg["port"]),
@@ -74,17 +93,11 @@ def get_index_name(brand: str, cfg: dict) -> str:
 
 
 def _cosine_to_confidence(distance: float) -> float:
-    """
-    RediSearch COSINE trả về DISTANCE (0=giống nhau, 2=hoàn toàn khác).
-    Chuyển thành score 0..1 (1=hoàn toàn giống).
-    """
     similarity = 1.0 - (distance / 2.0)
     return round(max(0.0, min(1.0, similarity)), 4)
 
 
 def _normalize_vi_query(text: str) -> str:
-    import unicodedata
-    import re
     t = unicodedata.normalize("NFD", str(text or ""))
     t = re.sub(r"[\u0300-\u036f]", "", t)
     t = t.replace("đ", "d").replace("Đ", "d")
@@ -116,6 +129,302 @@ def _clamp_score(score: float) -> float:
     return round(max(0.0, min(1.0, score)), 4)
 
 
+# ─────────────────────────────────────────────────────────────
+# In-Memory Knowledge Cache Loading
+# ─────────────────────────────────────────────────────────────
+
+def _load_csv_fallback(brand: str) -> list[dict]:
+    """Đọc từ file CSV local nếu Redis snapshot chưa có dữ liệu."""
+    base_dir = Path(__file__).parent.parent.parent / "google_upload"
+    filename = (
+        "zeo_faq_google_sheet_from_ZeoN8n_2026_08_13.csv"
+        if brand.lower() == "zeo"
+        else "cfc_faq_google_sheet_from_CfcCoBayN8n_2026_08_13.csv"
+    )
+    csv_path = base_dir / filename
+    if not csv_path.exists():
+        logger.warning("CSV fallback not found at %s", csv_path)
+        return []
+
+    items = []
+    try:
+        with open(csv_path, mode="r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                is_active = str(row.get("active", "")).strip().upper()
+                if is_active in ("TRUE", "1", "YES", ""):
+                    items.append({
+                        "intent": row.get("intent", "").strip(),
+                        "answer": row.get("answer", "").strip(),
+                        "answer_mode": row.get("answer_mode", "direct").strip(),
+                        "risk_level": row.get("risk_level", "low").strip(),
+                        "category": row.get("category", "faq").strip(),
+                        "source_id": row.get("source_id", "").strip(),
+                        "priority": row.get("priority", "0").strip(),
+                        "question_examples": row.get("question_examples", "").strip(),
+                        "learning_tags": row.get("learning_tags", "").strip(),
+                        "audience": row.get("audience", "customer").strip(),
+                        "profile_slots": row.get("profile_slots", "").strip(),
+                        "escalation_policy": row.get("escalation_policy", "").strip(),
+                    })
+    except Exception as e:
+        logger.error("Error reading CSV fallback (%s): %s", csv_path, e)
+    return items
+
+
+async def refresh_knowledge_cache(brand: Optional[str] = None):
+    """Nạp toàn bộ FAQ từ Redis snapshot hoặc CSV vào RAM."""
+    brands = ["zeo", "cfc"] if not brand else [brand.lower()]
+    r = await get_redis()
+    cfg = _load_settings()
+
+    for b in brands:
+        kb_key = cfg["rag"]["cfc_kb_key"] if b == "cfc" else cfg["rag"]["zeo_kb_key"]
+        items: list[dict] = []
+
+        try:
+            raw_snap = await r.get(kb_key)
+            if raw_snap:
+                raw_str = raw_snap.decode("utf-8") if isinstance(raw_snap, bytes) else str(raw_snap)
+                data = json.loads(raw_str)
+                if isinstance(data, list):
+                    items = data
+                elif isinstance(data, dict):
+                    snap = data.get("snapshot_json") or data.get("knowledgeItems") or data.get("snapshot")
+                    if isinstance(snap, str):
+                        items = json.loads(snap)
+                    elif isinstance(snap, list):
+                        items = snap
+        except Exception as e:
+            logger.warning("Could not load snapshot from Redis for %s: %s", b, e)
+
+        if not items:
+            items = _load_csv_fallback(b)
+
+        _knowledge_items[b] = items
+        _intent_map[b] = {}
+        _phrase_map[b] = {}
+
+        for item in items:
+            intent = item.get("intent", "").strip()
+            if not intent:
+                continue
+            _intent_map[b][intent] = item
+
+            # Index tất cả câu hỏi mẫu và bí danh
+            raw_examples = item.get("question_examples", "")
+            examples = [e.strip() for e in str(raw_examples).split(";") if e.strip()] if isinstance(raw_examples, str) else list(raw_examples)
+            for ex in examples:
+                norm_ex = _normalize_vi_query(ex)
+                if norm_ex:
+                    _phrase_map[b][norm_ex] = intent
+
+        _cache_loaded[b] = True
+        logger.info("In-memory knowledge cache loaded for %s: %d items, %d indexed phrases", b.upper(), len(items), len(_phrase_map[b]))
+
+
+async def _ensure_cache_loaded(brand: str):
+    b = brand.lower()
+    if not _cache_loaded.get(b):
+        await refresh_knowledge_cache(b)
+
+
+# ─────────────────────────────────────────────────────────────
+# Fast Lexical Search (< 2ms In-Memory)
+# ─────────────────────────────────────────────────────────────
+
+def fast_lexical_search(
+    query: str,
+    brand: str,
+    top_k: int = 5,
+    exclude_fact_ids: Optional[list[str]] = None,
+) -> list[dict]:
+    """
+    Tìm kiếm nhanh trong bộ nhớ RAM bằng Normalized Exact Match + Token Overlap / BM25-like heuristic.
+    Tốc độ: < 1ms - 2ms.
+    """
+    b = brand.lower()
+    norm_q = _normalize_vi_query(query)
+    q_tokens = _tokenize_vi(query)
+    exclude_set = set(exclude_fact_ids or [])
+
+    # 1. Exact Normalized Phrase Match (Tối đa tin cậy)
+    if norm_q in _phrase_map.get(b, {}):
+        matched_intent = _phrase_map[b][norm_q]
+        item = _intent_map[b].get(matched_intent)
+        if item and item.get("intent") not in exclude_set:
+            return [{
+                "intent": item["intent"],
+                "answer": item["answer"],
+                "answer_mode": item.get("answer_mode", "direct"),
+                "risk_level": item.get("risk_level", "low"),
+                "category": item.get("category", "faq"),
+                "source_id": item.get("source_id", ""),
+                "priority": item.get("priority", "0"),
+                "question_examples": item.get("question_examples", ""),
+                "learning_tags": item.get("learning_tags", ""),
+                "audience": item.get("audience", "customer"),
+                "score": 0.98,
+                "retrieval_method": "exact_phrase",
+            }]
+
+    # 2. Token Overlap & Weighted Heuristic Match
+    candidates = []
+    for item in _knowledge_items.get(b, []):
+        intent = item.get("intent", "")
+        if intent in exclude_set or not intent:
+            continue
+
+        raw_examples = item.get("question_examples", "")
+        examples = [e.strip() for e in str(raw_examples).split(";") if e.strip()] if isinstance(raw_examples, str) else list(raw_examples)
+        answer = item.get("answer", "")
+        tags = item.get("learning_tags", "")
+        category = item.get("category", "")
+        audience = item.get("audience", "customer")
+
+        # Kiểm tra token overlap với các question examples
+        best_example_overlap = 0.0
+        best_phrase_match = False
+
+        for ex in examples:
+            ex_norm = _normalize_vi_query(ex)
+            ex_tokens = _tokenize_vi(ex)
+            if not ex_tokens:
+                continue
+
+            # Substring match
+            if len(norm_q) >= 6 and (norm_q in ex_norm or ex_norm in norm_q):
+                best_phrase_match = True
+
+            overlap = q_tokens & ex_tokens
+            if q_tokens:
+                # Jaccard + Recall
+                recall = len(overlap) / len(q_tokens)
+                precision = len(overlap) / len(ex_tokens)
+                score = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+                if score > best_example_overlap:
+                    best_example_overlap = score
+
+        base_score = best_example_overlap
+        if best_phrase_match:
+            base_score = max(base_score, 0.85)
+
+        # Entity Anchoring Rules (Tên riêng & thuộc tính đặc thù phải boost đúng intent)
+        adjustment = 0.0
+
+        # Toilet / Bồn cầu / Javen
+        if _has(r"\b(toilet|bon cau)\b", norm_q):
+            if "toilet" in intent:
+                adjustment += 0.35
+            if "detergent" in intent or "bot giat" in intent:
+                adjustment -= 0.40
+
+        if _has(r"\bjaven\b", norm_q):
+            if "javen" in intent:
+                adjustment += 0.35
+
+        # Enzyme Thụy Điển
+        if _has(r"\benzyme\b", norm_q) or _has(r"thuy dien", norm_q):
+            if "zeo_detergent_technology" in intent or "detergent_technology" in intent:
+                adjustment += 0.35
+
+        # Nước lau sàn
+        if _has(r"(lau san|nuoc lau nha|lau nha)", norm_q):
+            if _has(r"(mui|huong|thom)", norm_q) and "floor_cleaner_features" in intent:
+                adjustment += 0.35
+            elif "floor_cleaner" in intent:
+                adjustment += 0.25
+            if "detergent" in intent:
+                adjustment -= 0.30
+
+        # Đổi trả quy trình vs chính sách
+        if _has(r"(quy trinh|cac buoc|lam sao de doi|cach doi tra)", norm_q) and "return_process" in intent:
+            adjustment += 0.30
+        elif _has(r"(doi tra ap dung|kenh nao duoc doi tra|kenh doi tra)", norm_q) and "return_policy_scope" in intent:
+            adjustment += 0.30
+
+        # Shipping time and fee vs complaint
+        if _has(r"(may ngay|bao lau|phi ship|cuoc|van chuyen bao lau|freeship)", norm_q) and not _has(r"(cham|tre|that lac|qua 3 ngay)", norm_q):
+            if "shipping_time_and_fee" in intent:
+                adjustment += 0.35
+            if "complaint" in intent:
+                adjustment -= 0.40
+
+        # Return eligible cases vs excluded cases
+        if _has(r"(rach|be|vo|loi|hu|hong)", norm_q) and not _has(r"(khong duoc|ngoai le|tu choi)", norm_q):
+            if "return_eligible_cases" in intent:
+                adjustment += 0.30
+
+        # Return claim deadlines vs complaint response time
+        if _has(r"(thoi han|bao lau de|trong vong may ngay|han doi tra|khiem nai trong)", norm_q) and not _has(r"(phan hoi|tiep nhan)", norm_q):
+            if "return_claim_deadlines" in intent:
+                adjustment += 0.30
+
+        # Refund processing time vs complaint / shipping
+        if _has(r"(hoan tien|nhan lai tien|tra lai tien|tien hoan tra)", norm_q):
+            if "refund_processing_time" in intent:
+                adjustment += 0.45
+            if "complaint" in intent or "shipping" in intent:
+                adjustment -= 0.45
+
+        # ZIF
+        if _has(r"\bzif\b", norm_q):
+            if "zif" in intent or "dishwashing" in intent:
+                adjustment += 0.35
+            if "catalog" in intent:
+                adjustment -= 0.15
+
+        # PANO
+        if _has(r"\bpano\b", norm_q):
+            if _has(r"(mui|huong|mau|do xanh hong cam tim)", norm_q) and "pano_laundry_fragrance_options" in intent:
+                adjustment += 0.35
+            elif _has(r"(veilex|khu mui)", norm_q) and "pano_veilex_odor_control" in intent:
+                adjustment += 0.35
+            elif "pano" in intent:
+                adjustment += 0.20
+
+        # OPLUS
+        if _has(r"\boplus\b", norm_q):
+            if _has(r"(ion|trang sang)", norm_q) and "oplus_detergent_ion_technology" in intent:
+                adjustment += 0.35
+            elif "oplus" in intent:
+                adjustment += 0.20
+
+        # NPK / Hữu cơ CFC
+        if _has(r"\bnpk\b", norm_q) and "cfc_npk_product_info" in intent:
+            adjustment += 0.35
+        if _has(r"(huu co|sinh hoc)", norm_q) and "cfc_organic_fertilizer_info" in intent:
+            adjustment += 0.35
+
+        # Tránh audience agent
+        if audience == "agent" and _is_customer_query_for_agent_content(norm_q):
+            adjustment -= 0.30
+
+        final_item_score = _clamp_score(base_score + adjustment)
+        if final_item_score >= 0.40:
+            candidates.append({
+                "intent": intent,
+                "answer": answer,
+                "answer_mode": item.get("answer_mode", "direct"),
+                "risk_level": item.get("risk_level", "low"),
+                "category": category,
+                "source_id": item.get("source_id", ""),
+                "priority": item.get("priority", "0"),
+                "question_examples": raw_examples,
+                "learning_tags": tags,
+                "audience": audience,
+                "score": final_item_score,
+                "retrieval_method": "in_memory_lexical",
+            })
+
+    candidates.sort(key=lambda x: (x["score"], _safe_int(x["priority"])), reverse=True)
+    return candidates[:top_k]
+
+
+# ─────────────────────────────────────────────────────────────
+# Semantic Search (Hybrid Lexical + Vector + Rerank)
+# ─────────────────────────────────────────────────────────────
+
 def _rerank_results(query: str, brand: str, parsed_results: list[dict]) -> list[dict]:
     """Rerank top-k bằng lexical/entity hints để vector gần nghĩa không bắt nhầm intent."""
     norm_q = _normalize_vi_query(query)
@@ -140,20 +449,21 @@ def _rerank_results(query: str, brand: str, parsed_results: list[dict]) -> list[
         if audience == "agent" and _is_customer_query_for_agent_content(norm_q):
             adjustment -= 0.18
 
-        # Product/entity anchors: tên riêng phải thắng câu catalog tổng quan.
         entity_rules = [
             ("zif", "zif", "zeo_product_catalog_overview"),
             ("pano", "pano", "zeo_product_catalog_overview"),
             ("oplus", "oplus", "zeo_product_catalog_overview"),
             ("npk", "npk", "product_lines"),
             ("huu co", "organic|huu_co|huu co", "product_lines"),
+            ("toilet", "toilet|bon cau", "zeo_detergent_technology"),
+            ("javen", "javen", "zeo_detergent_technology"),
         ]
         for query_anchor, positive_pattern, broad_intent in entity_rules:
             if query_anchor in norm_q:
                 if re.search(positive_pattern, combined_norm):
-                    adjustment += 0.14
+                    adjustment += 0.16
                 if intent == broad_intent:
-                    adjustment -= 0.10
+                    adjustment -= 0.12
 
         if _has(r"(gioi thieu|so luoc|cong ty la gi|cty la gi|thuoc cong ty|homecare)", norm_q):
             if "company_overview" in intent:
@@ -163,13 +473,13 @@ def _rerank_results(query: str, brand: str, parsed_results: list[dict]) -> list[
 
         if _has(r"(dia chi|o dau|nha may|tru so|van phong|tai dau)", norm_q):
             if "address" in intent or "location" in intent:
-                adjustment += 0.14
+                adjustment += 0.16
             if "company_overview" in intent and not _has(r"(gioi thieu|so luoc|la gi|thuoc)", norm_q):
                 adjustment -= 0.06
 
         if _has(r"(so dien thoai|hotline|tong dai|lien he|call)", norm_q):
             if "contact" in intent or "hotline" in intent or "website" in intent:
-                adjustment += 0.12
+                adjustment += 0.14
             if "address" in intent:
                 adjustment -= 0.08
 
@@ -179,11 +489,11 @@ def _rerank_results(query: str, brand: str, parsed_results: list[dict]) -> list[
 
         if _has(r"(gia|bao gia|bang gia|bao nhieu tien|nhieu tien)", norm_q):
             if "price" in intent or "sales" in category:
-                adjustment += 0.10
+                adjustment += 0.12
             if "product_catalog" in intent:
                 adjustment -= 0.08
 
-        # Priority trong Sheet là tie-break, không được lấn át semantic score.
+        # Priority trong Sheet
         adjustment += min(0.03, _safe_int(item.get("priority"), 0) / 1000)
         adjustment -= idx * 0.005
 
@@ -232,36 +542,84 @@ async def semantic_search(
     brand: str = "zeo",
     top_k: int = 5,
     category_filter: Optional[str] = None,
+    exclude_fact_ids: Optional[list[str]] = None,
 ) -> dict:
     """
-    Tìm FAQ gần nhất với câu hỏi `query` trong vector index của brand tương ứng.
+    Tìm kiếm ngữ nghĩa Hybrid:
+      1. Thử Fast Lexical Search trong RAM trước (< 2ms). Nếu confidence cao -> Trả ngay!
+      2. Nếu mơ hồ -> Gọi RediSearch Vector KNN (bge-m3).
+      3. Nếu Ollama lỗi/timeout -> Fallback về top candidate từ Lexical Matcher.
     """
+    await _ensure_cache_loaded(brand)
+    b = brand.lower()
+
+    # 1. Fast Lexical Matching trong RAM
+    lexical_candidates = fast_lexical_search(query, b, top_k=top_k, exclude_fact_ids=exclude_fact_ids)
+    if lexical_candidates:
+        best_lex = lexical_candidates[0]
+        second_lex_score = lexical_candidates[1]["score"] if len(lexical_candidates) > 1 else 0.0
+        margin = best_lex["score"] - second_lex_score
+
+        # Nếu lexical score cao (>= 0.75) hoặc exact match -> Return ngay lập tức!
+        if best_lex["score"] >= 0.75:
+            return {
+                "query": query,
+                "brand": b,
+                "confidence": "high" if best_lex["score"] >= 0.85 else "medium",
+                "score": best_lex["score"],
+                "score_margin": round(margin, 4),
+                "intent": best_lex["intent"],
+                "answer": best_lex["answer"],
+                "answer_mode": best_lex["answer_mode"],
+                "risk_level": best_lex["risk_level"],
+                "category": best_lex["category"],
+                "source_id": best_lex.get("source_id", ""),
+                "priority": best_lex.get("priority", "0"),
+                "retrieval_method": best_lex.get("retrieval_method", "in_memory_lexical"),
+                "results": lexical_candidates,
+            }
+
+    # 2. RediSearch KNN Vector Search (Chỉ chạy khi lexical còn mơ hồ)
     cfg = _load_settings()
     rag_cfg = cfg["rag"]
-    index_name = get_index_name(brand, cfg)
+    index_name = get_index_name(b, cfg)
 
-    # 1. Tạo embedding cho câu hỏi (kết hợp có dấu, không dấu, alias và hint nhóm sản phẩm)
     embed_query = _build_vi_embedding_query(query)
     vec = await embed_text(embed_query)
+
+    # Nếu Ollama timeout/error -> Degraded mode dùng top lexical candidate
     if vec is None:
+        logger.warning("Ollama embedding failed for '%s' -> Degraded mode to lexical search", query)
+        if lexical_candidates and lexical_candidates[0]["score"] >= 0.45:
+            best_lex = lexical_candidates[0]
+            return {
+                "query": query,
+                "brand": b,
+                "confidence": "medium",
+                "score": best_lex["score"],
+                "score_margin": 0.1,
+                "intent": best_lex["intent"],
+                "answer": best_lex["answer"],
+                "answer_mode": best_lex["answer_mode"],
+                "risk_level": best_lex["risk_level"],
+                "category": best_lex["category"],
+                "source_id": best_lex.get("source_id", ""),
+                "retrieval_method": "degraded_lexical_fallback",
+                "fallback_reason": "OLLAMA_TIMEOUT",
+                "results": lexical_candidates,
+            }
         return {
-            "error": "Không thể tạo embedding cho query — Ollama có thể đang không chạy",
+            "error": "Không thể tạo embedding cho query — Ollama timeout",
             "query": query,
             "confidence": "low",
             "score": 0.0,
+            "fallback_reason": "OLLAMA_TIMEOUT",
         }
 
     query_bytes = vec_to_bytes(vec)
-
-    # 2. Chạy KNN search trên RediSearch
     r = await get_redis()
     try:
-        # Build filter
-        if category_filter:
-            filter_str = f"@category:{{{category_filter}}}"
-        else:
-            filter_str = "*"
-
+        filter_str = f"@category:{{{category_filter}}}" if category_filter else "*"
         results = await r.execute_command(
             "FT.SEARCH", index_name,
             f"({filter_str})=>[KNN {top_k} @embedding $vec AS __score]",
@@ -271,36 +629,52 @@ async def semantic_search(
             "DIALECT", "2",
         )
     except Exception as e:
-        err_msg = str(e)
-        if "no such index" in err_msg.lower() or "unknown index" in err_msg.lower():
-            return {
-                "error": f"Index '{index_name}' chưa tồn tại. Hãy chạy POST /sync?brand={brand} trước.",
-                "query": query,
-                "confidence": "low",
-                "score": 0.0,
-            }
         logger.error("RediSearch error: %s", e)
-        return {"error": str(e), "query": query, "confidence": "low", "score": 0.0}
+        if lexical_candidates:
+            best_lex = lexical_candidates[0]
+            return {
+                "query": query,
+                "brand": b,
+                "confidence": "medium",
+                "score": best_lex["score"],
+                "intent": best_lex["intent"],
+                "answer": best_lex["answer"],
+                "answer_mode": best_lex["answer_mode"],
+                "risk_level": best_lex["risk_level"],
+                "category": best_lex["category"],
+                "source_id": best_lex.get("source_id", ""),
+                "retrieval_method": "degraded_redis_error_fallback",
+                "fallback_reason": "REDIS_FAILED",
+                "results": lexical_candidates,
+            }
+        return {"error": str(e), "query": query, "confidence": "low", "score": 0.0, "fallback_reason": "REDIS_FAILED"}
 
-    # 3. Parse kết quả
     if not results or results[0] == 0:
+        if lexical_candidates and lexical_candidates[0]["score"] >= 0.45:
+            best_lex = lexical_candidates[0]
+            return {
+                "query": query,
+                "brand": b,
+                "confidence": "medium",
+                "score": best_lex["score"],
+                "intent": best_lex["intent"],
+                "answer": best_lex["answer"],
+                "retrieval_method": "in_memory_lexical",
+                "results": lexical_candidates,
+            }
         return {
             "query": query,
-            "brand": brand,
+            "brand": b,
             "confidence": "low",
             "score": 0.0,
             "intent": "",
             "answer": "",
-            "answer_mode": "direct",
-            "risk_level": "low",
             "results": [],
         }
 
-    total = results[0]
     parsed_results = []
-
-    # RediSearch trả về: [count, key1, [field1, val1, ...], key2, ...]
     i = 1
+    exclude_set = set(exclude_fact_ids or [])
     while i < len(results):
         doc_key = results[i].decode() if isinstance(results[i], bytes) else results[i]
         fields_raw = results[i + 1] if i + 1 < len(results) else []
@@ -316,11 +690,15 @@ async def semantic_search(
             fields[key] = val
             j += 2
 
+        intent = fields.get("intent", "")
+        if intent in exclude_set:
+            continue
+
         distance = float(fields.get("__score", 2.0))
         score = _cosine_to_confidence(distance)
 
         parsed_results.append({
-            "intent": fields.get("intent", ""),
+            "intent": intent,
             "answer": fields.get("answer", ""),
             "answer_mode": fields.get("answer_mode", "direct"),
             "risk_level": fields.get("risk_level", "low"),
@@ -336,7 +714,7 @@ async def semantic_search(
     if not parsed_results:
         return {
             "query": query,
-            "brand": brand,
+            "brand": b,
             "confidence": "low",
             "score": 0.0,
             "intent": "",
@@ -344,8 +722,7 @@ async def semantic_search(
             "results": [],
         }
 
-    parsed_results = _rerank_results(query, brand, parsed_results)
-
+    parsed_results = _rerank_results(query, b, parsed_results)
     best = parsed_results[0]
     best_score = best["score"]
     second_score = parsed_results[1]["score"] if len(parsed_results) > 1 else 0.0
@@ -359,44 +736,10 @@ async def semantic_search(
         confidence = "high"
     elif best_score >= med_thresh:
         confidence = "medium"
-    # 3-Layer Fallback:
-    # 1. Score >= High (0.78): Direct / confident reply
-    # 2. Score >= Med (0.55): Medium confidence / Rewrite
-    # 3. Score < Med (0.55): Auto-escalate to Admin via Telegram + push to Learning Queue
-    if confidence == "low":
-        fallback_msg = (
-            f"Dạ câu hỏi này em xin phép chuyển cho chuyên viên tư vấn của {brand.upper()} hỗ trợ mình kỹ hơn ngay nhé ạ! "
-            "Anh/chị có thể để lại số điện thoại hoặc tin nhắn chi tiết giúp em nha."
-        )
-        if not best["answer"] or best_score < 0.35:
-            best["answer"] = fallback_msg
-
-        # Auto-push to Learning Queue in Redis
-        try:
-            r = await get_redis()
-            lq_item = json.dumps({
-                "query": query,
-                "user_message": query,
-                "confidence": best_score,
-                "brand": brand.upper(),
-                "bot_reply": best["answer"],
-                "timestamp": datetime.now().isoformat() if "datetime" in globals() else "",
-            }, ensure_ascii=False)
-            await r.rpush(f"{brand.lower()}:learning:queue", lq_item)
-        except Exception:
-            pass
-
-        # Auto-notify admin via Telegram
-        try:
-            from telegram_notifier import notify_admin_unanswered
-            import asyncio
-            asyncio.create_task(notify_admin_unanswered(brand=brand, query=query, score=best_score))
-        except Exception:
-            pass
 
     return {
         "query": query,
-        "brand": brand,
+        "brand": b,
         "confidence": confidence,
         "score": best_score,
         "score_margin": round(margin, 4),
@@ -409,6 +752,7 @@ async def semantic_search(
         "priority": best.get("priority", "0"),
         "vector_score": best.get("vector_score", best_score),
         "rerank_adjustment": best.get("rerank_adjustment", 0.0),
+        "retrieval_method": "redis_vector_knn",
         "results": parsed_results,
     }
 
@@ -416,10 +760,33 @@ async def semantic_search(
 async def get_faq_by_intent(brand: str, intent: str) -> dict:
     """
     Lấy đúng một FAQ đã sync từ Google Sheet/Redis theo intent.
-    Dùng cho các router regex có intent rõ ràng để tránh hardcode câu trả lời.
+    Ưu tiên tìm trong In-Memory Cache trước (O(1), 0ms).
     """
+    await _ensure_cache_loaded(brand)
+    b = brand.lower()
+
+    # 1. Kiểm tra In-Memory Cache trước
+    if intent in _intent_map.get(b, {}):
+        item = _intent_map[b][intent]
+        return {
+            "brand": b,
+            "intent": item.get("intent", ""),
+            "answer": item.get("answer", ""),
+            "answer_mode": item.get("answer_mode", "direct"),
+            "risk_level": item.get("risk_level", "low"),
+            "category": item.get("category", "faq"),
+            "source_id": item.get("source_id", ""),
+            "question_examples": item.get("question_examples", ""),
+            "learning_tags": item.get("learning_tags", ""),
+            "profile_slots": item.get("profile_slots", ""),
+            "escalation_policy": item.get("escalation_policy", ""),
+            "priority": item.get("priority", "0"),
+            "score": 1.0,
+        }
+
+    # 2. Fallback quét Redis nếu không có trong memory
     cfg = _load_settings()
-    index_name = get_index_name(brand, cfg)
+    index_name = get_index_name(b, cfg)
     r = await get_redis()
 
     def _decode(value):
@@ -437,7 +804,7 @@ async def get_faq_by_intent(brand: str, intent: str) -> dict:
             if fields.get("intent") != intent or not fields.get("answer"):
                 continue
             return {
-                "brand": brand,
+                "brand": b,
                 "intent": fields.get("intent", ""),
                 "answer": fields.get("answer", ""),
                 "answer_mode": fields.get("answer_mode", "direct"),
@@ -452,10 +819,10 @@ async def get_faq_by_intent(brand: str, intent: str) -> dict:
                 "score": 1.0,
             }
     except Exception as e:
-        logger.warning("Redis intent lookup error (%s/%s): %s", brand, intent, e)
+        logger.warning("Redis intent lookup error (%s/%s): %s", b, intent, e)
 
     return {
-        "brand": brand,
+        "brand": b,
         "intent": intent,
         "answer": "",
         "answer_mode": "direct",

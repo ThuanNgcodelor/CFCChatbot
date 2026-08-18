@@ -302,6 +302,14 @@ async def chat_pipeline_endpoint(req: ChatPipelineRequest):
     return await process_chat_pipeline(req)
 
 
+@app.post("/api/shopee/refresh-cache")
+async def refresh_shopee_cache_endpoint(brand: str = Query("all", description="'zeo', 'cfc' hoặc 'all'")):
+    """Làm mới lại in-memory cache cho danh mục sản phẩm Shopee."""
+    from shopee_matcher import refresh_shopee_cache
+    refresh_shopee_cache(brand)
+    return {"status": "ok", "message": f"Shopee cache refreshed for brand={brand}"}
+
+
 # ─────────────────────────────────────────
 # Dev entrypoint
 # ─────────────────────────────────────────

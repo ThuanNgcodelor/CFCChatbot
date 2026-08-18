@@ -20,3 +20,7 @@ python main.py
 # Mở trình duyệt truy cập Admin Dashboard: http://localhost:8000/admin
 
 docker exec -it zeo-redis redis-cli -a "crS9Lb7f/ywrTCiRP22gc32QCLZpirWIkczbnhjYIdU1o02Z"
+
+
+cd /Users/hyden/Documents/David-nguyen/N8n
+.venv/bin/python3 ChatbotN8n/javis/server/crawl_shopee_shop.py zeovietnamofficial

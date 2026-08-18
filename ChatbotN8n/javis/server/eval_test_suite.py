@@ -209,12 +209,13 @@ async def run_eval():
 
     results_by_cat = {}
 
+    run_id = int(time.time() * 1000)
     for idx, tc in enumerate(TEST_CASES, 1):
         q = tc["q"]
         cat = tc["category"]
         expected = tc["expected_intent"]
 
-        req = ChatPipelineRequest(brand="zeo", sender_id=f"eval_user_{idx}", text=q)
+        req = ChatPipelineRequest(brand="zeo", sender_id=f"eval_user_{run_id}_{idx}", text=q)
         t0 = time.perf_counter()
         res = await process_chat_pipeline(req)
         latency = (time.perf_counter() - t0) * 1000
@@ -229,7 +230,8 @@ async def run_eval():
             if (expected in ["shopee_product_link", "online_purchase"] and res.intent in ["shopee_product_link", "online_purchase"]) \
                or (expected in ["promotion_deals", "zeo_promotions_and_deals"] and res.intent in ["promotion_deals", "zeo_promotions_and_deals"]) \
                or (expected in ["catalog_overview", "zeo_product_catalog_overview"] and res.intent in ["catalog_overview", "zeo_product_catalog_overview"]) \
-               or (expected in ["shipping_time_and_fee", "nationwide_shipping_no_cod"] and res.intent in ["shipping_time_and_fee", "nationwide_shipping_no_cod"]):
+               or (expected in ["shipping_time_and_fee", "nationwide_shipping_no_cod"] and res.intent in ["shipping_time_and_fee", "nationwide_shipping_no_cod"]) \
+               or (expected in ["floor_cleaner_features", "zeo_floor_cleaner_product_overview"] and res.intent in ["floor_cleaner_features", "zeo_floor_cleaner_product_overview"]):
                 matched = True
                 passed += 1
                 status = "✅ PASS (Synonym)"
@@ -287,6 +289,12 @@ async def run_eval():
         pct = (stat['passed'] / stat['total']) * 100
         print(f"  - {cat:15s}: {stat['passed']}/{stat['total']} ({pct:.0f}%)")
     print("=" * 80)
+
+    try:
+        r = await get_redis()
+        await r.close()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

@@ -217,6 +217,13 @@ async def sync_brand(brand: str = "zeo") -> dict:
             deleted_stale += 1
             logger.info("✕ [%s] stale doc removed: %s", brand.upper(), key_str)
 
+        try:
+            from rag_search import refresh_knowledge_cache
+            await refresh_knowledge_cache(brand)
+            logger.info("✓ [%s] In-memory hot knowledge cache refreshed", brand.upper())
+        except Exception as e:
+            logger.warning("Could not refresh in-memory cache: %s", e)
+
         return {
             "brand": brand,
             "index": index_name,

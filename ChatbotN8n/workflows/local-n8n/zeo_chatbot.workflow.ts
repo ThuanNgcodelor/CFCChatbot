@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : Zeo Chatbot
-// Nodes   : 23  |  Connections: 30
+// Nodes   : 23  |  Connections: 5
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -38,32 +38,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //      → GoiFastApiChatPipeline
 //        → PrepareMessengerReply
 //          → NhanKhachAuto
-//        → GetCustomerProfile
-//          → MergeCustomerProfile
-//            → GetSession
-//              → GoiOllamaNluLocal
-//                → DialogueManager
-//                  → GetKnowledgeSnapshot
-//                    → RagTimKiem
-//                      → RouterCoNguon
-//                        → SaveCustomerProfile
-//                        → SaveSession
-//                          → NhanKhachAuto (↩ loop)
-//                       .out(1) → GoiOllamaLocal
-//                          → KiemChung
-//                            → RouterGuardrail
-//                              → SaveCustomerProfile (↩ loop)
-//                              → SaveSession (↩ loop)
-//                             .out(1) → SaveCustomerProfile (↩ loop)
-//                             .out(1) → SaveSession (↩ loop)
-//                             .out(1) → QueueLearningReview
-//                                → PrepareTelegramAlert
-//                                  → NotifyTelegramOperations
-//                          → KiemChung (↩ loop)
-//                       .out(2) → SaveCustomerProfile (↩ loop)
-//                       .out(2) → SaveSession (↩ loop)
-//                       .out(2) → QueueLearningReview (↩ loop)
-//                → DialogueManager (↩ loop)
+//        → PrepareMessengerReply (↩ loop)
 // </workflow-map>
 
 // =====================================================================
@@ -283,14 +258,19 @@ return [{ json: {
     PrepareMessengerReply = {
         jsCode: `
 const input = $('Loc Dau Vao').first().json;
-const pipelineRes = $input.first().json || {};
-const finalReply = pipelineRes.answer || "Dạ ZeO đã nhận được tin nhắn của bạn và sẽ phản hồi sớm nhất nhé ạ!";
+let pipelineRes = {};
+try {
+  pipelineRes = $input.first().json || {};
+} catch (e) {
+  pipelineRes = {};
+}
+const finalReply = pipelineRes.answer || "Dạ ZeO Vietnam đã nhận được tin nhắn của bạn. Bạn để lại nhu cầu cụ thể hoặc số điện thoại, admin sẽ hỗ trợ giải đáp ngay cho mình nha!";
 
 return [{
   json: {
     senderId: input.senderId,
     finalReply: finalReply,
-    intent: pipelineRes.intent || 'unknown',
+    intent: pipelineRes.intent || 'fastapi_degraded_fallback',
     confidence: pipelineRes.confidence || 'medium',
     score: pipelineRes.score || 0,
     hasPhone: pipelineRes.has_phone || false,
@@ -1682,32 +1662,7 @@ return [{
         this.MessengerTrigger.out(0).to(this.LocDauVao.in(0));
         this.LocDauVao.out(0).to(this.GoiFastApiChatPipeline.in(0));
         this.GoiFastApiChatPipeline.out(0).to(this.PrepareMessengerReply.in(0));
-        this.GoiFastApiChatPipeline.error().to(this.GetCustomerProfile.in(0));
+        this.GoiFastApiChatPipeline.error().to(this.PrepareMessengerReply.in(0));
         this.PrepareMessengerReply.out(0).to(this.NhanKhachAuto.in(0));
-        this.GetCustomerProfile.out(0).to(this.MergeCustomerProfile.in(0));
-        this.MergeCustomerProfile.out(0).to(this.GetSession.in(0));
-        this.GetSession.out(0).to(this.GoiOllamaNluLocal.in(0));
-        this.GoiOllamaNluLocal.out(0).to(this.DialogueManager.in(0));
-        this.GoiOllamaNluLocal.error().to(this.DialogueManager.in(0));
-        this.DialogueManager.out(0).to(this.GetKnowledgeSnapshot.in(0));
-        this.GetKnowledgeSnapshot.out(0).to(this.RagTimKiem.in(0));
-        this.RagTimKiem.out(0).to(this.RouterCoNguon.in(0));
-        this.RouterCoNguon.out(0).to(this.SaveCustomerProfile.in(0));
-        this.RouterCoNguon.out(0).to(this.SaveSession.in(0));
-        this.RouterCoNguon.out(1).to(this.GoiOllamaLocal.in(0));
-        this.RouterCoNguon.out(2).to(this.SaveCustomerProfile.in(0));
-        this.RouterCoNguon.out(2).to(this.SaveSession.in(0));
-        this.RouterCoNguon.out(2).to(this.QueueLearningReview.in(0));
-        this.GoiOllamaLocal.out(0).to(this.KiemChung.in(0));
-        this.GoiOllamaLocal.error().to(this.KiemChung.in(0));
-        this.KiemChung.out(0).to(this.RouterGuardrail.in(0));
-        this.RouterGuardrail.out(0).to(this.SaveCustomerProfile.in(0));
-        this.RouterGuardrail.out(0).to(this.SaveSession.in(0));
-        this.RouterGuardrail.out(1).to(this.SaveCustomerProfile.in(0));
-        this.RouterGuardrail.out(1).to(this.SaveSession.in(0));
-        this.RouterGuardrail.out(1).to(this.QueueLearningReview.in(0));
-        this.SaveSession.out(0).to(this.NhanKhachAuto.in(0));
-        this.QueueLearningReview.out(0).to(this.PrepareTelegramAlert.in(0));
-        this.PrepareTelegramAlert.out(0).to(this.NotifyTelegramOperations.in(0));
     }
 }

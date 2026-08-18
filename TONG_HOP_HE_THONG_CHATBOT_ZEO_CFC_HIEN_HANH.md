@@ -565,41 +565,38 @@ Tên workflow:
 Zeo Chatbot
 ```
 
+### 8.1 `zeo_chatbot.workflow.ts`
+
+Tên workflow:
+
+```text
+Zeo Chatbot
+```
+
 Số node:
 
 ```text
-23 nodes, 30 connections
+5 nodes, 5 connections (Streamlined Single-Brain I/O Gateway)
 ```
 
 Vai trò:
 
 - Nhận tin nhắn Messenger cho ZeO.
-- Gọi Python `/api/chat-pipeline` trước.
-- Nếu Python thành công thì prepare reply và gửi Messenger.
-- Nếu Python lỗi thì fallback sang luồng n8n cũ: profile/session/RAG/Ollama/guardrail.
-- Lưu profile/session/learning queue vào Redis.
-- Gửi alert Telegram operations khi cần.
+- Bóc tách payload đầu vào (`LocDauVao`).
+- Chuyển tiếp sang não xử lý Python `/api/chat-pipeline` (`GoiFastApiChatPipeline`).
+- Chuẩn bị tin nhắn phản hồi (`PrepareMessengerReply`).
+- Gửi tin nhắn trả lời trực tiếp cho khách qua Facebook Graph API (`NhanKhachAuto`).
+- Đã loại bỏ hoàn toàn các node rìa/tàn dư cũ để tối ưu hóa hiệu năng và độ ổn định.
 
 Node chính:
 
 | Node | Loại | Vai trò |
 |---|---|---|
 | `MessengerTrigger` | facebookTrigger | Nhận tin Messenger |
-| `LocDauVao` | code | Lọc/chuẩn hóa input |
-| `GoiFastApiChatPipeline` | httpRequest | Gọi `http://127.0.0.1:8000/api/chat-pipeline` |
-| `PrepareMessengerReply` | code | Chuẩn bị reply từ Python |
-| `NhanKhachAuto` | httpRequest | Gửi reply về khách |
-| `GetCustomerProfile` | redis | Đọc `zeo:customer:messenger:{senderId}` |
-| `GetSession` | redis | Đọc `zeo:session:messenger:{senderId}` |
-| `GetKnowledgeSnapshot` | redis | Đọc `zeo:kb:basic:active` |
-| `RagTimKiem` | code | RAG fallback trong n8n |
-| `GoiOllamaLocal` | httpRequest | Gọi Ollama local rewrite |
-| `KiemChung` | code | Kiểm chứng output |
-| `RouterGuardrail` | if | Chặn câu không chắc/sai |
-| `SaveCustomerProfile` | redis | Lưu profile |
-| `SaveSession` | redis | Lưu session |
-| `QueueLearningReview` | redis | Push `zeo:learning:queue` |
-| `NotifyTelegramOperations` | executeWorkflow | Gọi workflow alert |
+| `LocDauVao` | code | Lọc/chuẩn hóa input, bóc tách text/senderId/messageId |
+| `GoiFastApiChatPipeline` | httpRequest | Gọi `http://127.0.0.1:8000/api/chat-pipeline` (Single Brain) |
+| `PrepareMessengerReply` | code | Chuẩn bị final reply trả về từ Python |
+| `NhanKhachAuto` | httpRequest | Gửi reply về khách hàng qua Graph API Facebook |
 
 Route chính:
 
@@ -609,24 +606,6 @@ MessengerTrigger
 → GoiFastApiChatPipeline
 → PrepareMessengerReply
 → NhanKhachAuto
-```
-
-Route fallback nếu Python lỗi:
-
-```text
-GoiFastApiChatPipeline.error
-→ GetCustomerProfile
-→ MergeCustomerProfile
-→ GetSession
-→ GoiOllamaNluLocal
-→ DialogueManager
-→ GetKnowledgeSnapshot
-→ RagTimKiem
-→ RouterCoNguon
-→ direct answer hoặc rewrite/guardrail
-→ SaveCustomerProfile
-→ SaveSession
-→ NhanKhachAuto hoặc QueueLearningReview
 ```
 
 ### 8.2 `cfc_cobay_chatbot.workflow.ts`
@@ -640,14 +619,15 @@ CFC Co Bay Chatbot
 Số node:
 
 ```text
-23 nodes, 30 connections
+5 nodes, 5 connections (Streamlined Single-Brain I/O Gateway)
 ```
 
-Vai trò giống `zeo_chatbot.workflow.ts` nhưng dùng namespace CFC:
+Vai trò giống `zeo_chatbot.workflow.ts` nhưng dùng cho thương hiệu CFC Cò Bay:
 
 ```text
-cfc:customer:messenger:{senderId}
-cfc:session:messenger:{senderId}
+brand: "cfc"
+Facebook Page ID: 946909570780806
+```
 cfc:kb:basic:active
 cfc:learning:queue
 ```
@@ -1335,8 +1315,8 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Hỏi **Website** $\rightarrow$ Trả về website chính thức `https://zeo.vn/` hoặc `https://cfccobay.vn/` từ Google Sheet.
    - Hỏi **Link Shopee / Đặt Online** $\rightarrow$ Trả về gian hàng Shopee Mall chính hãng hoặc link mua hàng từ Sheet.
 
-9. **Chuẩn Hóa Link Shopee Ngắn Gọn (`https://shopee.vn/product/{shop_id}/{item_id}`)**:
-   - Toàn bộ link sản phẩm Shopee gửi cho khách hàng được tự động rút gọn thành dạng chuẩn Shopee Mall: `https://shopee.vn/product/20523065/{item_id}` (độ dài chỉ ~40 ký tự thay vì 200+ ký tự có slug tiếng Việt dài loằng ngoằng). Click vào mở thẳng ứng dụng Shopee hoặc web Shopee của đúng sản phẩm.
+9. **Chuẩn Hóa Link Shopee Mall Chính Hãng Chuẩn Xác 100%**:
+   - Toàn bộ link sản phẩm Shopee được nạp trực tiếp từ danh mục chính thức của gian hàng ZeO Vietnam Official trên Shopee Mall (`zeo:shopee:catalog:active`), đảm bảo đầy đủ tham số định tuyến để mở thẳng App Shopee hoặc Web Shopee mà không bị lỗi 404 hay lỗi ký tự.
 
 10. **Bộ Lọc Câu Hỏi Cá Nhân & Phản Hồi Lịch Sự (Polite Dismiss & Clarification)**:
    - Khách hỏi cá nhân / ngoài lề (*"có biết anh Thuận là anh nào không"*, *"ai tạo ra bot"*): Bot phản hồi lịch sự xác định vai trò trợ lý CSKH và hỏi lại nhu cầu sản phẩm.

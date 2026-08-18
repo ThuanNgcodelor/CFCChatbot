@@ -57,20 +57,6 @@ def _format_discount(disc: Any) -> str:
         return s if s.endswith("%") else f"{s}%"
 
 
-def _shorten_shopee_url(url: str) -> str:
-    """Rút gọn link Shopee dài thành dạng ngắn chuẩn: https://shopee.vn/product/{shop_id}/{item_id}"""
-    if not url:
-        return "https://shopee.vn/zeovietnamofficial"
-    url_str = str(url).strip()
-    m = re.search(r"i\.(\d+)\.(\d+)", url_str)
-    if m:
-        return f"https://shopee.vn/product/{m.group(1)}/{m.group(2)}"
-    m2 = re.search(r"product/(\d+)/(\d+)", url_str)
-    if m2:
-        return f"https://shopee.vn/product/{m2.group(1)}/{m2.group(2)}"
-    return url_str
-
-
 def _get_redis_sync_client() -> Optional[redis.Redis]:
     settings_path = Path(__file__).parent / "settings.json"
     if not settings_path.exists():
@@ -94,7 +80,6 @@ def _load_catalog_from_csv(brand: str) -> list[dict]:
     """Fallback đọc catalog từ file CSV template nếu Redis chưa có."""
     csv_candidates = [
         Path(__file__).resolve().parents[2] / "google_upload" / "zeo_shopee_catalog_template.csv",
-        Path(__file__).resolve().parents[2] / "google_upload" / "zeovietnamofficial_shopee_catalog_crawled.csv",
     ]
     for p in csv_candidates:
         if p.exists():
@@ -128,7 +113,7 @@ def _load_catalog_from_csv(brand: str) -> list[dict]:
                             "specs": row.get("specs", ""),
                             "keywords": kw_list,
                             "variants": [v.strip() for v in str(row.get("variants", "")).split(";") if v.strip()],
-                            "link_shopee": _shorten_shopee_url(row.get("link_shopee") or row.get("shopee_url", "")),
+                            "link_shopee": row.get("link_shopee") or row.get("shopee_url", ""),
                             "in_stock": str(row.get("in_stock", "true")).lower() in ("true", "1", "yes"),
                         })
                 if products:
@@ -159,9 +144,6 @@ def load_shopee_catalog(brand: str = "zeo") -> list[dict]:
                 parsed = json.loads(raw_data)
                 items = parsed if isinstance(parsed, list) else parsed.get("products", [])
                 if items:
-                    for item in items:
-                        if isinstance(item, dict) and "link_shopee" in item:
-                            item["link_shopee"] = _shorten_shopee_url(item["link_shopee"])
                     _catalog_cache[b] = items
                     logger.info("Loaded %d Shopee products from Redis [%s]", len(items), redis_key)
                     return items

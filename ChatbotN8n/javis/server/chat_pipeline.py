@@ -183,7 +183,7 @@ PRODUCT_ENTITY_PATTERNS = [
     ("oplus_detergent_features", "Oplus", "product_family", r"\boplus\b"),
     ("zeo_laundry_product_overview", "Giặt giũ ZeO/PANO/Oplus", "laundry", r"giat giu|nuoc giat|bot giat|giat quan ao"),
     ("zeo_dishwashing_product_overview", "Rửa chén ZeO/ZIF/PANO/Oplus", "dishwashing", r"nuoc rua chen|rua chen|rua bat"),
-    ("zeo_floor_cleaner_product_overview", "Lau sàn ZeO/Oplus", "floor_cleaner", r"nuoc lau san|lau san|lau nha"),
+    ("zeo_floor_cleaner_product_overview", "Lau sàn ZeO/Oplus", "floor_cleaner", r"nuoc lau san|lau san|lau nha|tay san|san nha|tay san nha|lau san nha"),
     ("zeo_toilet_cleaner", "Tẩy Toilet ZeO", "cleaning_hygiene", r"toilet|bon cau|tay toilet"),
     ("zeo_cleaning_hygiene_product_overview", "Tẩy rửa vệ sinh ZeO/PANO", "cleaning_hygiene", r"javen|ve sinh|lau kinh|xit tay|tay mau"),
     ("cfc_npk_product_info", "Phân bón NPK CFC Cò Bay", "fertilizer", r"\bnpk\b"),
@@ -709,7 +709,7 @@ def _prettify_answer(answer: str) -> str:
 
 def _has_product_view_action(norm_text: str) -> bool:
     return bool(re.search(
-        r"(muon xem|xem ve|xem dong|cho.*xem|tim hieu|hoi ve|thong tin ve|tu van|can xem|gui.*thong tin|co.*gi|co.*loai nao|co.*dong nao|co.*dong phan|gom nhung gi|dong san pham|san pham nao|san pham gi|can mua|muon mua|mua cho|dung cho|quan an|nha hang|bep an|can lon|can to|co khong|co ko)",
+        r"(muon xem|xem ve|xem dong|cho.*xem|tim hieu|hoi ve|thong tin ve|tu van|can xem|gui.*thong tin|co.*gi|co.*loai nao|co.*cai nao|co.*dong nao|co.*dong phan|gom nhung gi|dong san pham|san pham nao|san pham gi|can mua|muon mua|mua cho|dung cho|quan an|nha hang|bep an|can lon|can to|\bco\b.*\b(khong|hong|ko|k)\b)",
         norm_text,
     ))
 
@@ -740,7 +740,7 @@ def _detect_product_group_intent(norm_text: str, brand: str) -> Optional[str]:
     zeo_groups = [
         ("zeo_dishwashing_product_overview", r"(nuoc rua chen|nuoc rua bat|rua chen|rua bat|zif)"),
         ("zeo_laundry_product_overview", r"(giat giu|nuoc giat|bot giat|giat quan ao|do giat|giat xa)"),
-        ("zeo_floor_cleaner_product_overview", r"(nuoc lau san|lau san|nuoc lau nha|lau nha)"),
+        ("zeo_floor_cleaner_product_overview", r"(nuoc lau san|lau san|nuoc lau nha|lau nha|tay san|san nha|tay san nha|lau san nha)"),
         ("zeo_toilet_cleaner", r"(tay toilet|toilet|bon cau|nuoc tay bon cau)"),
         ("zeo_cleaning_hygiene_product_overview", r"(tay rua ve sinh|tay rua|ve sinh|javen|lau kinh|xit tay|tay mau|nha tam)"),
         ("pano_product_type", r"\bpano\b"),
@@ -858,6 +858,16 @@ def _detect_out_of_scope_general_question(norm_text: str) -> bool:
     ])
 
 
+def _detect_out_of_scope_personal_question(norm_text: str) -> bool:
+    """Bắt các câu hỏi cá nhân, nhân sự nội bộ, hỏi về sếp, anh Thuận, ai làm ra bot."""
+    return _has_any(norm_text, [
+        r"\b(co biet|biet khong|biet ko|la ai|la nguoi nao)\b.{0,30}\b(anh|chi|em|ong|ba|ban|sep|chu tich|giam doc|thuan|tuan|nguyen|nam|duc)\b",
+        r"\b(anh|chi|ong|ba)\s+(thuan|tuan|dung|hoa|nam|hung|duc|hien)\s+(la ai|la nguoi nao|o dau|lam gi)\b",
+        r"\b(ai tao ra|ai lam ra|ai viet ra|ai sinh ra|ai lap trinh)\s+(bot|ban|em|chatbot|may)\b",
+        r"\b(ten gi|bao nhieu tuoi|que o dau|co nguoi yeu chua|doc than khong|yeu ai|cuoi chua)\b",
+    ])
+
+
 def _detect_purchase_signal(norm_text: str) -> bool:
     return _has_any(norm_text, [
         r"\b(muon mua|can mua|dat hang|chot don|lay hang|lay \d+|mua \d+|cho minh \d+|cho toi \d+)\b",
@@ -968,8 +978,8 @@ def _detect_specific_product_intent(norm_text: str, brand: str) -> Optional[str]
         if re.search(r"(bot giat|giat)", norm_text):
             return "oplus_detergent_features"
 
-    # 6. Lau sàn
-    if re.search(r"(lau san|nuoc lau nha|lau nha)", norm_text):
+    # 6. Lau sàn / Tẩy sàn nhà
+    if re.search(r"(lau san|nuoc lau nha|lau nha|tay san|tay san nha|san nha|lau san nha)", norm_text):
         return "zeo_floor_cleaner_product_overview"
 
     # 7. ZeO Bột giặt
@@ -1317,6 +1327,16 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         # FAST-PATH 2: CHÀO HỎI, CẢM ƠN, XÁC NHẬN (< 10ms)
         # ─────────────────────────────────────────────────────────────
         token_count = len(norm_text.split())
+        # 0. Dấu chấm hỏi / thắc mắc ngắn dạng '???', 'là sao', 'sao vậy'
+        if re.match(r"^[\?\!！？\s\.\,\…]+$", raw_text.strip()) or norm_text in ["la sao", "sao vay", "y la sao", "nghia la sao", "sao the"]:
+            clarify_msg = "Dạ bạn cần bên mình giải thích rõ hơn phần nào hoặc cần tư vấn sản phẩm nào ạ? Bạn cứ nhắn chi tiết mình hỗ trợ ngay nha! 💙" if brand == "zeo" else "Dạ bạn cần Cò Bay tư vấn thêm thông tin nào ạ? Bạn cứ nhắn cho mình nha!"
+            return _fast_response(clarify_msg, "clarification_request", brand, start_time)
+
+        # 0.5. Từ chối / Không quan tâm / Thôi khỏi ('ko quan tam', 'ko can', 'ko can biet', 'thoi khoi')
+        if re.search(r"\b(ko quan tam|khong quan tam|ko can|khong can|ko can biet|khong can biet|thoi khoi|thoi bo qua|khong can dau|khoi can)\b", norm_text):
+            dismiss_msg = "Dạ vâng ạ! Nếu sau này bạn cần tìm hiểu thêm về sản phẩm hoặc cần hỗ trợ đặt hàng, bạn cứ nhắn tin lại cho bên mình bất kỳ lúc nào nhé! Chúc bạn một ngày tốt lành ạ! 💙" if brand == "zeo" else "Dạ vâng ạ! Khi nào cần tư vấn phân bón hoặc kỹ thuật canh tác, bạn cứ nhắn lại cho Cò Bay nha!"
+            return _fast_response(dismiss_msg, "customer_dismiss_polite", brand, start_time)
+
         if token_count <= 6:
             # 1. Cảm ơn (Ưu tiên trước acknowledgement)
             if re.search(r"(cam on|thanks|thank you|da cam on|ok cam on|tks)\b", norm_text):
@@ -1332,8 +1352,8 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 greeting = "Dạ ZeO Vietnam chào bạn! Bạn đang cần tư vấn về nước giặt sinh học, nước rửa chén hay mua hàng ạ?" if brand == "zeo" else "Dạ phân bón Cò Bay (CFC) chào bạn! Bạn đang cần tư vấn phân bón cho cây lúa, cây ăn trái hay đại lý phân phối ạ?"
                 return _fast_response(greeting, "greeting", brand, start_time)
 
-            # 3. Xác nhận
-            if re.search(r"^(ok|oke|okay|da|vang|uh|um|roi|duoc|biet roi|hieu roi)\b", norm_text) and not re.search(r"(cam on|thanks)", norm_text):
+            # 3. Xác nhận / Kết thúc hội thoại ('z ok', 'vay ok', 'da ok', 'ok nha', 'the thoi')
+            if re.search(r"^(z ok|vay ok|da ok|ok nha|ok nhe|ok shop|oke shop|the thoi|the nha|vay dc roi|vay duoc roi|ok roi|ok|oke|okay|da|vang|uh|um|roi|duoc|biet roi|hieu roi)\b", norm_text) and not re.search(r"(cam on|thanks)", norm_text):
                 ack = "Dạ vâng ạ! Bạn cần thêm thông tin gì cứ nhắn ZeO nhé." if brand == "zeo" else "Dạ vâng ạ! Khi nào cần phân bón chất lượng cao bạn cứ nhắn Cò Bay nha."
                 return _fast_response(ack, "acknowledgement", brand, start_time)
 
@@ -1398,6 +1418,13 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 "Bạn cần xem sản phẩm, giá, giao hàng hay thông tin liên hệ bên mình không ạ?"
             )
             return _fast_response_remember(msg, "out_of_scope_general_question", stage=lead_stage, fallback_reason="OUT_OF_SCOPE")
+
+        if _detect_out_of_scope_personal_question(norm_text):
+            msg = (
+                f"Dạ mình là trợ lý tư vấn tự động của {brand_display}, chuyên hỗ trợ thông tin sản phẩm, báo giá, khuyến mãi và đơn hàng ạ. "
+                "Bạn cần mình hỗ trợ thông tin gì về sản phẩm hay dịch vụ bên mình không ạ? 💙"
+            )
+            return _fast_response(msg, "out_of_scope_personal_question", brand, start_time)
 
         if _detect_customer_correction(norm_text):
             msg = (
@@ -1838,6 +1865,15 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             # 7. Thông tin liên hệ / Hotline
             if "contact" in target_intent or "hotline" in target_intent:
                 return any(k in query_norm for k in ["hotline", "so dien thoai", "lien he", "tong dai", "sdt", "call"])
+            # 8. Tẩy Toilet / Bồn cầu
+            if target_intent == "zeo_toilet_cleaner":
+                return any(k in query_norm for k in ["toilet", "bon cau", "be phot", "men su", "wc", "con vit"])
+            # 9. Lau Kính
+            if target_intent == "zeo_glass_cleaner":
+                return any(k in query_norm for k in ["kinh", "guong", "man hinh"])
+            # 10. Lau Sàn
+            if target_intent == "zeo_floor_cleaner_product_overview":
+                return any(k in query_norm for k in ["lau san", "tay san", "san nha", "lau nha"])
             if "tiktok" in target_intent or "zalo" in target_intent:
                 return _is_internal_content_request(query_norm)
             return True

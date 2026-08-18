@@ -1335,8 +1335,18 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Hỏi **Website** $\rightarrow$ Trả về website chính thức `https://zeo.vn/` hoặc `https://cfccobay.vn/` từ Google Sheet.
    - Hỏi **Link Shopee / Đặt Online** $\rightarrow$ Trả về gian hàng Shopee Mall chính hãng hoặc link mua hàng từ Sheet.
 
-9. **Kết Quả Đánh Giá NLU Regression Suite**:
-   - **98/98 Test Cases (100.0% Pass Rate)**, tốc độ phản hồi trung bình **7.8ms/câu**.
+9. **Chuẩn Hóa Link Shopee Ngắn Gọn (`https://shopee.vn/product/{shop_id}/{item_id}`)**:
+   - Toàn bộ link sản phẩm Shopee gửi cho khách hàng được tự động rút gọn thành dạng chuẩn Shopee Mall: `https://shopee.vn/product/20523065/{item_id}` (độ dài chỉ ~40 ký tự thay vì 200+ ký tự có slug tiếng Việt dài loằng ngoằng). Click vào mở thẳng ứng dụng Shopee hoặc web Shopee của đúng sản phẩm.
+
+10. **Bộ Lọc Câu Hỏi Cá Nhân & Phản Hồi Lịch Sự (Polite Dismiss & Clarification)**:
+   - Khách hỏi cá nhân / ngoài lề (*"có biết anh Thuận là anh nào không"*, *"ai tạo ra bot"*): Bot phản hồi lịch sự xác định vai trò trợ lý CSKH và hỏi lại nhu cầu sản phẩm.
+   - Khách từ chối / không quan tâm (*"ko quan tâm"*, *"ko cần biết"*, *"thôi khỏi"*): Bot chào lịch sự, không spam khuyến mãi.
+   - Khách xác nhận ngắn (*"z ok"*, *"vậy ok"*, *"ok nha"*): Bot ghi nhận và cảm ơn thay vì tìm kiếm nhầm sang sản phẩm khác.
+   - Khách gửi dấu hỏi (*"???"*, *"là sao"*): Bot hỏi lại khách cần giải thích phần nào để hỗ trợ.
+   - Khách hỏi tẩy sàn / lau sàn (*"có cái nào mà tẩy sàn nhà ko"*, *"xin ít sản phẩm để tẩy sàn nhà đi"*): Bắt đúng nhóm Nước lau sàn ZeO & Oplus đậm đặc 2X.
+
+11. **Kết Quả Đánh Giá NLU Regression Suite**:
+   - **98/98 Test Cases (100.0% Pass Rate)**, tốc độ phản hồi trung bình **7.9ms/câu**.
 
 
 

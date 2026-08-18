@@ -565,14 +565,6 @@ Tên workflow:
 Zeo Chatbot
 ```
 
-### 8.1 `zeo_chatbot.workflow.ts`
-
-Tên workflow:
-
-```text
-Zeo Chatbot
-```
-
 Số node:
 
 ```text

@@ -37,6 +37,10 @@ from shopee_matcher import (
     match_best_sellers,
     match_new_arrivals,
     match_need_preference,
+    is_bulk_or_restaurant_inquiry,
+    match_bulk_or_restaurant_need,
+    is_skin_care_dishwashing_inquiry,
+    match_skin_care_dishwashing,
 )
 from telegram_notifier import notify_new_lead, notify_admin_unanswered
 
@@ -331,7 +335,8 @@ def _has_reference_signal(norm_text: str) -> bool:
         r"\b(no|do|nay|tren)\s+(gia|bao nhieu|nhieu tien|ship|giao hang|con hang|con khong|con)\b",
         r"\b(cai|loai|dong|san pham|phan)\s+(dau tien|thu nhat|thu hai|thu ba|thu tu|thu 1|thu 2|thu 3|thu 4|so 1|so 2|so 3|so 4|\d)\b",
         r"\b(dau tien|thu nhat|thu hai|thu ba|thu tu|thu 1|thu 2|thu 3|thu 4|so 1|so 2|so 3|so 4)\b",
-        r"\b(vua hoi|vua noi|hoi nay|luc nay|o tren)\b",
+        r"\b(vua hoi|vua noi|hoi nay|luc nay|o tren|y la gia|y la|gia cua can|gia can|can to|can lon|tui to|tui lon)\b",
+        r"\b(\d+[\s\.]*\d*\s*(?:kg|g|ml|lit|can|tui|chai)|can\s+\d+|tui\s+\d+|chai\s+\d+)\b",
     ]):
         return True
     return len(tokens) <= 5 and any(t in {"no", "do", "nay", "tren"} for t in tokens)
@@ -351,7 +356,14 @@ def _ordinal_reference_index(norm_text: str) -> Optional[int]:
 
 
 def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[str, Any]) -> dict[str, Any]:
-    if not _has_reference_signal(norm_text):
+    products = [
+        _copy_product_item(item)
+        for item in (conversation_state.get("last_products_shown") or [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    active = conversation_state.get("active_entities") or {}
+
+    if not _has_reference_signal(norm_text) or (not products and not active.get("product")):
         return {
             "references_previous_turn": False,
             "resolved": False,
@@ -361,13 +373,6 @@ def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[s
             "resolved_query": raw_text,
             "reason": "no_reference",
         }
-
-    products = [
-        _copy_product_item(item)
-        for item in (conversation_state.get("last_products_shown") or [])
-        if isinstance(item, dict) and item.get("name")
-    ]
-    active = conversation_state.get("active_entities") or {}
     idx = _ordinal_reference_index(norm_text)
     chosen: dict[str, str] = {}
     reason = "unresolved"
@@ -375,16 +380,25 @@ def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[s
     if idx is not None and 0 <= idx < len(products):
         chosen = products[idx]
         reason = "ordinal"
-    elif active.get("product"):
-        chosen = {
-            "name": str(active.get("product", "")),
-            "intent": str(active.get("product_intent", "")),
-            "category": str(active.get("category", "")),
-        }
-        reason = "active_entity"
-    elif len(products) == 1:
-        chosen = products[0]
-        reason = "single_last_product"
+    else:
+        # Tìm theo biến thể / quy cách xuất hiện trong last_products_shown
+        if products:
+            for p in products:
+                p_name_norm = _normalize_vn(p.get("name", ""))
+                if any(_normalize_vn(term) in norm_text and _normalize_vn(term) in p_name_norm for term in ["3.8kg", "9kg", "5.5kg", "3.5kg", "2.4kg", "650ml", "400g", "720g", "vitamin e", "nha dam"]):
+                    chosen = p
+                    reason = "variant_match"
+                    break
+        if not chosen and active.get("product"):
+            chosen = {
+                "name": str(active.get("product", "")),
+                "intent": str(active.get("product_intent", "")),
+                "category": str(active.get("category", "")),
+            }
+            reason = "active_entity"
+        elif not chosen and len(products) == 1:
+            chosen = products[0]
+            reason = "single_last_product"
 
     if not chosen:
         return {
@@ -532,6 +546,21 @@ async def _build_contextual_more_info_answer(
 
 
 def _product_memory_for_intent(intent: str, answer: str, brand: str) -> list[dict[str, str]]:
+    products = []
+
+    # 1. Bóc tách các sản phẩm cụ thể xuất hiện trong bot_reply (từ Shopee Catalog) - ƯU TIÊN CAO NHẤT
+    bold_items = re.findall(r"\*\*(.+?)\*\*", answer)
+    for b_item in bold_items:
+        b_clean = b_item.strip()
+        b_norm = _normalize_vn(b_clean)
+        if len(b_clean) > 10 and any(k in b_norm for k in ["giat", "rua chen", "lau san", "tay", "javen", "zif", "pano", "zeo", "oplus"]):
+            item = {"name": b_clean, "category": "shopee_product", "intent": intent}
+            if item not in products:
+                products.append(item)
+
+    if products:
+        return products[:8]
+
     if intent in PRODUCT_MEMORY_BY_INTENT:
         return [_copy_product_item(item) for item in PRODUCT_MEMORY_BY_INTENT[intent]]
 
@@ -539,7 +568,6 @@ def _product_memory_for_intent(intent: str, answer: str, brand: str) -> list[dic
     if not norm_answer:
         return []
 
-    products = []
     for entity_intent, name, category, pattern in PRODUCT_ENTITY_PATTERNS:
         if brand.lower() == "zeo" and (entity_intent.startswith("cfc_") or name.startswith("Phân bón CFC")):
             continue
@@ -554,6 +582,7 @@ def _product_memory_for_intent(intent: str, answer: str, brand: str) -> list[dic
             item = {"name": name, "category": category, "intent": entity_intent}
             if item not in products:
                 products.append(item)
+
     return products[:8]
 
 
@@ -680,7 +709,7 @@ def _prettify_answer(answer: str) -> str:
 
 def _has_product_view_action(norm_text: str) -> bool:
     return bool(re.search(
-        r"(muon xem|xem ve|xem dong|cho.*xem|tim hieu|hoi ve|thong tin ve|tu van|can xem|gui.*thong tin|co.*gi|co.*loai nao|co.*dong nao|co.*dong phan|gom nhung gi|dong san pham|san pham nao|san pham gi)",
+        r"(muon xem|xem ve|xem dong|cho.*xem|tim hieu|hoi ve|thong tin ve|tu van|can xem|gui.*thong tin|co.*gi|co.*loai nao|co.*dong nao|co.*dong phan|gom nhung gi|dong san pham|san pham nao|san pham gi|can mua|muon mua|mua cho|dung cho|quan an|nha hang|bep an|can lon|can to|co khong|co ko)",
         norm_text,
     ))
 
@@ -885,7 +914,7 @@ def _detect_usage_safety_gap(norm_text: str, brand: str) -> bool:
             r"(\bbon\b|\bpha\b|\btron\b|lieu luong|bao nhieu kg|cong lua|thuoc sau|tri benh|dao on)",
         ])
     return _has_any(norm_text, [
-        r"(lieu luong|cach dung|dung bao nhieu|bao nhieu ml|bao nhieu kg|may bo do|\d+\s*(bo|kg|lit|ml).{0,20}(bo do|bo|quan ao))",
+        r"(lieu luong|dung bao nhieu|bao nhieu ml|bao nhieu kg|may bo do|\d+\s*(bo|kg|lit|ml).{0,20}(bo do|bo|quan ao)|bao nhieu nuoc)",
         r"(uong duoc|vao mat|dinh vao mat|nuot phai|an phai)",
     ])
 
@@ -1436,6 +1465,64 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                     latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
                 )
 
+        # 1.5. Tư vấn chuyên sâu ăn da tay / tróc da tay khi rửa chén
+        if brand.lower() == "zeo" and is_skin_care_dishwashing_inquiry(raw_text) and not is_return_or_claim:
+            skin_res = match_skin_care_dishwashing(raw_text, brand=brand)
+            if skin_res:
+                _remember_response(skin_res["suggested_reply"], skin_res.get("intent", "pano_dishwashing_features"), "browsing_catalog")
+                return ChatPipelineResponse(
+                    answer=_prettify_answer(skin_res["suggested_reply"]),
+                    intent=skin_res.get("intent", "pano_dishwashing_features"),
+                    confidence="high",
+                    score=0.99,
+                    brand=brand.upper(),
+                    has_phone=has_phone,
+                    phone=phone,
+                    area=area,
+                    lead_stage=lead_stage,
+                    shopee_url=skin_res.get("shopee_url"),
+                    latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                )
+
+        # 1.6. Báo giá sản phẩm đích danh có trong Shopee Catalog (kết hợp ngữ cảnh nếu hỏi tắt can/túi)
+        if brand.lower() == "zeo" and not is_return_or_claim:
+            resolved_text = reference_resolution.get("resolved_query", raw_text)
+            specific_price_res = match_specific_product_price(resolved_text, brand=brand, context=conversation_state)
+            if specific_price_res:
+                _remember_response(specific_price_res["suggested_reply"], specific_price_res.get("intent", "specific_product_pricing"), "browsing_catalog")
+                return ChatPipelineResponse(
+                    answer=_prettify_answer(specific_price_res["suggested_reply"]),
+                    intent=specific_price_res.get("intent", "specific_product_pricing"),
+                    confidence="high",
+                    score=0.99,
+                    brand=brand.upper(),
+                    has_phone=has_phone,
+                    phone=phone,
+                    area=area,
+                    lead_stage=lead_stage,
+                    shopee_url=specific_price_res.get("shopee_url"),
+                    latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                )
+
+        # 1.7. Tư vấn can lớn / Quán ăn / Nhà hàng / Bếp ăn
+        if brand.lower() == "zeo" and is_bulk_or_restaurant_inquiry(raw_text) and not is_return_or_claim:
+            bulk_res = match_bulk_or_restaurant_need(raw_text, brand=brand)
+            if bulk_res:
+                _remember_response(bulk_res["suggested_reply"], bulk_res.get("intent", "pano_dishwashing_product_overview"), "browsing_catalog")
+                return ChatPipelineResponse(
+                    answer=_prettify_answer(bulk_res["suggested_reply"]),
+                    intent=bulk_res.get("intent", "pano_dishwashing_product_overview"),
+                    confidence="high",
+                    score=0.99,
+                    brand=brand.upper(),
+                    has_phone=has_phone,
+                    phone=phone,
+                    area=area,
+                    lead_stage=lead_stage,
+                    shopee_url=bulk_res.get("shopee_url"),
+                    latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                )
+
         # 2. Tư vấn theo nhu cầu khách hàng (tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ)
         need_type = _detect_need_choice(norm_text)
         if brand.lower() == "zeo" and need_type and not is_return_or_claim:
@@ -1453,25 +1540,6 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                     area=area,
                     lead_stage=lead_stage,
                     shopee_url=need_res.get("shopee_url"),
-                    latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
-                )
-
-        # 3. Báo giá sản phẩm đích danh có trong Shopee Catalog
-        if brand.lower() == "zeo" and not is_return_or_claim:
-            specific_price_res = match_specific_product_price(raw_text, brand=brand)
-            if specific_price_res:
-                _remember_response(specific_price_res["suggested_reply"], specific_price_res.get("intent", "specific_product_pricing"), "browsing_catalog")
-                return ChatPipelineResponse(
-                    answer=_prettify_answer(specific_price_res["suggested_reply"]),
-                    intent=specific_price_res.get("intent", "specific_product_pricing"),
-                    confidence="high",
-                    score=0.99,
-                    brand=brand.upper(),
-                    has_phone=has_phone,
-                    phone=phone,
-                    area=area,
-                    lead_stage=lead_stage,
-                    shopee_url=specific_price_res.get("shopee_url"),
                     latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
                 )
 
@@ -1577,7 +1645,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
 
         if reference_resolution.get("references_previous_turn"):
             resolved_product = reference_resolution.get("product", "")
-            if reference_resolution.get("resolved") and _has_price_signal(norm_text):
+            if reference_resolution.get("resolved") and _has_price_signal(norm_text) and not any(k in norm_text for k in ["gia si", "mua si", "lay si", "chinh sach si", "chiet khau", "dai ly"]):
                 msg = (
                     f"Dạ mình hiểu bạn đang hỏi giá của {resolved_product}. "
                     "Hiện hệ thống chưa có giá chính xác cho sản phẩm/nhóm này nên mình không tự báo giá để tránh sai. "
@@ -1661,7 +1729,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         # ─────────────────────────────────────────────────────────────
         # PATH 3.7: WHOLESALE & DISTRIBUTOR INQUIRY (< 15ms)
         # ─────────────────────────────────────────────────────────────
-        if re.search(r"(lay si|muon lam dai ly|dang ky dai ly|nhap hang|phan phoi|chinh sach si|nhap so luong lon|kinh doanh zeo|dai li)\b", norm_text):
+        if re.search(r"(lay si|muon lam dai ly|dang ky dai ly|nhap hang|phan phoi|chinh sach si|nhap so luong lon|kinh doanh zeo|dai li|gia si|co gia si|mua si|lay gia si)\b", norm_text):
             wholesale_intent = "wholesale_inquiry" if brand.lower() == "zeo" else "wholesale_dealer"
             return await _sheet_response_remember(wholesale_intent, stage="collecting_contact")
 
@@ -1681,6 +1749,13 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             else:
                 ship_intent = "nationwide_shipping_no_cod" if brand.lower() == "zeo" else "shipping_methods"
             return await _sheet_response_remember(ship_intent, stage="browsing_catalog")
+
+        # ─────────────────────────────────────────────────────────────
+        # PATH 3.7.7: CORPORATE INVOICE & VAT SUPPORT (< 15ms)
+        # ─────────────────────────────────────────────────────────────
+        if re.search(r"\b(hoa don do|hoa don vat|xuat vat|xuat hoa don|vat khong|vat ko|hoa don tai chinh|mst|ma so thue)\b", norm_text):
+            invoice_intent = "corporate_invoice_support"
+            return await _sheet_response_remember(invoice_intent, stage="browsing_catalog")
 
         # ─────────────────────────────────────────────────────────────
         # PATH 3.8: GENERAL CATALOG OVERVIEW INQUIRY (< 15ms)
@@ -1790,7 +1865,16 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 re.search(r"(^|\s)(mua|dat|chai|lit|kg)(\s|$)", norm_text)
                 or re.search(r"(bao phan|\d+\s*bao)", norm_text)
             )
-            if purchase_signal and not any(w in norm_text for w in ["co nhung", "cac san pham", "san pham nao", "dong san pham", "gioi thieu"]):
+
+            # Nếu khách đã nói rõ nhóm ngành sản phẩm (nước rửa chén, giặt giũ...) thì ưu tiên trả về danh mục nhóm đó
+            detected_group = _detect_product_group_intent(norm_text, brand)
+            if detected_group:
+                group_item = await get_faq_by_intent(brand, detected_group)
+                if group_item.get("answer"):
+                    final_answer = group_item["answer"].strip()
+                    intent = detected_group
+                    confidence = "medium"
+            elif purchase_signal and not any(w in norm_text for w in ["co nhung", "cac san pham", "san pham nao", "dong san pham", "gioi thieu"]):
                 fallback_intent = "zeo_price_request_needs_product" if brand.lower() == "zeo" else "cfc_price_unverified"
                 fallback_item = await get_faq_by_intent(brand, fallback_intent)
                 final_answer = fallback_item.get("answer", "").strip() or (

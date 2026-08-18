@@ -502,28 +502,41 @@ def match_new_arrivals(query: str, brand: str = "zeo") -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. MATCH BÁO GIÁ & GỬI LINK CHO SẢN PHẨM ĐÍCH DANH
 # ─────────────────────────────────────────────────────────────────────────────
-def match_specific_product_price(query: str, brand: str = "zeo") -> Optional[dict]:
+def match_specific_product_price(query: str, brand: str = "zeo", context: Optional[dict] = None) -> Optional[dict]:
     """
-    Nhận diện câu hỏi giá cho một sản phẩm cụ thể (vd: xin giá nước rửa chén vitamin e, bột giặt pano bao nhiêu...).
+    Nhận diện câu hỏi giá cho một sản phẩm cụ thể (vd: xin giá nước rửa chén vitamin e, bột giặt pano bao nhiêu, can 3.8kg giá bao nhiêu...).
     Trả về giá niêm yết, giá khuyến mãi và link Shopee Mall trực tiếp.
     """
     query_folded = _fold(query)
 
-    # Loại trừ câu hỏi về liều lượng / cách dùng (vd: 1kg cho 5 bộ đồ, bón bao nhiêu kg...)
+    # Loại trừ câu hỏi về liều lượng / cách dùng hoặc chính sách sỉ/đại lý
     if re.search(r"\b(bao nhieu (?:bo|kg|lit|goi|can|gam|muong|nap)|cho \d+ bo|bon bao nhieu|bao nhieu do|lieu luong|cach dung)\b", query_folded):
+        return None
+    if re.search(r"\b(gia si|mua si|lay si|chinh sach si|chiet khau|dai ly|kinh doanh zeo|nhap so luong lon)\b", query_folded):
         return None
 
     # Kiểm tra xem có từ khóa hỏi giá rõ ràng bằng word boundary không
-    has_price_ask = bool(re.search(r"\b(gia|gia ban|gia ca|bao nhieu|nhieu tien|bao gia|bang gia|xin gia|ton bao nhieu|mua het bao|gia sao|gia the nao)\b", query_folded))
+    has_price_ask = bool(re.search(r"\b(gia|gia ban|gia ca|bao nhieu|nhieu tien|bao gia|bang gia|xin gia|ton bao nhieu|mua het bao|gia sao|gia the nao|y la gia)\b", query_folded))
     if not has_price_ask:
         return None
+
+    # Nếu câu hỏi có quy cách/dung tích nhưng thiếu tên nhóm (vd: "can 3.8kg giá bao nhiêu"), bổ sung từ ngữ cảnh
+    if context and isinstance(context, dict):
+        active_entities = context.get("active_entities", [])
+        if isinstance(active_entities, list) and active_entities:
+            query_folded = query_folded + " " + " ".join(_fold(e) for e in active_entities)
+        last_bot_reply = _fold(context.get("last_bot_reply", ""))
+        if "rua chen" in last_bot_reply or "pano" in last_bot_reply:
+            query_folded += " rua chen pano"
+        elif "nuoc giat" in last_bot_reply:
+            query_folded += " nuoc giat"
 
     # Phải có từ khóa định danh sản phẩm
     has_product_mention = any(k in query_folded for k in [
         "rua chen", "rua bat", "bot giat", "nuoc giat", "lau san", "toilet", "bon cau",
         "javel", "javen", "tay mau", "xa vai", "lau kinh", "treo xe", "tinh dau",
         "vitamin e", "nha dam", "cam chanh", "oai huong", "tao dua", "bio enzyme", "2in1",
-        "nano clean", "pano", "oplus", "zif"
+        "nano clean", "pano", "oplus", "zif", "can"
     ])
     if not has_product_mention:
         return None
@@ -532,6 +545,7 @@ def match_specific_product_price(query: str, brand: str = "zeo") -> Optional[dic
     has_specific_subbrand_or_variant = any(k in query_folded for k in [
         "pano", "oplus", "zif", "javen", "javel", "bio enzyme", "nano clean", "2in1", "4in1",
         "vitamin e", "nha dam", "cam chanh", "oai huong", "tao dua", "trai cay", "chanh",
+        "toilet", "bon cau", "lau kinh", "treo xe", "tinh dau", "tay mau", "chai", "zeo",
         "300g", "400g", "720g", "2.4kg", "3.5kg", "3.8kg", "5.5kg", "9kg", "650ml", "1000ml"
     ])
     if not has_specific_subbrand_or_variant:
@@ -616,45 +630,106 @@ def match_specific_product_price(query: str, brand: str = "zeo") -> Optional[dic
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. TƯ VẤN THEO NHU CẦU NỐI TIẾP (NEED-BASED MULTI-TURN)
+# 4. TƯ VẤN THEO NHU CẦU NỐI TIẾP (NEED-BASED MULTI-TURN) - LOAD 100% REDIS
 # ─────────────────────────────────────────────────────────────────────────────
 def match_need_preference(need_type: str, brand: str = "zeo") -> Optional[dict]:
-    """Tư vấn thông minh khi khách chọn nhu cầu: tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ."""
+    """Tư vấn thông minh khi khách chọn nhu cầu: tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ — Load 100% động từ Redis catalog."""
+    catalog = load_shopee_catalog(brand=brand)
     general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
 
     if need_type == "tiet_kiem":
+        matched = [
+            p for p in catalog
+            if any(term in _fold(p.get("name", "")) for term in ["oplus", "pano", "can to", "tiet kiem", "gia re", "5.5kg", "3.8kg"])
+        ][:3]
+        lines = []
+        for i, p in enumerate(matched, 1):
+            p_price = _format_price(p.get("price"))
+            p_disc = _format_discount(p.get("discount"))
+            disc_text = f" (Giảm {p_disc})" if p_disc else ""
+            p_url = p.get("link_shopee") or general_link
+            lines.append(f"{i}. ⭐️ **{p['name']}** — Giá: **{p_price}**{disc_text}\n   👉 {p_url}")
+        items_str = "\n".join(lines) if lines else (
+            f"1. ⭐️ **Bột giặt Oplus 4in1** (Giá từ 66.000đ)\n"
+            f"2. ⭐️ **Bột giặt Pano Hương Cam Chanh** (Chỉ từ 46.350đ)\n"
+            f"3. ⭐️ **Nước giặt Pano Can to 3.8kg** (Giá 123.291đ)"
+        )
+
         reply = (
-            "Dạ nếu bạn đang ưu tiên **tiết kiệm chi phí**, bên mình gợi ý 2 lựa chọn kinh tế nhất:\n\n"
-            "1. ⭐️ **Bột giặt Oplus 4in1 (Túi 720g / 5.5kg)** — Công nghệ ION hòa tan cực nhanh, tiết kiệm nước và bột giặt (Giá từ **66.000đ**).\n"
-            "2. ⭐️ **Bột giặt Pano Hương Cam Chanh (Túi 2.4kg / 5.5kg)** — Sạch quần áo, ít cặn, giá siêu tiết kiệm (Chỉ từ **46.350đ**).\n"
-            "3. ⭐️ **Nước giặt Pano Can to 3.8kg** — Can lớn dùng lâu dài cho cả gia đình (Giá **123.291đ**).\n\n"
-            f"👉 Xem chi tiết trên Shopee Mall: {general_link}\n"
+            "Dạ nếu bạn đang ưu tiên **tiết kiệm chi phí**, bên mình gợi ý các lựa chọn kinh tế nhất trên Shopee Mall:\n\n"
+            f"{items_str}\n\n"
+            f"👉 Xem toàn bộ ưu đãi tại: {general_link}\n"
             "Bạn muốn chọn túi nhỏ dùng thử hay can lớn để tiết kiệm tối đa ạ? 💙"
         )
     elif need_type == "thom_lau":
+        matched = [
+            p for p in catalog
+            if any(term in _fold(p.get("name", "")) for term in ["huong nuoc hoa", "oai huong", "luu huong", "fresh", "warmish", "elegant", "active", "xa vai", "tinh dau"])
+        ][:3]
+        lines = []
+        for i, p in enumerate(matched, 1):
+            p_price = _format_price(p.get("price"))
+            p_disc = _format_discount(p.get("discount"))
+            disc_text = f" (Giảm {p_disc})" if p_disc else ""
+            p_url = p.get("link_shopee") or general_link
+            lines.append(f"{i}. 🌸 **{p['name']}** — Giá: **{p_price}**{disc_text}\n   👉 {p_url}")
+        items_str = "\n".join(lines) if lines else (
+            f"1. 🌸 **Nước giặt & Bột giặt PANO Hương Nước Hoa Pháp**\n"
+            f"2. 🌸 **Nước giặt 2in1 Oplus Hương Nước Hoa Pháp**\n"
+            f"3. 🌸 **Combo Nước xả vải Nano Clean ZeO**"
+        )
+
         reply = (
-            "Dạ với nhu cầu **lưu hương thơm lâu quyến rũ**, bạn không nên bỏ qua:\n\n"
-            "1. 🌸 **Nước giặt & Bột giặt PANO Hương Nước Hoa Pháp** — Ứng dụng công nghệ VEILEX khử triệt để mùi ẩm mốc, tỏa hương sang trọng cả ngày.\n"
-            "2. 🌸 **Nước giặt 2in1 Oplus Hương Nước Hoa Pháp** — Vừa giặt sạch vừa xả mềm vải thơm ngát (Giá từ **62.100đ**).\n"
-            "3. 🌸 **Combo Nước xả vải Nano Clean ZeO (Hương hoa trắng & Xạ hương)** — Giữ hương sâu trong từng sợi vải.\n\n"
+            "Dạ với nhu cầu **lưu hương thơm lâu quyến rũ**, bạn không nên bỏ qua các dòng sản phẩm hương nước hoa Pháp:\n\n"
+            f"{items_str}\n\n"
             f"👉 Bạn có thể đặt mua ngay tại: {general_link}\n"
             "Bạn thích phong cách hương nước hoa nồng nàn hay hương hoa dịu nhẹ thanh mát hơn ạ? 💙"
         )
     elif need_type == "sach_sau":
+        matched = [
+            p for p in catalog
+            if any(term in _fold(p.get("name", "")) for term in ["enzyme", "active", "sach sau", "tay mau", "toilet", "dam dac"])
+        ][:3]
+        lines = []
+        for i, p in enumerate(matched, 1):
+            p_price = _format_price(p.get("price"))
+            p_disc = _format_discount(p.get("discount"))
+            disc_text = f" (Giảm {p_disc})" if p_disc else ""
+            p_url = p.get("link_shopee") or general_link
+            lines.append(f"{i}. ⚡️ **{p['name']}** — Giá: **{p_price}**{disc_text}\n   👉 {p_url}")
+        items_str = "\n".join(lines) if lines else (
+            f"1. ⚡️ **Bột giặt ZeO Sinh Học (Công nghệ Enzyme Thụy Điển)**\n"
+            f"2. ⚡️ **Nước giặt Pano Active**\n"
+            f"3. ⚡️ **Nước tẩy quần áo màu Oxy Active ZeO**"
+        )
+
         reply = (
             "Dạ với nhu cầu **sạch sâu đánh bay vết bẩn cứng đầu**, dòng sản phẩm tối ưu nhất là:\n\n"
-            "1. ⚡️ **Bột giặt ZeO Sinh Học (Công nghệ Enzyme Thụy Điển)** — Bẻ gãy các vết bẩn protein, dầu mỡ khó giặt mà không hại sợi vải, được Viện Pasteur chứng nhận diệt khuẩn.\n"
-            "2. ⚡️ **Nước giặt Pano Active** — Đậm đặc làm sạch sâu vết ố cổ áo, tay áo hiệu quả.\n"
-            "3. ⚡️ **Nước tẩy quần áo màu Oxy Active ZeO** — Tẩy sạch vết ố màu mà không làm phai màu vải.\n\n"
+            f"{items_str}\n\n"
             f"👉 Tham khảo gian hàng chính hãng tại: {general_link}\n"
             "Bạn đang cần xử lý loại vết bẩn nào cứ nhắn mình tư vấn giải pháp phù hợp nha! 💙"
         )
     elif need_type == "diu_nhe":
+        matched = [
+            p for p in catalog
+            if any(term in _fold(p.get("name", "")) for term in ["nha dam", "vitamin e", "diu da tay", "chanh tu nhien", "aloe"])
+        ][:3]
+        lines = []
+        for i, p in enumerate(matched, 1):
+            p_price = _format_price(p.get("price"))
+            p_disc = _format_discount(p.get("discount"))
+            disc_text = f" (Giảm {p_disc})" if p_disc else ""
+            p_url = p.get("link_shopee") or general_link
+            lines.append(f"{i}. 🌿 **{p['name']}** — Giá: **{p_price}**{disc_text}\n   👉 {p_url}")
+        items_str = "\n".join(lines) if lines else (
+            f"1. 🌿 **Bột giặt ZeO Nha Đam (Aloe Vera)**\n"
+            f"2. 🌿 **Nước rửa chén PANO Vitamin E**\n"
+            f"3. 🌿 **Nước rửa chén ZeO / ZIF 100% Cốt Chanh Tự Nhiên**"
+        )
+
         reply = (
             "Dạ nếu bạn cần sản phẩm **dịu nhẹ, bảo vệ da tay và an toàn cho quần áo em bé / da nhạy cảm**:\n\n"
-            "1. 🌿 **Bột giặt ZeO Nha Đam (Aloe Vera)** — Tinh chất nha đam the mát, độ pH trung tính, dịu nhẹ tối đa cho da tay khi giặt tay.\n"
-            "2. 🌿 **Nước rửa chén PANO Vitamin E** — Bổ sung Vitamin E dưỡng ẩm, rửa sạch dầu mỡ mà không gây khô ráp da tay.\n"
-            "3. 🌿 **Nước rửa chén ZeO / ZIF 100% Cốt Chanh Tự Nhiên** — Diệt khuẩn an toàn cho chén đĩa cả gia đình.\n\n"
+            f"{items_str}\n\n"
             f"👉 Xem chi tiết tại: {general_link}\n"
             "Bạn cần mua nước rửa chén hay bột giặt dịu da tay ạ? 💙"
         )
@@ -668,6 +743,145 @@ def match_need_preference(need_type: str, brand: str = "zeo") -> Optional[dict]:
         "score": 0.98,
         "suggested_reply": reply,
         "shopee_url": general_link,
+    }
+
+
+def is_bulk_or_restaurant_inquiry(text: str) -> bool:
+    """Kiểm tra xem khách có hỏi về can lớn, mua cho quán ăn, nhà hàng, bếp ăn không."""
+    folded = _fold(text)
+    return bool(re.search(r"\b(quan an|nha hang|bep an|dung cho bep|can lon|can to|can 3\.8kg|can 3,8kg|can 9kg|tui 5\.5kg|tui 5,5kg|dung cho quan|mua dung cho quan|mua can|dung can|so luong lon|can lon nhat)\b", folded))
+
+
+def match_bulk_or_restaurant_need(query: str, brand: str = "zeo") -> Optional[dict]:
+    """Tư vấn thông minh cho khách hàng quán ăn, nhà hàng, bếp ăn cần can lớn tiết kiệm chi phí — Load 100% từ Redis catalog."""
+    folded = _fold(query)
+    catalog = load_shopee_catalog(brand=brand)
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+
+    # 1. Nước rửa chén can lớn (Quán ăn / Nhà hàng / Bếp)
+    if any(k in folded for k in ["rua chen", "rua bat", "chen", "bat", "bep", "quan an", "nha hang"]):
+        matched_items = [
+            p for p in catalog
+            if any(term in _fold(p.get("name", "")) for term in ["3.8kg", "9kg", "nha hang", "quan an", "can"])
+            and ("rua chen" in _fold(p.get("category", "")) or "rua chen" in _fold(p.get("name", "")))
+        ]
+        if not matched_items:
+            matched_items = [p for p in catalog if "rua chen" in _fold(p.get("category", ""))][:2]
+
+        lines = []
+        for i, p in enumerate(matched_items[:3], 1):
+            p_name = p.get("name", "")
+            p_price = _format_price(p.get("price"))
+            p_disc = _format_discount(p.get("discount"))
+            disc_text = f" (Giảm {p_disc})" if p_disc else ""
+            p_url = p.get("link_shopee") or general_link
+            lines.append(f"{i}. ⭐️ **{p_name}** — Giá ưu đãi: **{p_price}**{disc_text}\n   👉 Mua ngay: {p_url}")
+
+        items_str = "\n".join(lines)
+        reply = (
+            "Dạ đối với quán ăn, nhà hàng, bếp ăn cần can lớn tiết kiệm chi phí tối đa, ZeO Vietnam có các dòng can lớn chuyên dụng:\n\n"
+            f"{items_str}\n\n"
+            f"👉 Bạn có thể đặt mua trực tiếp tại Shopee Mall: {general_link}\n"
+            "Nếu bạn cần mua số lượng lớn định kỳ hàng tháng cho quán, bạn để lại Số Điện Thoại và Khu Vực để phòng kinh doanh B2B gửi bảng giá sỉ chiết khấu tốt nhất nha! 💙"
+        )
+        return {
+            "matched": True,
+            "intent": "pano_dishwashing_product_overview",
+            "confidence": "high",
+            "score": 0.99,
+            "suggested_reply": reply,
+            "shopee_url": general_link,
+            "products": matched_items,
+        }
+
+    # 2. Giặt giũ can lớn (Nước giặt can 3.8kg / Bột giặt 5.5kg)
+    if any(k in folded for k in ["giat", "quan ao", "do giat", "tiem giat", "khach san"]):
+        matched_items = [
+            p for p in catalog
+            if any(term in _fold(p.get("name", "")) for term in ["3.8kg", "3.5kg", "5.5kg", "can"])
+            and ("giat" in _fold(p.get("category", "")) or "giat" in _fold(p.get("name", "")))
+        ]
+        if not matched_items:
+            matched_items = [p for p in catalog if "giat" in _fold(p.get("category", ""))][:2]
+
+        lines = []
+        for i, p in enumerate(matched_items[:3], 1):
+            p_name = p.get("name", "")
+            p_price = _format_price(p.get("price"))
+            p_disc = _format_discount(p.get("discount"))
+            disc_text = f" (Giảm {p_disc})" if p_disc else ""
+            p_url = p.get("link_shopee") or general_link
+            lines.append(f"{i}. ⭐️ **{p_name}** — Giá ưu đãi: **{p_price}**{disc_text}\n   👉 Mua ngay: {p_url}")
+
+        items_str = "\n".join(lines)
+        reply = (
+            "Dạ đối với nhu cầu giặt giũ can lớn tiết kiệm cho gia đình đông người hoặc tiệm giặt:\n\n"
+            f"{items_str}\n\n"
+            f"👉 Link gian hàng Shopee Mall chính hãng: {general_link}\n"
+            "Bạn muốn chọn dạng Nước giặt can to hay Bột giặt bao 5.5kg ạ? 💙"
+        )
+        return {
+            "matched": True,
+            "intent": "zeo_laundry_product_overview",
+            "confidence": "high",
+            "score": 0.99,
+            "suggested_reply": reply,
+            "shopee_url": general_link,
+            "products": matched_items,
+        }
+
+    return None
+
+
+def is_skin_care_dishwashing_inquiry(text: str) -> bool:
+    """Kiểm tra xem khách có băn khoăn về ăn da tay, tróc da tay khi rửa chén / giặt đồ không."""
+    folded = _fold(text)
+    has_skin_issue = bool(re.search(r"\b(an da tay|an tay|troc da|troc tay|kho da|kho tay|diu da tay|hai da tay|rat da|da nhay cam|hai tay|rat tay|di ung|diu nhe da|khong hai da)\b", folded))
+    has_product = any(k in folded for k in ["rua chen", "rua bat", "nuoc rua", "bot giat", "nuoc giat", "tay"])
+    return has_skin_issue and has_product
+
+
+def match_skin_care_dishwashing(query: str, brand: str = "zeo") -> Optional[dict]:
+    """Tư vấn chuyên sâu khi khách hàng băn khoăn về ăn da tay, tróc da tay khi dùng nước rửa chén / giặt đồ — Load 100% từ Redis catalog."""
+    folded = _fold(query)
+    catalog = load_shopee_catalog(brand=brand)
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+
+    matched_items = [
+        p for p in catalog
+        if any(term in _fold(p.get("name", "")) for term in ["vitamin e", "nha dam", "diu da tay", "chanh tu nhien"])
+        and ("rua chen" in _fold(p.get("category", "")) or "rua chen" in _fold(p.get("name", "")))
+    ]
+
+    lines = []
+    for i, p in enumerate(matched_items[:3], 1):
+        p_name = p.get("name", "")
+        p_price = _format_price(p.get("price"))
+        p_disc = _format_discount(p.get("discount"))
+        disc_text = f" (Giảm {p_disc})" if p_disc else ""
+        p_url = p.get("link_shopee") or general_link
+        lines.append(f"{i}. 🌿 **{p_name}** — Giá ưu đãi: **{p_price}**{disc_text}\n   👉 Link đặt mua: {p_url}")
+
+    items_str = "\n".join(lines) if lines else (
+        f"1. 🌿 **Nước rửa chén PANO Vitamin E** — Dưỡng ẩm bảo vệ da tay.\n"
+        f"2. 🌿 **Nước rửa chén Oplus Nha Đam** — Dịu nhẹ êm dịu cho da mẫn cảm."
+    )
+
+    reply = (
+        "Dạ nước rửa chén của ZeO/PANO/Oplus có độ pH trung tính, chiết xuất từ thiên nhiên và **HOÀN TOÀN KHÔNG ĂN DA TAY** bạn nhé.\n\n"
+        "Đặc biệt nếu tay bạn mỏng, nhạy cảm hay dễ bị khô ráp/tróc vảy khi rửa bát, bên mình khuyên dùng các dòng dưỡng ẩm bảo vệ da tay sau:\n\n"
+        f"{items_str}\n\n"
+        f"👉 Bạn có thể xem thêm tại Shopee Mall: {general_link}\n"
+        "Cần tư vấn thêm quy cách nào bạn cứ nhắn mình hỗ trợ nhé! 💙"
+    )
+    return {
+        "matched": True,
+        "intent": "pano_dishwashing_features",
+        "confidence": "high",
+        "score": 0.99,
+        "suggested_reply": reply,
+        "shopee_url": general_link,
+        "products": matched_items,
     }
 
 

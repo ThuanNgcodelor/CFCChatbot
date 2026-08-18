@@ -1313,20 +1313,30 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Khách trả lời: *"nhu cầu tiết kiệm đi"*, *"loại nào thơm lâu"*, *"sạch sâu"*, *"dịu nhẹ da tay"*.
    - Bot lập tức tư vấn sâu đúng dòng tương ứng (vd: Tiết kiệm $\rightarrow$ Bột giặt Oplus 4in1, Bột giặt Pano bao lớn; Thơm lâu $\rightarrow$ PANO Veilex; Sạch sâu $\rightarrow$ ZeO Enzyme Thụy Điển; Dịu nhẹ $\rightarrow$ Pano Vitamin E / ZeO Nha Đam).
 
-3. **Báo Giá Trực Tiếp Sản Phẩm Đích Danh (`match_specific_product_price`)**:
+3. **Báo Giá Trực Tiếp Sản Phẩm Đích Danh & Tự Động Ghép Ngữ Cảnh (`match_specific_product_price` + `_resolve_reference`)**:
    - Khi khách hỏi giá sản phẩm cụ thể (vd: *"xin giá nước rửa chén vitamin e"*, *"bột giặt pano bao nhiêu"*).
-   - Bot tra cứu realtime từ Redis Shopee Catalog, báo đúng giá niêm yết, giá khuyến mãi, % giảm và gửi link Shopee Mall trực tiếp của sản phẩm đó.
+   - Khi khách hỏi tắt theo quy cách/dung tích nối tiếp (vd: lượt 1 giới thiệu can lớn $\rightarrow$ lượt 2 hỏi *"Can 3.8kg giá bao nhiêu tiền?"* hoặc *"Giá bao nhiêu 1 chai?"*): Bot tự động lấy thực thể từ lượt trước trong `conversation_state`, ghép nối và tra cứu chính xác sản phẩm tương ứng trong Redis Shopee Catalog để báo giá ưu đãi và gửi link Shopee trực tiếp.
    - Nếu khách chỉ hỏi danh mục chung (vd: *"nước giặt giá bao nhiêu tiền 1 can"*), hệ thống tự chuyển sang bảng giá chung (`zeo_price_inquiry_general`) từ Google Sheet.
 
-4. **Bán Chạy & Mới Ra Mắt Theo Danh Mục**:
+4. **Tư Vấn Can Lớn & Quán Ăn / Nhà Hàng (`match_bulk_or_restaurant_need`) — 100% Load Từ Redis**:
+   - Khách hỏi *"Quán ăn cần mua nước rửa chén can lớn dùng cho bếp"*, *"Nhà hàng cần can 3.8kg / 9kg"* $\rightarrow$ Bot quét trực tiếp Redis Shopee Catalog, bóc tách đúng các sản phẩm can lớn: Nước rửa chén Enzyme ZeO (16.900đ), Nước rửa chén Pano can 3.8kg (76.050đ) kèm link Shopee Mall và số hotline sỉ B2B.
+
+5. **Tư Vấn Chăm Sóc Da Tay & Không Ăn Da Tay (`match_skin_care_dishwashing`) — 100% Load Từ Redis**:
+   - Khách hỏi băn khoăn về da tay *"Nước rửa chén có ăn da tay không shop, tay mình hay bị tróc da?"* $\rightarrow$ Bot giải thích độ pH trung tính, đồng thời quét Redis giới thiệu ngay 3 dòng dưỡng ẩm: PANO Vitamin E (12.350đ), Pano Chanh tự nhiên (13.000đ), ZeO Enzyme (16.900đ) kèm direct link.
+
+6. **Bổ Sung Kiến Thức Hóa Đơn Đỏ VAT & Hướng Dẫn Sử Dụng Tẩy Rửa**:
+   - `corporate_invoice_support`: Hỗ trợ xuất hóa đơn GTGT điện tử cho doanh nghiệp/hộ kinh doanh khi mua hàng.
+   - `cleaning_usage_instruction`: Hướng dẫn các bước ngâm và cọ rửa bồn cầu / tẩy vệ sinh an toàn, hiệu quả.
+
+7. **Bán Chạy & Mới Ra Mắt Theo Danh Mục**:
    - Khách hỏi *"nước rửa chén nào bán chạy nhỉ"* $\rightarrow$ Bot trả về Top 1 Bestseller Nước rửa chén Vitamin E Pano (12.350đ) và link trực tiếp.
 
-5. **Phân Tách Rõ Ràng Các Kênh Thông Tin (Website vs Mua Hàng Online vs Shopee Mall)**:
+8. **Phân Tách Rõ Ràng Các Kênh Thông Tin (Website vs Mua Hàng Online vs Shopee Mall)**:
    - Hỏi **Website** $\rightarrow$ Trả về website chính thức `https://zeo.vn/` hoặc `https://cfccobay.vn/` từ Google Sheet.
    - Hỏi **Link Shopee / Đặt Online** $\rightarrow$ Trả về gian hàng Shopee Mall chính hãng hoặc link mua hàng từ Sheet.
 
-6. **Kết Quả Đánh Giá NLU Regression Suite**:
-   - **98/98 Test Cases (100.0% Pass Rate)**, tốc độ phản hồi trung bình **8.7ms/câu**.
+9. **Kết Quả Đánh Giá NLU Regression Suite**:
+   - **98/98 Test Cases (100.0% Pass Rate)**, tốc độ phản hồi trung bình **7.8ms/câu**.
 
 
 

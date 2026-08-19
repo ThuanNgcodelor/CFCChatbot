@@ -9,8 +9,10 @@ Hỗ trợ đa nhà cung cấp:
 Tự động chuyển đổi dự phòng (Fallback Chain) khi gặp lỗi.
 """
 
+import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional, List
 
@@ -461,3 +463,130 @@ async def run_assistant_agent_chat(
         "tools_used": [],
         "action_cards": [],
     }
+
+
+async def synthesize_cskh_answer(
+    user_query: str,
+    brand: str,
+    retrieved_facts: str,
+    conversation_summary: str = "",
+    timeout: float = 2.5,
+) -> Optional[str]:
+    """
+    Dùng LLM (Ollama local / Groq / Gemini) để biến Fact từ Sheet thành câu trả lời CSKH 5 sao.
+    TUYỆT ĐỐI không bịa đặt, giọng điệu tự nhiên, lịch sự, KHÔNG dùng icon sến súa/phản cảm như 🔥.
+    """
+    return await reason_and_answer_cskh(
+        user_query=user_query,
+        brand=brand,
+        retrieved_facts=retrieved_facts,
+        conversation_summary=conversation_summary,
+        timeout=timeout,
+    )
+
+
+async def reason_and_answer_cskh(
+    user_query: str,
+    brand: str,
+    retrieved_facts: str = "",
+    chat_history: Optional[List[dict]] = None,
+    catalog_products: Optional[List[dict]] = None,
+    conversation_summary: str = "",
+    timeout: float = 3.0,
+) -> Optional[str]:
+    """
+    Trợ lý CSKH Thông Minh (Single Brain):
+    Nhận diện câu hỏi tự nhiên, đối chiếu với Dữ liệu thực tế (Facts & Products từ Google Sheet/Redis)
+    và Lịch sử trò chuyện để trả lời trọn vẹn, thuyết phục, chuẩn văn phong 5 sao và TUYỆT ĐỐI không bịa đặt.
+    """
+    brand_upper = brand.upper()
+    brand_display = "ZeO Vietnam (Chăm sóc gia đình sinh học: ZeO, PANO, Oplus)" if brand_upper == "ZEO" else "CFC Cò Bay (Phân bón & Dinh dưỡng cây trồng nông nghiệp Cần Thơ)"
+    website_url = "https://zeo.vn/" if brand_upper == "ZEO" else "https://cfccobay.vn/"
+    shopee_url = "https://shopee.vn/zeovietnamofficial" if brand_upper == "ZEO" else "https://shopee.vn/cfccobay"
+    hotline = "1900 5307" if brand_upper == "ZEO" else "0292 3841 818"
+
+    system_prompt = f"""Bạn là Chuyên viên CSKH và Tư vấn bán hàng cao cấp của thương hiệu {brand_display}.
+Mục tiêu: Đọc hiểu sâu sắc câu hỏi của khách hàng, đối chiếu với LỊCH SỬ CHAT và DỮ LIỆU THỰC TẾ (FACTS) để đưa ra câu trả lời xuất sắc nhất.
+
+QUY TẮC CỐT LÕI (BẮT BUỘC):
+1. Giọng điệu & Xưng hô:
+   - Thân thiện, ngọt ngào, lịch sự, chuyên nghiệp.
+   - Xưng: 'mình' hoặc 'dạ em'; Gọi khách: 'bạn' hoặc 'anh/chị'.
+2. Hiểu ngữ cảnh & Đa ý định (Context & Multi-Intent):
+   - Đọc kỹ lịch sử trò chuyện để hiểu rõ các đại từ thay thế như 'cái số 2', 'loại đó', 'cái này', 'sản phẩm hồi nãy'.
+   - Nếu khách hỏi gộp nhiều ý (ví dụ: vừa hỏi giá/sản phẩm vừa hỏi giao hàng/freeship về tỉnh), hãy giải đáp ĐẦY ĐỦ VÀ MẠCH LẠC tất cả các ý trong một câu trả lời duy nhất.
+3. Nguyên tắc Zero-Hallucination (Không bịa đặt):
+   - Chỉ sử dụng các dữ liệu về giá cả, thành phần, công nghệ, công dụng và chính sách có trong 'DỮ LIỆU THỰC TẾ & SẢN PHẨM' dưới đây.
+   - Đối với giá phân bón hoặc liều lượng nông nghiệp chưa có số liệu cố định: Không tự bịa giá tĩnh/liều lượng, hãy giải thích giá phụ thuộc vào đại lý từng vùng và hướng dẫn khách để lại SĐT để kỹ sư/đại lý hỗ trợ.
+   - Khi khách hỏi Mua sỉ / Nhập hàng / Đại lý (như 'cần nhập', 'muốn nhập', 'lấy sỉ', 'nhập số lượng lớn'): Hãy xác nhận công ty có chính sách chiết khấu sỉ rất tốt, xin Số điện thoại + Khu vực (Tỉnh/Thành) để chuyên viên gửi bảng giá sỉ, đồng thời cung cấp link Shopee Mall nếu khách có nhu cầu mua lẻ trải nghiệm.
+4. Văn phong sạch & Tinh tế (Clean Styling):
+   - TUYỆT ĐỐI KHÔNG dùng các icon phản cảm, sến súa, spam như: 🔥, 💥, ⚡, 💣, 😈, 💯.
+   - Chỉ sử dụng các emoji thanh lịch, nhã nhặn như: 🌿, ⭐️, 💙, 👉, 💡 khi cần thiết.
+5. Thông tin kênh mua hàng chính thức:
+   - Gian hàng Shopee Mall chính hãng: {shopee_url} (Hỗ trợ mã Freeship Extra toàn quốc).
+   - Website chính thức: {website_url}
+   - Hotline hỗ trợ: {hotline}
+6. Định dạng câu trả lời:
+   - Ngắn gọn, súc tích, dễ đọc trên điện thoại di động (có thể gạch đầu dòng 1-3 ý chính).
+   - Kết thúc bằng một lời gợi mở nhẹ nhàng (ví dụ hỏi thăm thêm nhu cầu, gửi link đặt hàng hoặc hỗ trợ tiếp).
+   - Chỉ xuất ra nội dung tin nhắn gửi khách hàng, không viết thêm bất kỳ lời bình luận nào của AI."""
+
+    # Chuẩn bị context
+    facts_block = retrieved_facts.strip() if retrieved_facts else "Hiện chưa có dữ liệu đặc thù cho câu hỏi này. Hãy trả lời dựa trên thông tin chung của thương hiệu hoặc hướng dẫn khách liên hệ hotline/để lại SĐT."
+
+    products_str = ""
+    if catalog_products and isinstance(catalog_products, list):
+        prod_lines = []
+        for p in catalog_products[:5]:
+            p_name = p.get("name", "")
+            p_price = p.get("price", "")
+            p_link = p.get("shopee_url") or p.get("link_shopee") or shopee_url
+            p_discount = p.get("discount_percent") or p.get("discount", "")
+            p_disc_str = f" (Giảm {p_discount})" if p_discount else ""
+            prod_lines.append(f"• {p_name} — Giá: {p_price}{p_disc_str} — Link: {p_link}")
+        if prod_lines:
+            products_str = "\nDANH MỤC SẢN PHẨM PHÙ HỢP TỪ SHOPEE:\n" + "\n".join(prod_lines)
+
+    history_str = ""
+    if chat_history and isinstance(chat_history, list):
+        h_lines = []
+        for h in chat_history[-6:]:
+            role = "Khách" if h.get("role") == "user" else "CSKH"
+            content = h.get("content", "").strip()
+            if content:
+                h_lines.append(f"{role}: {content}")
+        if h_lines:
+            history_str = "\nLỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n" + "\n".join(h_lines)
+    elif conversation_summary:
+        history_str = f"\nTÓM TẮT LỊCH SỬ CHAT: {conversation_summary}"
+
+    user_prompt = f"""{history_str}
+
+DỮ LIỆU THỰC TẾ (FACTS TỪ GOOGLE SHEET & HỆ THỐNG):
+{facts_block}
+{products_str}
+
+Khách hàng vừa nhắn: "{user_query}"
+Hãy soạn câu trả lời CSKH 5 sao hoàn chỉnh gửi cho khách:"""
+
+    try:
+        res = await asyncio.wait_for(
+            generate_ai_text(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                preferred_provider="ollama",
+                temperature=0.25,
+            ),
+            timeout=timeout,
+        )
+        if res.get("success") and res.get("text"):
+            ans = res.get("text", "").strip()
+            # Lọc icon xấu
+            ans = re.sub(r"[🔥💥💣⚡😈💯]", "", ans)
+            if len(ans) >= 20:
+                return ans
+    except Exception as e:
+        logger.warning("CSKH Agent synthesis error or timeout (%s): %s", brand, e)
+
+    return None
+

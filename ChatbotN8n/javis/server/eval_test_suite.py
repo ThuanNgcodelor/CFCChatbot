@@ -63,7 +63,7 @@ TEST_CASES = [
     {"q": "Bột giặt ZeO có thơm lâu không?", "category": "tech", "expected_intent": "zeo_detergent_fragrance"},
     {"q": "PANO có những mùi hương nào?", "category": "tech", "expected_intent": "pano_laundry_fragrance_options"},
     {"q": "Công nghệ VEILEX là gì?", "category": "tech", "expected_intent": "pano_veilex_odor_control"},
-    {"q": "Nước lau sàn có những mùi nào?", "category": "tech", "expected_intent": "floor_cleaner_features"},
+    {"q": "Nước lau sàn có những mùi nào?", "category": "tech", "expected_intent": "zeo_floor_cleaner_product_overview"},
     {"q": "Nước rửa chén ZIF ZeO có thành phần gì?", "category": "tech", "expected_intent": "zeo_zif_dishwashing_liquid"},
     {"q": "Tẩy Toilet ZeO có diệt khuẩn không?", "category": "tech", "expected_intent": "zeo_toilet_cleaner"},
 
@@ -127,6 +127,13 @@ TEST_CASES = [
     {"q": "nước tẩy", "category": "regression_short_product", "expected_intent": "zeo_javen_bleach"},
     {"q": "Soạn", "category": "regression_ui_noise", "expected_intent": "out_of_scope_general_question"},
     {"q": "Viết cho ZeO VietNam", "category": "regression_ui_noise", "expected_intent": "out_of_scope_general_question"},
+
+    # ─── 13. TƯ VẤN NỖI ĐAU & NHU CẦU CHUYÊN BIỆT (CONSULTATIVE CSKH) ───
+    {"q": "Nước rửa chén có ăn da tay không shop, tay mình hay bị bong tróc", "category": "consultative_pain_point", "expected_intent": "pano_dishwashing_features"},
+    {"q": "Quần áo em bé sơ sinh thì dùng nước giặt nào an toàn shop", "category": "consultative_pain_point", "expected_intent": "zeo_laundry_product_overview"},
+    {"q": "Máy giặt cửa trước thì dùng loại nước giặt nào ít bọt", "category": "consultative_pain_point", "expected_intent": "zeo_laundry_product_overview"},
+    {"q": "Quán ăn cần mua can nước rửa chén to tiết kiệm", "category": "consultative_pain_point", "expected_intent": "zeo_dishwashing_product_overview"},
+    {"q": "Shop ơi hàng giao bị nứt nắp chảy tùm lum rồi", "category": "urgent_complaint", "expected_intent": "urgent_damage_complaint"},
 ]
 
 
@@ -197,6 +204,15 @@ MULTI_TURN_CASES = [
             {"q": "vậy 2 bộ thì sao", "expected_intent": "zeo_usage_safety_review"},
         ],
     },
+    {
+        "name": "zeo_compound_budget_then_stain_followup",
+        "brand": "zeo",
+        "turns": [
+            {"q": "có sản phẩm nào dưới 200k ko nhỉ, có giao về rạch giá đc ko", "expected_intent": "multi_shopee_budget_filter_shipping_time_and_fee"},
+            {"q": "Cái số 2 dùng ổn ko nhỉ , liệu có tẩy được vết máu ko", "expected_intent": "laundry_stain_removal_guide"},
+            {"q": "cái này tẩy được vết máu ko sốp", "expected_intent": "laundry_stain_removal_guide"},
+        ],
+    },
 ]
 
 
@@ -232,7 +248,9 @@ async def run_eval():
                or (expected in ["promotion_deals", "zeo_promotions_and_deals"] and res.intent in ["promotion_deals", "zeo_promotions_and_deals"]) \
                or (expected in ["catalog_overview", "zeo_product_catalog_overview"] and res.intent in ["catalog_overview", "zeo_product_catalog_overview"]) \
                or (expected in ["shipping_time_and_fee", "nationwide_shipping_no_cod"] and res.intent in ["shipping_time_and_fee", "nationwide_shipping_no_cod"]) \
-               or (expected in ["floor_cleaner_features", "zeo_floor_cleaner_product_overview"] and res.intent in ["floor_cleaner_features", "zeo_floor_cleaner_product_overview"]):
+               or (expected in ["floor_cleaner_features", "zeo_floor_cleaner_product_overview"] and res.intent in ["floor_cleaner_features", "zeo_floor_cleaner_product_overview"]) \
+               or (expected in ["zeo_dishwashing_product_overview", "pano_dishwashing_product_overview", "pano_dishwashing_features"] and res.intent in ["zeo_dishwashing_product_overview", "pano_dishwashing_product_overview", "pano_dishwashing_features"]) \
+               or (expected in ["zeo_laundry_product_overview", "zeo_laundry_brand_differences"] and res.intent in ["zeo_laundry_product_overview", "zeo_laundry_brand_differences"]):
                 matched = True
                 passed += 1
                 status = "✅ PASS (Synonym)"

@@ -129,6 +129,36 @@ async def notify_admin_unanswered(
     return await send_telegram_message(msg)
 
 
+async def notify_urgent_complaint(
+    brand: str,
+    query: str,
+    phone: str = "",
+    sender_id: str = "",
+    fb_name: str = "",
+) -> dict:
+    """Bắn cảnh báo khiếu nại / hàng lỗi / bể vỡ khẩn cấp cho Admin."""
+    cfg = _telegram_cfg()
+    if not cfg.get("enabled", True) and not cfg.get("bot_token"):
+        return {"success": False, "skipped": True, "reason": "Telegram chưa kích hoạt"}
+
+    now_str = datetime.now().strftime("%H:%M:%S - %d/%m/%Y")
+    brand_title = "ZEO VIETNAM" if brand.upper() == "ZEO" else "CFC CÒ BAY"
+
+    msg = f"""
+🚨 <b>KHIẾU NẠI / HÀNG LỖI CẦN XỬ LÝ GẤP ({brand_title})</b>
+
+👤 <b>Khách hàng:</b> {fb_name or 'Khách Messenger'}
+📞 <b>Số điện thoại:</b> {phone or 'Đang yêu cầu khách cung cấp'}
+💬 <b>Nội dung phản ánh:</b> <i>"{query}"</i>
+🆔 <b>Sender ID:</b> <code>{sender_id or 'Ẩn danh'}</code>
+⏰ <b>Thời gian:</b> {now_str}
+
+👉 <i>CSKH vui lòng kiểm tra hộp thư Messenger để đổi trả / hoàn tiền ngay cho khách!</i>
+""".strip()
+
+    return await send_telegram_message(msg)
+
+
 async def test_telegram(bot_token: str, chat_id: str) -> dict:
     """Gửi tin nhắn kiểm thử kết nối Telegram."""
     test_msg = "⚡ <b>CFC AI Test Notification</b>\n\nKết nối Telegram Bot thành công! Bạn sẽ nhận được thông báo Lead và Báo cáo tại đây."

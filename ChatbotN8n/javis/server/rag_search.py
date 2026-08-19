@@ -400,6 +400,13 @@ def fast_lexical_search(
         if audience == "agent" and _is_customer_query_for_agent_content(norm_q):
             adjustment -= 0.30
 
+        # Hạ điểm price_inquiry khi không có từ khóa hỏi giá và tăng điểm overview khi hỏi dòng sản phẩm
+        if not _has(r"\b(gia|bao gia|bang gia|bao nhieu tien|nhieu tien|gia ban|gia ca|xin gia)\b", norm_q):
+            if "price_inquiry" in intent:
+                adjustment -= 0.35
+            if _has(r"(co\b.*\b(khong|hong|ko|k)|co nhung|cac dong|san pham gi|co san pham|co bot giat|co nuoc giat|co nuoc rua chen)", norm_q) and "overview" in intent:
+                adjustment += 0.25
+
         final_item_score = _clamp_score(base_score + adjustment)
         if final_item_score >= 0.40:
             candidates.append({
@@ -487,11 +494,16 @@ def _rerank_results(query: str, brand: str, parsed_results: list[dict]) -> list[
             if audience == "agent" or "content_style" in intent or "reels" in intent:
                 adjustment -= 0.25
 
-        if _has(r"(gia|bao gia|bang gia|bao nhieu tien|nhieu tien)", norm_q):
+        if _has(r"\b(gia|bao gia|bang gia|bao nhieu tien|nhieu tien|gia ban|gia ca|xin gia)\b", norm_q):
             if "price" in intent or "sales" in category:
                 adjustment += 0.12
             if "product_catalog" in intent:
                 adjustment -= 0.08
+        else:
+            if "price_inquiry" in intent:
+                adjustment -= 0.35
+            if _has(r"(co\b.*\b(khong|hong|ko|k)|co nhung|cac dong|san pham gi|co san pham)", norm_q) and "overview" in intent:
+                adjustment += 0.25
 
         # Priority trong Sheet
         adjustment += min(0.03, _safe_int(item.get("priority"), 0) / 1000)

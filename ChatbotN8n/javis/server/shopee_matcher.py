@@ -141,6 +141,7 @@ def load_shopee_catalog(brand: str = "zeo") -> list[dict]:
                 raw_data = r.get("zeo:shopee:catalog:active")
 
             if raw_data:
+                # pyrefly: ignore [bad-argument-type]
                 parsed = json.loads(raw_data)
                 items = parsed if isinstance(parsed, list) else parsed.get("products", [])
                 if items:
@@ -508,22 +509,39 @@ def match_specific_product_price(query: str, brand: str = "zeo", context: Option
     """
     query_folded = _fold(query)
 
-    # Loại trừ câu hỏi về liều lượng / cách dùng hoặc chính sách sỉ/đại lý
-    if re.search(r"\b(bao nhieu (?:bo|kg|lit|goi|can|gam|muong|nap)|cho \d+ bo|bon bao nhieu|bao nhieu do|lieu luong|cach dung)\b", query_folded):
+    # Tách bỏ tên sản phẩm được prepend / bổ sung trong ngoặc để chỉ kiểm tra đúng ý định người dùng
+    user_part = query_folded.split("(", 1)[0]
+    if "]" in user_part:
+        user_part = user_part.split("]", 1)[-1]
+    user_part = re.sub(r"\bgia re\b", "", user_part)
+
+    # Loại trừ câu hỏi về tính năng / hiệu quả làm sạch / tẩy vết bẩn / dùng ổn không
+    if re.search(r"\b(tay duoc|tay sach|vet mau|vet o|vet ban|dung on|dung tot|co tot|co sach|co tay|on ko|on khong|tay trang|thom ko|thanh phan|cong dung|huong dan|cach dung|di ung|an da tay)\b", user_part):
         return None
-    if re.search(r"\b(gia si|mua si|lay si|chinh sach si|chiet khau|dai ly|kinh doanh zeo|nhap so luong lon)\b", query_folded):
+
+    # Loại trừ câu hỏi về liều lượng / cách dùng hoặc chính sách sỉ/đại lý
+    if re.search(r"\b(bao nhieu (?:bo|kg|lit|goi|can|gam|muong|nap)|cho \d+ bo|bon bao nhieu|bao nhieu do|lieu luong|cach dung)\b", user_part):
+        return None
+    if re.search(r"\b(gia si|mua si|lay si|chinh sach si|chiet khau|dai ly|kinh doanh zeo|nhap so luong lon)\b", user_part):
         return None
 
     # Kiểm tra xem có từ khóa hỏi giá rõ ràng bằng word boundary không
-    has_price_ask = bool(re.search(r"\b(gia|gia ban|gia ca|bao nhieu|nhieu tien|bao gia|bang gia|xin gia|ton bao nhieu|mua het bao|gia sao|gia the nao|y la gia)\b", query_folded))
+    has_price_ask = bool(re.search(r"\b(gia|gia ban|gia ca|bao nhieu|nhieu tien|bao gia|bang gia|xin gia|ton bao nhieu|mua het bao|gia sao|gia the nao|y la gia|gia bao nhieu)\b", user_part))
     if not has_price_ask:
         return None
 
     # Nếu câu hỏi có quy cách/dung tích nhưng thiếu tên nhóm (vd: "can 3.8kg giá bao nhiêu"), bổ sung từ ngữ cảnh
     if context and isinstance(context, dict):
-        active_entities = context.get("active_entities", [])
-        if isinstance(active_entities, list) and active_entities:
+        active_entities = context.get("active_entities")
+        if isinstance(active_entities, list):
             query_folded = query_folded + " " + " ".join(_fold(e) for e in active_entities)
+        elif isinstance(active_entities, dict):
+            query_folded = query_folded + " " + " ".join(_fold(v) for v in active_entities.values() if isinstance(v, str))
+        
+        last_prods = context.get("last_products_shown")
+        if isinstance(last_prods, list) and last_prods:
+            query_folded = query_folded + " " + " ".join(_fold(p.get("name", "")) for p in last_prods if isinstance(p, dict))
+
         last_bot_reply = _fold(context.get("last_bot_reply", ""))
         if "rua chen" in last_bot_reply or "pano" in last_bot_reply:
             query_folded += " rua chen pano"
@@ -884,6 +902,167 @@ def match_skin_care_dishwashing(query: str, brand: str = "zeo") -> Optional[dict
     }
 
 
+def is_baby_or_sensitive_laundry_inquiry(text: str) -> bool:
+    """Kiểm tra câu hỏi giặt giũ cho trẻ em, em bé, con nít hoặc da nhạy cảm."""
+    folded = _fold(text)
+    has_baby = bool(re.search(r"\b(em be|con nit|tre em|tre nho|so sinh|da nhay cam|di ung da|diu nhe)\b", folded))
+    has_laundry = any(k in folded for k in ["giat", "bot giat", "nuoc giat", "xa vai", "quan ao", "do em be", "do tre"])
+    return has_baby and (has_laundry or "giat" in folded)
+
+
+def match_baby_or_sensitive_laundry(query: str, brand: str = "zeo") -> Optional[dict]:
+    """Tư vấn dòng giặt xả dịu nhẹ, an toàn cho trẻ nhỏ và da nhạy cảm."""
+    catalog = load_shopee_catalog(brand=brand)
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+
+    matched_items = [
+        p for p in catalog
+        if any(term in _fold(p.get("name", "")) for term in ["nha dam", "bio enzyme", "nano clean", "diu nhe"])
+    ]
+
+    lines = []
+    for i, p in enumerate(matched_items[:3], 1):
+        p_name = p.get("name", "")
+        p_price = _format_price(p.get("price"))
+        p_disc = _format_discount(p.get("discount"))
+        disc_text = f" (Giảm {p_disc})" if p_disc else ""
+        p_url = p.get("link_shopee") or general_link
+        lines.append(f"{i}. 🌿 **{p_name}** — Giá ưu đãi: **{p_price}**{disc_text}\n   👉 Link Shopee: {p_url}")
+
+    items_str = "\n".join(lines) if lines else (
+        "1. 🌿 **Bột giặt ZeO Nha Đam** — Dịu nhẹ sạch vết bẩn, an toàn cho da mẫn cảm.\n"
+        "2. 🌿 **Nước giặt Bio Enzyme ZeO** — Men sinh học đánh bay vết bẩn an toàn, không kích ứng da."
+    )
+
+    reply = (
+        "Dạ đối với quần áo trẻ nhỏ, em bé hoặc người có làn da nhạy cảm, bên mình khuyên dùng các dòng giặt sinh học dịu nhẹ sau:\n\n"
+        f"{items_str}\n\n"
+        "Các sản phẩm này sử dụng hoạt chất dịu nhẹ, không chứa hóa chất tẩy gắt và đã qua kiểm nghiệm an toàn da liễu nha bạn. 💙\n"
+        f"👉 Link gian hàng chính hãng: {general_link}"
+    )
+    return {
+        "matched": True,
+        "intent": "zeo_laundry_product_overview",
+        "confidence": "high",
+        "score": 0.99,
+        "suggested_reply": reply,
+        "shopee_url": general_link,
+        "products": matched_items,
+    }
+
+
+def is_front_load_washer_inquiry(text: str) -> bool:
+    """Kiểm tra câu hỏi giặt máy cửa trước, máy cửa ngang, ít bọt hoặc trào bọt."""
+    folded = _fold(text)
+    return bool(re.search(r"\b(cua truoc|cua ngang|it bot|trao bot|co bi trao bot|may giat cua truoc|may giat cua ngang|may cua truoc|may cua ngang)\b", folded))
+
+
+def match_front_load_washer(query: str, brand: str = "zeo") -> Optional[dict]:
+    """Tư vấn nước giặt công thức đậm đặc ít bọt an toàn cho máy giặt cửa trước."""
+    catalog = load_shopee_catalog(brand=brand)
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+
+    matched_items = [
+        p for p in catalog
+        if ("nuoc giat" in _fold(p.get("name", "")) or "2in1" in _fold(p.get("name", "")))
+        and any(term in _fold(p.get("name", "")) for term in ["pano", "oplus", "bio enzyme"])
+    ]
+
+    lines = []
+    for i, p in enumerate(matched_items[:3], 1):
+        p_name = p.get("name", "")
+        p_price = _format_price(p.get("price"))
+        p_disc = _format_discount(p.get("discount"))
+        disc_text = f" (Giảm {p_disc})" if p_disc else ""
+        p_url = p.get("link_shopee") or general_link
+        lines.append(f"{i}. ⭐️ **{p_name}** — Giá: **{p_price}**{disc_text}\n   👉 Link Shopee: {p_url}")
+
+    items_str = "\n".join(lines) if lines else (
+        "1. ⭐️ **Nước giặt PANO Hương nước hoa Pháp** — Đậm đặc, ít bọt, chuyên dụng cho máy cửa trước.\n"
+        "2. ⭐️ **Nước giặt 2in1 Oplus** — Giặt xả kết hợp, bảo vệ lồng giặt."
+    )
+
+    reply = (
+        "Dạ máy giặt cửa trước (cửa ngang) rất cần loại nước giặt công thức đậm đặc, **ít bọt và dễ hòa tan** để tránh trào bọt gây tắc nghẽn hoặc hỏng vi mạch máy.\n\n"
+        "Bên mình gợi ý 3 lựa chọn nước giặt chuyên dụng chuẩn cho máy cửa trước sau:\n\n"
+        f"{items_str}\n\n"
+        "Bạn muốn dùng dạng túi 3.5kg hay can to 3.8kg để mình gửi link ưu đãi tốt nhất cho bạn nhé? 💙"
+    )
+    return {
+        "matched": True,
+        "intent": "zeo_laundry_product_overview",
+        "confidence": "high",
+        "score": 0.99,
+        "suggested_reply": reply,
+        "shopee_url": general_link,
+        "products": matched_items,
+    }
+
+
+def is_stain_removal_or_efficacy_inquiry(text: str) -> bool:
+    """Kiểm tra câu hỏi về tẩy vết bẩn (vết máu, vết ố, dầu mỡ), hiệu quả làm sạch hoặc hỏi 'dùng ổn không'."""
+    folded = _fold(text)
+    # Loại trừ hỏi giá rõ ràng
+    if bool(re.search(r"\b(bao nhieu tien|gia bao nhieu|xin gia|bang gia)\b", folded)):
+        return False
+    triggers = [
+        "vet mau", "vet o", "vet ban", "vet dau mo", "vet mo hoi", "vet cafe", "vet tra",
+        "tay mau", "tay duoc", "tay sach", "co sach ko", "co sach khong", "tay trang", "o vang",
+        "dung on ko", "dung on khong", "dung tot ko", "dung tot khong", "co tot ko", "co tot khong",
+        "giat sach ko", "giat sach khong", "tay vet", "danh bay vet ban", "sach vet", "co bay mau"
+    ]
+    return any(t in folded for t in triggers)
+
+
+def match_stain_removal_or_efficacy(query: str, brand: str = "zeo", context: Optional[dict] = None) -> Optional[dict]:
+    """Tư vấn chuyên sâu về hiệu quả làm sạch, tẩy vết máu/vết ố/vết bẩn cứng đầu và hướng dẫn sử dụng tối ưu."""
+    folded = _fold(query)
+    catalog = load_shopee_catalog(brand=brand)
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+
+    # Phân loại vết bẩn
+    is_blood = bool(re.search(r"\b(vet mau|mau)\b", folded))
+    is_yellow_stain = bool(re.search(r"\b(o vang|vet o|moc|tham kim)\b", folded))
+
+    if is_blood:
+        reply = (
+            "Dạ các dòng Bột giặt / Nước giặt của ZeO và PANO **HOÀN TOÀN TẨY ĐƯỢC VẾT MÁU** và các vết bẩn gốc protein (máu, mồ hôi, sữa) rất hiệu quả bạn nhé! 💙\n\n"
+            "🌟 **Mẹo tẩy sạch vết máu 100% không để lại vệt ố:**\n"
+            "1. **Xả ngay bằng nước lạnh:** Tuyệt đối không dùng nước nóng vì nhiệt độ cao sẽ làm protein trong máu đông chặt vào thớ vải.\n"
+            "2. **Thoa trực tiếp:** Lấy một lượng nhỏ Bột giặt/Nước giặt PANO hoặc Bio Enzyme ZeO thoa trực tiếp lên vết máu, ngâm 10–15 phút để hoạt chất men phân hủy vết bẩn.\n"
+            "3. **Vò nhẹ & giặt lại:** Vò nhẹ rồi giặt bình thường bằng tay hoặc máy giặt.\n\n"
+            "👉 Với quần áo trắng bị ố máu lâu ngày, bạn có thể kết hợp thêm **Nước tẩy Javen ZeO** để áo trắng tinh tươm như mới nha!\n"
+            f"👉 Xem sản phẩm chính hãng tại Shopee Mall: {general_link}"
+        )
+    elif is_yellow_stain:
+        reply = (
+            "Dạ đối với quần áo bị ố vàng, thâm kim hoặc cặn mồ hôi lâu ngày, bạn có thể dùng các giải pháp chuyên dụng sau của ZeO:\n\n"
+            "1. ⭐️ **Bột giặt ZeO Enzyme Thụy Điển / Bột giặt PANO**: Công thức đánh bay vết ố vàng sâu trong sợi vải.\n"
+            "2. ⭐️ **Nước tẩy Javen ZeO (cho vải trắng)** hoặc **Nước tẩy màu ZeO (cho vải màu)**: Đánh bay vết ố vàng, thâm kim và khử khuẩn 99.9%.\n\n"
+            "💡 **Cách dùng:** Hòa nước tẩy với nước và bột giặt theo tỉ lệ trên bao bì, ngâm áo từ 15-20 phút trước khi giặt xả lại.\n"
+            f"👉 Link Shopee Mall: {general_link}"
+        )
+    else:
+        reply = (
+            "Dạ các sản phẩm giặt giũ của ZeO/PANO/Oplus được ứng dụng công nghệ làm sạch sinh học (Enzyme Thụy Điển, ION hòa tan nhanh và hạt VEILEX khử mùi), "
+            "giúp đánh bay các vết bẩn cứng đầu như dầu mỡ, bùn đất, thức ăn, mồ hôi mà không làm mục vải hay phai màu quần áo bạn nhé. 💙\n\n"
+            "Sản phẩm ít cặn, dễ hòa tan kể cả trong nước lạnh và giữ hương thơm bền lâu suốt cả ngày.\n"
+            f"👉 Link gian hàng Shopee Mall chính hãng: {general_link}\n"
+            "Bạn đang cần giặt đồ trắng, đồ màu hay quần áo trẻ em để mình hướng dẫn cách giặt tối ưu nhất nhé!"
+        )
+
+    return {
+        "matched": True,
+        "intent": "laundry_stain_removal_guide",
+        "confidence": "high",
+        "score": 0.99,
+        "suggested_reply": reply,
+        "shopee_url": general_link,
+    }
+
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. GENERAL MATCHING & FALLBACK
 # ─────────────────────────────────────────────────────────────────────────────
@@ -911,6 +1090,7 @@ def is_shopee_inquiry(text: str) -> bool:
         "shopee", "shoppe", "sopi", "sope", "shopi", "san tmdt",
         "link shopee", "gian hang shopee", "shopee mall", "shopee cua shop",
         "link nuoc", "link bot", "link san pham", "cho xin link", "cho link", "gui link",
+        "xin link", "link mua", "cho minh xin link", "cho minh link", "gui link cho minh", "cho link mua",
         "mua o dau", "mua o cho nao", "mua tai dau", "dat online o dau", "dat tren mang o dau"
     ]
     return any(t in folded for t in triggers)
@@ -950,6 +1130,12 @@ def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
     query_folded = _fold(query)
     brand_upper = brand.upper()
 
+    # 0. Kiểm tra hỏi về hiệu quả làm sạch / tẩy vết bẩn (vết máu, vết ố, dùng ổn không)
+    if is_stain_removal_or_efficacy_inquiry(query):
+        stain_res = match_stain_removal_or_efficacy(query, brand=brand)
+        if stain_res:
+            return stain_res
+
     # 1. Kiểm tra hỏi tầm giá / ngân sách
     if is_budget_inquiry(query):
         budget_res = match_products_by_budget(query, brand=brand)
@@ -970,6 +1156,24 @@ def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
     # 4. Kiểm tra hỏi khuyến mãi / flash sale
     if is_promotion_inquiry(query):
         return match_promotions_and_deals(query, brand=brand)
+
+    # 5. Kiểm tra tư vấn theo nỗi đau & nhu cầu chuyên biệt
+    if is_skin_care_dishwashing_inquiry(query):
+        res = match_skin_care_dishwashing(query, brand=brand)
+        if res:
+            return res
+    if is_baby_or_sensitive_laundry_inquiry(query):
+        res = match_baby_or_sensitive_laundry(query, brand=brand)
+        if res:
+            return res
+    if is_front_load_washer_inquiry(query):
+        res = match_front_load_washer(query, brand=brand)
+        if res:
+            return res
+    if is_bulk_or_restaurant_inquiry(query):
+        res = match_bulk_or_restaurant_need(query, brand=brand)
+        if res:
+            return res
 
     catalog = load_shopee_catalog(brand=brand)
     if not catalog:

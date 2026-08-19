@@ -484,6 +484,130 @@ function renderActionCard(card) {
   const tool = card.tool;
   const res = card.result || {};
 
+  // 1. Business Stats / Leads CRM Card
+  if (tool === 'get_business_stats' && res.total_customers !== undefined) {
+    const details = res.details || {};
+    return `
+      <div class="action-card-box">
+        <div class="action-card-header">
+          <div style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;color:var(--text-main)">
+            <i data-lucide="bar-chart-2" style="width:16px;height:16px;color:var(--primary)"></i>
+            <span>Báo Cáo Tổng Hợp Khách Hàng &amp; Leads</span>
+          </div>
+          <span class="badge badge-emerald" style="font-size:10px">${res.timestamp || 'Realtime'}</span>
+        </div>
+        <div class="stat-metric-grid">
+          <div class="stat-metric-cell">
+            <span class="stat-metric-num">${res.total_customers || 0}</span>
+            <span class="stat-metric-title">Tổng Khách Hàng</span>
+          </div>
+          <div class="stat-metric-cell" style="border-color:rgba(16,185,129,0.3)">
+            <span class="stat-metric-num" style="color:var(--success)">${res.total_leads_with_phone || 0}</span>
+            <span class="stat-metric-title">Leads Có SĐT</span>
+          </div>
+          <div class="stat-metric-cell">
+            <span class="stat-metric-num" style="color:var(--warning)">${res.total_learning_queue_pending || 0}</span>
+            <span class="stat-metric-title">Chờ Duyệt FAQ</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+          <div style="font-size:11.5px;color:var(--text-dim)">
+            ZeO: <strong>${details.zeo?.leads_with_phone || 0} SĐT</strong> · CFC: <strong>${details.cfc?.leads_with_phone || 0} SĐT</strong>
+          </div>
+          <button class="btn btn-ghost btn-xs" onclick="switchPage('customers', document.querySelector('.nav-item[data-page=customers]'))" style="font-size:11px">
+            <span>Mở CRM Lead</span>
+            <i data-lucide="arrow-right" style="width:12px;height:12px"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  // 2. Shopee Catalog Products Card
+  if (tool === 'get_shopee_catalog_summary' && (res.sample_products || res.products)) {
+    const prods = res.products || res.sample_products || [];
+    return `
+      <div class="action-card-box">
+        <div class="action-card-header">
+          <div style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;color:var(--text-main)">
+            <i data-lucide="shopping-bag" style="width:16px;height:16px;color:var(--primary)"></i>
+            <span>Sản Phẩm Khuyên Dùng (${res.total_products !== undefined ? res.total_products + ' sản phẩm' : prods.length + ' sản phẩm'})</span>
+          </div>
+        </div>
+        <div class="shopee-product-grid">
+          ${prods.slice(0, 4).map(p => `
+            <div class="shopee-product-card">
+              <div>
+                <div class="shopee-prod-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+                ${p.variant ? `<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">${escapeHtml(p.variant)}</div>` : ''}
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+                <span class="shopee-prod-price">${escapeHtml(p.price || '')}</span>
+                ${p.link ? `<a href="${p.link}" target="_blank" rel="noopener" class="btn btn-primary btn-xs" style="text-decoration:none;padding:2px 8px;font-size:10.5px">Xem Mall</a>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // 3. n8n Workflows List Card
+  if (tool === 'list_n8n_workflows' && Array.isArray(res.workflows)) {
+    return `
+      <div class="action-card-box">
+        <div class="action-card-header">
+          <div style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;color:var(--text-main)">
+            <i data-lucide="git-branch" style="width:16px;height:16px;color:var(--primary)"></i>
+            <span>Trạng Thái Workflows n8n (${res.total || res.workflows.length})</span>
+          </div>
+          <span class="badge badge-blue" style="font-size:10px">${res.active_count || 0} Đang Chạy</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+          ${res.workflows.slice(0, 5).map(wf => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--bg-surface2);border-radius:var(--r-sm);border:1px solid var(--border)">
+              <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
+                <span class="sys-dot" style="background:${wf.active ? 'var(--success)' : 'var(--danger)'}"></span>
+                <span style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(wf.name)}</span>
+              </div>
+              <button class="btn btn-sm ${wf.active ? 'btn-ghost' : 'btn-primary'}" onclick="assistantToggleWorkflow('${wf.id}', this)" style="font-size:10.5px;padding:2px 8px">
+                <i data-lucide="${wf.active ? 'power-off' : 'power'}" style="width:10px;height:10px"></i>
+                <span>${wf.active ? 'Tắt' : 'Bật'}</span>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // 4. Learning Queue Card
+  if (tool === 'get_learning_queue_summary' && Array.isArray(res.items)) {
+    return `
+      <div class="action-card-box">
+        <div class="action-card-header">
+          <div style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;color:var(--text-main)">
+            <i data-lucide="brain" style="width:16px;height:16px;color:var(--warning)"></i>
+            <span>Hàng Đợi Học &amp; Duyệt FAQ (${res.total_retrieved || res.items.length} câu)</span>
+          </div>
+          <button class="btn btn-ghost btn-xs" onclick="switchPage('learning', document.querySelector('.nav-item[data-page=learning]'))" style="font-size:11px">
+            <span>Duyệt ngay</span>
+            <i data-lucide="arrow-right" style="width:11px;height:11px"></i>
+          </button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-top:6px">
+          ${res.items.slice(0, 3).map(it => `
+            <div style="padding:6px 10px;background:var(--bg-surface2);border-radius:var(--r-sm);font-size:12px;border:1px solid var(--border)">
+              <div style="font-weight:600;color:var(--text-main)">"${escapeHtml(it.user_message || it.query || '')}"</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Lý do: ${escapeHtml(it.fallback_reason || 'Chưa chắc chắn')}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // 5. Toggle Workflow Success Card
   if (tool === 'toggle_n8n_workflow' && res.success) {
     const isNowActive = res.new_state;
     return `
@@ -502,7 +626,10 @@ function renderActionCard(card) {
         </button>
       </div>
     `;
-  } else if (tool === 'get_system_status' && res.redis) {
+  }
+
+  // 6. System Status Card
+  if (tool === 'get_system_status' && res.redis) {
     return `
       <div style="display:flex;align-items:center;gap:12px;font-size:11.5px;color:var(--text-dim);margin-top:6px;flex-wrap:wrap">
         <span>💾 Redis RAM: <strong style="color:var(--success)">${res.redis.used_memory_ram || '?'}</strong></span>

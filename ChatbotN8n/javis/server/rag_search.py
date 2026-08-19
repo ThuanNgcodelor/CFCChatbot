@@ -368,11 +368,11 @@ def fast_lexical_search(
                 adjustment -= 0.45
 
         # ZIF
-        if _has(r"\bzif\b", norm_q):
-            if "zif" in intent or "dishwashing" in intent:
-                adjustment += 0.35
-            if "catalog" in intent:
-                adjustment -= 0.15
+        # if _has(r"\bzif\b", norm_q):
+        #     if "zif" in intent or "dishwashing" in intent:
+        #         adjustment += 0.35
+        #     if "catalog" in intent:
+        #         adjustment -= 0.15
 
         # PANO
         if _has(r"\bpano\b", norm_q):
@@ -794,6 +794,7 @@ async def get_faq_by_intent(brand: str, intent: str) -> dict:
 
     try:
         async for key in r.scan_iter(match=f"{index_name}:doc:*:{intent}", count=100):
+            # pyrefly: ignore [not-async]
             fields_raw = await r.hgetall(key)
             fields = {}
             for k, v in fields_raw.items():

@@ -168,11 +168,13 @@ async def health():
     # Check Redis
     try:
         r = await get_redis()
+        # pyrefly: ignore [not-async]
         await r.ping()
         status["redis"] = "ok"
         # Kiểm tra index đã tồn tại chưa
         try:
             result = await r.execute_command("FT._LIST")
+            # pyrefly: ignore [not-iterable]
             status["vector_indexes"] = [idx.decode() if isinstance(idx, bytes) else idx for idx in result]
         except Exception:
             status["vector_indexes"] = []

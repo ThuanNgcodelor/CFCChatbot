@@ -57,14 +57,10 @@
 
       <!-- NỘI DUNG -->
       <div class="nav-group">
-        <div class="nav-group-label">Kiến Thức &amp; Danh Mục</div>
+        <div class="nav-group-label">Kiến Thức &amp; Tài Liệu</div>
         <div class="nav-item" data-page="documents" onclick="switchPage('documents', this)">
           <i data-lucide="book-open"></i>
           <span>Nạp Tài Liệu MD</span>
-        </div>
-        <div class="nav-item" data-page="shopee" onclick="switchPage('shopee', this)">
-          <i data-lucide="shopping-bag"></i>
-          <span>Shopee Catalog</span>
         </div>
       </div>
 
@@ -201,7 +197,7 @@
           <!-- Thanh Nhập Tin Nhắn (Chat Input Bar) -->
           <div style="padding:12px 18px;background:var(--bg-card);border-top:1px solid var(--border);display:flex;gap:10px;align-items:center">
             <input type="text" id="assistant-input" class="form-input" style="flex:1;height:42px;font-size:13.5px"
-              placeholder="Nhắn tin với Trợ lý: hỏi chuyện, hỏi model, tra số liệu, hoặc 'Bật workflow Shopee'..." />
+              placeholder="Nhắn tin với Trợ lý: hỏi chuyện, hỏi model, tra số liệu, hoặc 'Bật workflow ZeO'..." />
             <button class="btn btn-primary" id="assistant-send-btn" onclick="submitAssistantChat()" style="height:42px;padding:0 20px;display:inline-flex;align-items:center;gap:8px">
               <i data-lucide="send"></i>
               <span>Gửi</span>
@@ -407,51 +403,6 @@
       </div>
     </div>
 
-    <!-- ── PAGE: Shopee Catalog ── -->
-    <div id="page-shopee" class="page">
-      <div class="page-header">
-        <div class="page-header-left">
-          <h2>
-            <i data-lucide="shopping-bag"></i>
-            <span>Danh Mục Sản Phẩm Shopee Mall</span>
-          </h2>
-          <p>Bot tự động nhận diện intent mua sắm và gửi chính xác link Shopee sản phẩm tương ứng</p>
-        </div>
-        <div class="page-header-actions">
-          <span class="badge badge-green" id="shopee-count">0 sản phẩm</span>
-          <span id="shopee-last-sync" style="font-size:11.5px;color:var(--text-dim);font-family:'JetBrains Mono',monospace"></span>
-          <button class="btn btn-primary" onclick="openAddShopeeModal()">
-            <i data-lucide="plus"></i>
-            <span>Thêm Sản Phẩm</span>
-          </button>
-          <button class="btn btn-ghost" onclick="syncShopeeSheetNow()">
-            <i data-lucide="refresh-cw"></i>
-            <span>Sync Google Sheet</span>
-          </button>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Brand</th>
-                <th>Tên Sản Phẩm</th>
-                <th>Quy Cách</th>
-                <th>Giá Bán</th>
-                <th>Ưu Đãi</th>
-                <th>Link Shopee</th>
-                <th style="text-align:right">Thao Tác</th>
-              </tr>
-            </thead>
-            <tbody id="shopee-table">
-              <tr><td colspan="7" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
     <!-- ── PAGE: n8n Control ── -->
     <div id="page-n8n" class="page">
       <div class="page-header">
@@ -648,28 +599,6 @@
       </div>
 
       <div class="settings-grid">
-
-        <!-- Shopee Sheet -->
-        <div class="settings-card">
-          <div class="settings-card-header">
-            <div class="settings-card-icon">
-              <i data-lucide="shopping-bag"></i>
-            </div>
-            <div>
-              <div class="settings-card-title">Shopee Catalog &amp; Google Sheet</div>
-              <div class="settings-card-sub">Tự động đồng bộ danh mục &amp; giá sản phẩm mỗi 10 phút</div>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Google Sheets URL Danh Mục Shopee</label>
-            <input class="form-input" id="set-shopee-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/.../edit">
-            <div class="form-hint">Cột chuẩn: Brand | Tên SP | Quy cách | Giá | Ưu đãi | Link Shopee | Từ khóa</div>
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="syncShopeeSheetNow()">
-            <i data-lucide="refresh-cw"></i>
-            <span>Đồng bộ Shopee Sheet ngay</span>
-          </button>
-        </div>
 
         <!-- n8n Configuration -->
         <div class="settings-card">
@@ -952,98 +881,107 @@
   </div>
 </div>
 
-<!-- Shopee Product Modal -->
-<div class="modal-overlay" id="shopee-modal">
-  <div class="modal" style="max-width:540px">
+<!-- Google Sheets Live Hub Modal (Preview & Sync) -->
+<div class="modal-overlay" id="google-sheet-hub-modal">
+  <div class="modal" style="max-width:800px;width:95%">
     <div class="modal-header">
-      <div class="modal-title" id="shopee-modal-title">
-        <i data-lucide="shopping-bag"></i>
-        <span>Thêm Sản Phẩm Shopee</span>
+      <div class="modal-title">
+        <i data-lucide="sheet" style="color:var(--success)"></i>
+        <span>Google Sheets Live Hub — Tải Tab Tự Động &amp; Đồng Bộ Redis</span>
       </div>
-      <button class="modal-close" onclick="closeShopeeModal()">✕</button>
+      <button class="modal-close" onclick="closeGoogleSheetHub()">✕</button>
     </div>
     <div class="modal-body">
-      <form onsubmit="event.preventDefault(); saveShopeeProduct();">
-        <input type="hidden" id="shopee-edit-idx" value="-1">
-        <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px" class="form-group">
+      <!-- Method Selector Tabs -->
+      <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:10px">
+        <button class="filter-tab active" id="hub-tab-btn-url" onclick="switchHubMethod('url')">
+          <i data-lucide="link"></i>
+          <span>Kết Nối Google Sheets (URL / API Key)</span>
+        </button>
+        <button class="filter-tab" id="hub-tab-btn-file" onclick="switchHubMethod('file')">
+          <i data-lucide="upload"></i>
+          <span>Tải Lên File CSV / Excel Trực Tiếp</span>
+        </button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" class="form-group">
+        <div>
+          <label class="form-label">Loại Dữ Liệu Đồng Bộ</label>
+          <select class="form-input" id="hub-sheet-target">
+            <option value="faq">FAQ Knowledge (Cơ Sở Tri Thức RAG)</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Thương Hiệu Áp Dụng</label>
+          <select class="form-input" id="hub-sheet-brand">
+            <option value="zeo">ZeO Vietnam</option>
+            <option value="cfc">CFC Cò Bay</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- METHOD 1: URL & API Key -->
+      <div id="hub-method-url">
+        <div class="form-group">
+          <label class="form-label">Đường Dẫn Google Sheets *</label>
+          <div style="display:flex;gap:8px">
+            <input class="form-input" id="hub-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/1WDwenHKbcLkVVDpmLsTZOm0oc6yPfIo9gAPninGyFkg/edit" style="flex:1" required>
+            <button type="button" class="btn btn-ghost" onclick="fetchSheetTabsList()" id="btn-fetch-tabs" style="white-space:nowrap;font-size:12px">
+              <i data-lucide="list"></i>
+              <span>Tải Danh Sách Tab</span>
+            </button>
+          </div>
+          <div class="form-hint">Dán link Google Sheet. Nếu file riêng tư, hãy chuyển sang 'Bất kỳ ai có đường liên kết' hoặc nhập Google API Key / Client Key.</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" class="form-group">
           <div>
-            <label class="form-label">Thương hiệu</label>
-            <select class="form-input" id="shopee-form-brand">
-              <option value="ZEO">ZEO</option>
-              <option value="CFC">CFC</option>
+            <label class="form-label">Chọn Trang Tính (Sheet Tab / From List)</label>
+            <select class="form-input" id="hub-sheet-tab-select">
+              <option value="">-- Mặc định (Tab đầu tiên) --</option>
             </select>
           </div>
           <div>
-            <label class="form-label">Tên sản phẩm *</label>
-            <input class="form-input" id="shopee-form-name" placeholder="VD: Nước giặt ZeO Hương Nắng Mai" required>
+            <label class="form-label">Google API Key / Client Key (Tuỳ chọn cho file riêng tư)</label>
+            <input class="form-input" id="hub-sheet-key" placeholder="AIzaSy... hoặc Bearer Token">
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" class="form-group">
-          <div>
-            <label class="form-label">Quy cách</label>
-            <input class="form-input" id="shopee-form-variant" placeholder="VD: Can 3.6kg, Bao 25kg">
-          </div>
-          <div>
-            <label class="form-label">Giá bán</label>
-            <input class="form-input" id="shopee-form-price" placeholder="VD: 145.000đ">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Ưu đãi / Khuyến mãi</label>
-          <input class="form-input" id="shopee-form-promotion" placeholder="VD: Mua 2 tặng 1, Freeship đơn 150k">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Link Shopee Mall *</label>
-          <input class="form-input" id="shopee-form-url" placeholder="https://shopee.vn/product/..." required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Từ khóa nhận diện (cách nhau bởi dấu phẩy)</label>
-          <input class="form-input" id="shopee-form-keywords" placeholder="VD: nuoc giat, huong nang mai, zeo 3.6kg">
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-          <button type="button" class="btn btn-ghost" onclick="closeShopeeModal()">Hủy</button>
-          <button type="submit" class="btn btn-primary">
-            <i data-lucide="save"></i>
-            <span>Lưu Sản Phẩm</span>
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
 
-<!-- Import Google Sheets Modal -->
-<div class="modal-overlay" id="import-sheet-modal">
-  <div class="modal" style="max-width:520px">
-    <div class="modal-header">
-      <div class="modal-title">
-        <i data-lucide="sheet"></i>
-        <span>Import Tài Liệu Google Sheets</span>
-      </div>
-      <button class="modal-close" onclick="closeImportSheetModal()">✕</button>
-    </div>
-    <div class="modal-body">
-      <form onsubmit="event.preventDefault(); submitImportSheet();">
-        <div class="form-group">
-          <label class="form-label">Thương hiệu</label>
-          <select class="form-input" id="sheet-import-brand">
-            <option value="zeo">ZeO</option>
-            <option value="cfc">CFC</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Đường dẫn Google Sheets</label>
-          <input class="form-input" id="sheet-import-url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" required>
-          <div class="form-hint">Sheet cần ở chế độ <b>"Bất kỳ ai có đường liên kết đều có thể xem"</b>. Cột: Câu hỏi | Câu trả lời</div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-          <button type="button" class="btn btn-ghost" onclick="closeImportSheetModal()">Hủy</button>
-          <button type="submit" class="btn btn-primary" id="btn-submit-import-sheet">
-            <i data-lucide="download"></i>
-            <span>Tiến Hành Import</span>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button type="button" class="btn btn-ghost" onclick="previewGoogleSheet()" style="flex:1;justify-content:center">
+            <i data-lucide="eye"></i>
+            <span>1. Xem Trước Bảng Tính (Live Preview)</span>
+          </button>
+          <button type="button" class="btn btn-primary" id="btn-hub-sync" onclick="syncGoogleSheetFromHub()" style="flex:1;justify-content:center" disabled>
+            <i data-lucide="zap"></i>
+            <span>2. Đồng Bộ Vào Redis Ngay</span>
           </button>
         </div>
-      </form>
+      </div>
+
+      <!-- METHOD 2: Direct File Upload -->
+      <div id="hub-method-file" style="display:none">
+        <div class="form-group">
+          <label class="form-label">Chọn file CSV / Excel từ máy tính</label>
+          <input type="file" class="form-input" id="hub-file-input" accept=".csv,.tsv,.txt">
+          <div class="form-hint">Tải file CSV/Excel từ Google Sheet về máy rồi chọn file tại đây. 100% không cần tài khoản hay quyền cấp phép.</div>
+        </div>
+        <div style="margin-top:14px">
+          <button type="button" class="btn btn-primary" onclick="uploadCsvDirectFromHub()" style="width:100%;justify-content:center">
+            <i data-lucide="upload-cloud"></i>
+            <span>Tải Lên &amp; Đồng Bộ Vào Redis Ngay</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Preview Area -->
+      <div id="hub-preview-area" style="display:none;margin-top:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:12px;font-weight:700;color:var(--text-main)" id="hub-preview-count">Xem trước dữ liệu:</span>
+          <span class="badge badge-green" style="font-size:10px">Live Sheet Preview</span>
+        </div>
+        <div class="sheet-preview-wrap" id="hub-preview-table"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -1074,8 +1012,7 @@
       closeModal();
       closeEditModal();
       closeHistoryModal();
-      closeShopeeModal();
-      closeImportSheetModal();
+      closeGoogleSheetHub();
     }
   });
 
@@ -1092,8 +1029,9 @@
   setInterval(updateFooterClock, 1000);
   updateFooterClock();
 
-  // Initial Load
-  loadPage('dashboard');
+  // Initial Load from URL Hash (vd: /#customers, /#assistant, /#reports)
+  const initialPage = (window.location.hash || '').replace('#', '').trim() || 'dashboard';
+  switchPage(initialPage, null, false);
   setLastUpdated();
   updateSidebarStatus();
   refreshIcons();

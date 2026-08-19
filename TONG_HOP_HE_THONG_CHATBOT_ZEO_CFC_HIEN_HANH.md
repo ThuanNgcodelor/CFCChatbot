@@ -78,22 +78,33 @@ Bot không chắc / guardrail fail
 │   │   ├── knowledge/
 │   │   │   └── shopee_catalog.json
 │   │   ├── server/
-│   │   │   ├── main.py
-│   │   │   ├── chat_pipeline.py
-│   │   │   ├── rag_search.py
-│   │   │   ├── knowledge_sync.py
-│   │   │   ├── embedder.py
-│   │   │   ├── shopee_matcher.py
-│   │   │   ├── admin_routes.py
-│   │   │   ├── ai_engine.py
-│   │   │   ├── ai_agent_tools.py
-│   │   │   ├── document_ingestor.py
-│   │   │   ├── telegram_notifier.py
-│   │   │   ├── eval_test_suite.py
-│   │   │   ├── settings.example.json
-│   │   │   ├── settings.json
-│   │   │   ├── requirements.txt
-│   │   │   └── static/admin.html
+│   │   │   ├── domains/                 # 📂 9 Domain Packages theo chuẩn DDD
+│   │   │   │   ├── common/              # Shared Kernel (Redis connection pool, settings I/O)
+│   │   │   │   ├── system/              # Status, Health check, Cài đặt & Analytics
+│   │   │   │   ├── assistant/           # Trợ lý điều hành AI & Autonomous Tools
+│   │   │   │   ├── customers/           # Quản lý khách hàng, hội thoại, Leads CRM & Export CSV
+│   │   │   │   ├── n8n/                 # Quản trị Workflow n8n, Executions & File Watching
+│   │   │   │   ├── reports/             # Báo cáo điều hành kinh doanh AI Insights
+│   │   │   │   ├── learning/            # Hàng đợi học (Learning Queue) & AI gợi ý FAQ
+│   │   │   │   ├── knowledge/           # Kho kiến thức Markdown & Google Sheets Live Hub
+│   │   │   │   └── rag_test/            # Kiểm thử Semantic Search RAG & NLU
+│   │   │   ├── scripts/                 # 📂 Scripts cào Shopee & tiện ích tiền xử lý CSV
+│   │   │   ├── main.py                  # Server FastAPI chính (port 8000)
+│   │   │   ├── admin_routes.py          # Facade Gateway Router (~55 dòng)
+│   │   │   ├── chat_pipeline.py         # Não bộ xử lý hội thoại & NLU
+│   │   │   ├── rag_search.py            # Semantic Search FAQ (In-memory RAM < 1ms)
+│   │   │   ├── knowledge_sync.py        # Đồng bộ Redis Vector Index
+│   │   │   ├── embedder.py              # Vector embedding Ollama (bge-m3)
+│   │   │   ├── ai_engine.py             # Kết nối LLMs (Groq, Gemini, OpenRouter, Ollama)
+│   │   │   ├── ai_agent_tools.py        # Autonomous Tool Execution cho Trợ lý AI
+│   │   │   ├── ai_reporter.py           # Báo cáo kinh doanh AI Briefing
+│   │   │   ├── document_ingestor.py     # Nạp tài liệu MD vào Vector Index
+│   │   │   ├── shopee_matcher.py        # Khớp link Shopee Mall khi chat
+│   │   │   ├── telegram_notifier.py     # Bắn thông báo Telegram
+│   │   │   ├── eval_test_suite.py       # Bộ 98 test cases kiểm thử NLU
+│   │   │   ├── settings.json            # File cấu hình API keys
+│   │   │   ├── requirements.txt         # Thư viện Python
+│   │   │   └── static/                  # Frontend Web Admin (HTML/CSS/JS)
 │   │   └── skills/
 │   ├── workflows/
 │   │   └── local-n8n/
@@ -369,35 +380,34 @@ Vai trò:
 
 Nếu không có link chính thức trong catalog/Sheet thì bot không nên tự bịa link.
 
-### 5.7 `admin_routes.py`
+### 5.7 `admin_routes.py` & Kiến Trúc `domains/` (DDD)
 
 Vai trò:
 
-- Backend cho dashboard `/admin`.
-- Quản lý settings.
-- Xem status Redis/Ollama/n8n.
-- Xem thống kê khách hàng.
-- Xem/sửa/xóa customer profile/session.
-- Xem learning queue, approve/dismiss.
-- Test query RAG.
-- Quản lý tài liệu, import sheet, upload docs.
-- Quản lý Shopee catalog.
-- Gửi Telegram test.
-- Analytics weekly/snapshot.
-- AI assistant/admin tools.
+- `admin_routes.py`: Facade Gateway Router tinh gọn (~55 dòng) nạp toàn bộ sub-routers từ các domain nghiệp vụ.
+- `domains/`: Bóc tách thành 9 Bounded Contexts độc lập:
+  - `domains.common`: Shared Kernel (Redis pool, settings I/O, config).
+  - `domains.system`: Settings, Status, Health check & Analytics weekly.
+  - `domains.assistant`: Trợ lý điều hành AI & Autonomous tool calling.
+  - `domains.customers`: Quản lý khách hàng, hội thoại, Leads CRM & Export CSV.
+  - `domains.n8n`: Điều khiển Workflow n8n, Executions & Real-time File Watching.
+  - `domains.reports`: Báo cáo điều hành kinh doanh AI Insights.
+  - `domains.learning`: Hàng đợi học (Learning Queue) & AI gợi ý FAQ.
+  - `domains.knowledge`: Kho kiến thức, Tài liệu Markdown & Google Sheets Live Hub.
+  - `domains.rag_test`: Kiểm thử Semantic Search RAG & NLU evaluation.
 
-Nhóm endpoint:
+Nhóm endpoint tiêu biểu:
 
-| Nhóm | Endpoint ví dụ |
-|---|---|
-| Settings/status | `/settings`, `/status` |
-| n8n | `/n8n/workflows`, `/n8n/deploy`, `/n8n/executions` |
-| Customers | `/customers`, `/customers/{brand}/{sender_id}/session` |
-| Learning | `/learning-queue`, `/learning-queue/approve` |
-| Documents | `/documents`, `/documents/sync`, `/documents/import-sheet` |
-| Shopee | `/shopee/catalog`, `/shopee/sync-sheet` |
-| Analytics/reports | `/analytics/weekly`, `/reports/generate` |
-| Assistant | `/assistant/chat`, `/assistant/quick-prompts` |
+| Nhóm Domain | Endpoint tiêu biểu | Chức năng chính |
+|---|---|---|
+| **System & Settings** | `/settings`, `/status`, `/stats/today`, `/analytics/weekly` | Quản trị kết nối, cấu hình API keys và theo dõi sức khỏe hệ thống |
+| **AI Assistant** | `/assistant/chat`, `/assistant/quick-prompts` | Trợ lý điều hành tự động thực thi tool và tra cứu số liệu CRM/n8n |
+| **Customers CRM** | `/customers`, `/customers/{brand}/{id}/session`, `/customers/export` | Quản lý profile, số điện thoại Leads, lịch sử chat và xuất file CSV |
+| **n8n Automation** | `/n8n/workflows`, `/n8n/deploy`, `/n8n/executions`, `/n8n/ws/file-watch` | Bật/tắt workflow, đẩy code .ts lên n8n và theo dõi file thay đổi real-time |
+| **AI Reports** | `/reports/latest`, `/reports/generate` | Sinh Bản Tin Báo Cáo Điều Hành kinh doanh hàng ngày với Groq / Ollama |
+| **Learning Queue** | `/learning-queue`, `/learning-queue/approve`, `/learning/ai-suggest` | Duyệt câu hỏi chưa chắc và AI tự động gom nhóm gợi ý câu trả lời |
+| **Knowledge Hub** | `/sheets/get-tabs`, `/sheets/preview`, `/sheets/sync-direct`, `/documents/upload` | Google Sheets Live Hub (chọn Tab n8n-style) và nạp tài liệu Markdown |
+| **RAG Test** | `/test/query` | Thử nghiệm độ chính xác của Semantic Search và câu trả lời bot |
 
 ### 5.8 `document_ingestor.py`
 
@@ -1319,6 +1329,57 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
 
 11. **Kết Quả Đánh Giá NLU Regression Suite**:
    - **98/98 Test Cases (100.0% Pass Rate)**, tốc độ phản hồi trung bình **7.9ms/câu**.
+
+---
+
+## 24. Cập Nhật Web Admin: Google Sheets Live Hub & Trợ Lý Điều Hành AI
+
+Ngày cập nhật: **18/08/2026**
+
+### 24.1 Google Sheets Live Hub (Xem Trước & Đồng Bộ 1 Chạm — Cơ Chế Chuẩn n8n)
+- **Tự động tải danh sách Tab (From List)**:
+  - Endpoint `POST /admin/sheets/get-tabs`: Kết nối Google Sheets API v4 metadata, tự động đọc toàn bộ danh sách các Tab (Sheet Name) trong bảng tính và nạp vào Dropdown cho người dùng chọn trước khi xem trước/đồng bộ.
+- **Tích hợp xem trước bảng tính trực tiếp**:
+  - Hỗ trợ cả Sheet công khai và Sheet riêng tư (thông qua Google Cloud API Key / OAuth Bearer Token).
+  - Endpoint `POST /admin/sheets/preview`: Bóc tách cấu trúc cột, số dòng theo đúng Sheet Tab đã chọn.
+- **Đồng bộ trực tiếp vào Redis (1-Click Sync)**:
+  - Endpoint `POST /admin/sheets/sync-direct`: Đồng bộ thẳng vào `zeo:shopee:catalog:active` (Shopee) hoặc `zeo:kb:basic:active` (FAQ) và kích hoạt cập nhật Vector Index tự động.
+- **Tải lên File CSV / Excel trực tiếp (Offline / No Key)**:
+  - Endpoint `POST /admin/sheets/upload-csv`: Cho phép kéo thả file CSV xuất từ Google Sheet trực tiếp mà không cần cấp quyền Google Drive.
+
+### 24.2 Trợ Lý Điều Hành AI & Tự Động Thực Thi Công Cụ (Autonomous Tool Execution)
+- **Chấm dứt việc AI trả lời lý thuyết**: Tích hợp cơ chế `_match_autonomous_tool` trong `ai_engine.py`.
+- Khi người dùng hỏi về:
+  - Tình hình khách hàng/leads hôm nay $\rightarrow$ Tự động chạy `get_business_stats` đọc Redis CRM.
+  - Danh mục Shopee $\rightarrow$ Tự động chạy `get_shopee_catalog_summary` đọc catalog live.
+  - Danh sách / Lỗi n8n $\rightarrow$ Tự động chạy `list_n8n_workflows` hoặc `get_n8n_executions`.
+  - Hàng đợi học $\rightarrow$ Tự động chạy `get_learning_queue_summary`.
+### 24.3 Tinh Gọn Giao Diện Web Admin
+- **Loại bỏ Menu & Tab Shopee Catalog**: Đã gỡ bỏ mục Shopee Catalog khỏi thanh Sidebar điều hướng, gỡ trang Shopee và gỡ bỏ thẻ cấu hình Shopee trong mục Cài đặt (Settings) theo yêu cầu, giữ giao diện Web Admin gọn gàng, tập trung vào Quản trị Chatbot, CRM Lead, n8n Console và Kho Kiến Thức FAQ RAG.
+
+### 24.4 Nâng Cấp Báo Cáo AI Briefing (AI Insights)
+- **Tối ưu Model Routing**: Chuyển Groq sang model `openai/gpt-oss-120b` và bổ sung candidate model fallback (`openai/gpt-oss-20b`, `qwen/qwen3.6-27b`, `groq/compound`), loại bỏ lỗi 404 model not found.
+- **Dự phòng tổng hợp số liệu (System Fallback Synthesis)**: Trong trường hợp toàn bộ AI provider mất mạng hoặc quá tải, hệ thống tự động tổng hợp bản tin báo cáo phân tích theo mẫu chuẩn từ số liệu thực tế của Redis (Khách hàng, Leads SĐT, Learning Queue), đảm bảo không bao giờ bị lỗi giao diện.
+- **Render Markdown trực quan**: Định dạng bảng biểu, tiêu đề và gạch đầu dòng rõ ràng trên giao diện web.
+
+### 24.5 SPA URL Hash Routing & Đồng Bộ Thanh Điều Hướng (Deep Linking)
+- **Đồng bộ URL Hash khi chuyển Tab**: Mỗi khi chuyển tab (vd: Trợ lý AI, Hội thoại Lead, Báo cáo AI, n8n Control, Cài đặt), URL trình duyệt tự động cập nhật hash tương ứng (`/#assistant`, `/#customers`, `/#reports`, `/#n8n`, `/#learning`, `/#documents`, `/#test`, `/#settings`).
+- **Giữ nguyên vị trí khi Reload (F5)**: Khi người dùng reload trang hoặc truy cập trực tiếp bằng đường link có hash, hệ thống tự động nhận diện và mở đúng trang đó mà không bị nhảy về Dashboard.
+- **Hỗ trợ Nút Back/Forward của trình duyệt**: Bắt sự kiện `popstate` và `hashchange` để người dùng có thể điều hướng tới lui mượt mà như một ứng dụng web đa trang hiện đại.
+
+### 24.6 Tái Cấu Trúc Toàn Diện Theo Mô Hình DDD & Modular Architecture
+- **Bóc tách tệp nguyên khối `admin_routes.py` (2,377 dòng)** thành các Bounded Contexts / Domain Folders riêng biệt tại `domains/`:
+  - `domains/common/`: Shared Kernel (Redis connection pool, settings I/O, config helpers).
+  - `domains/system/`: Trạng thái hệ thống, Settings, Health check & Analytics.
+  - `domains/assistant/`: Trợ lý điều hành AI & Autonomous tool agent.
+  - `domains/customers/`: Quản lý khách hàng, hội thoại, Leads CRM & Export CSV.
+  - `domains/n8n/`: Điều khiển Workflow n8n, Executions & Real-time File Watching.
+  - `domains/reports/`: Báo cáo điều hành kinh doanh & AI Insights.
+  - `domains/learning/`: Hàng đợi học (Learning Queue) & AI gợi ý FAQ.
+  - `domains/knowledge/`: Kho kiến thức, Tài liệu Markdown & Google Sheets Live Hub.
+  - `domains/rag_test/`: Kiểm thử Semantic Search RAG & NLU evaluation.
+- **Facade Gateway Router**: `admin_routes.py` trở thành Facade Router tinh gọn (~55 dòng) nạp toàn bộ sub-routers từ các domain, đảm bảo 100% Backward Compatibility cho `main.py` và các module hiện hành.
+- **Tổ chức thư mục `scripts/`**: Toàn bộ các script cào dữ liệu Shopee (`crawl_shopee_*.py`), tiền xử lý CSV (`clean_*.py`, `format_*.py`) và sinh tài liệu (`generate_doc.py`) được quy hoạch vào thư mục `scripts/`, giữ thư mục gốc server sạch sẽ và đúng chuẩn Enterprise codebase.
 
 
 

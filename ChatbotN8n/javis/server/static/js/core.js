@@ -113,11 +113,19 @@ async function updateSidebarStatus() {
   } catch (_) {}
 }
 
-// ── Navigation ────────────────────────────────────
-function switchPage(page, el) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (el) el.classList.add('active');
+// ── Navigation & SPA Hash Routing ────────────────────────────────
+function switchPage(page, el, updateHash = true) {
+  const validPages = ['assistant', 'dashboard', 'reports', 'documents', 'n8n', 'customers', 'learning', 'test', 'settings'];
+  if (!validPages.includes(page)) {
+    page = 'dashboard';
+  }
 
+  // 1. Highlight Nav Item
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const targetNav = el || document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (targetNav) targetNav.classList.add('active');
+
+  // 2. Hiện Trang tương ứng
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const pageEl = document.getElementById('page-' + page);
   if (pageEl) pageEl.classList.add('active');
@@ -127,22 +135,44 @@ function switchPage(page, el) {
     dashboard: 'Dashboard',
     reports:   'Báo Cáo & AI Insights',
     documents: 'Nạp Tài Liệu & Tự Học',
-    shopee:    'Shopee Catalog',
     n8n:       'n8n Control',
-    customers: 'Hội Thoại Khách Hàng',
+    customers: 'Hội Thoại Lead',
     learning:  'Learning Queue',
     test:      'Test Bot',
     settings:  'Cài Đặt & API Keys',
   };
 
-  // Update breadcrumb
+  // 3. Cập nhật Breadcrumb
   const crumb = document.getElementById('breadcrumb-current');
   if (crumb) crumb.textContent = titles[page] || page;
+
+  // 4. Đồng bộ URL Hash lên thanh địa chỉ trình duyệt (#page)
+  if (updateHash && window.location.hash !== '#' + page) {
+    if (window.history && window.history.pushState) {
+      window.history.pushState(null, '', '#' + page);
+    } else {
+      window.location.hash = '#' + page;
+    }
+  }
 
   APP.currentPage = page;
   loadPage(page);
   setTimeout(refreshIcons, 50);
 }
+
+// Lắng nghe sự kiện Back/Forward của trình duyệt để đổi trang mượt mà
+window.addEventListener('popstate', () => {
+  const hashPage = (window.location.hash || '').replace('#', '').trim();
+  if (hashPage && hashPage !== APP.currentPage) {
+    switchPage(hashPage, null, false);
+  }
+});
+window.addEventListener('hashchange', () => {
+  const hashPage = (window.location.hash || '').replace('#', '').trim();
+  if (hashPage && hashPage !== APP.currentPage) {
+    switchPage(hashPage, null, false);
+  }
+});
 
 function loadPage(page) {
   switch (page) {
@@ -150,7 +180,6 @@ function loadPage(page) {
     case 'dashboard': loadStatus(); loadStats(); break;
     case 'reports':   loadReports(); break;
     case 'documents': loadDocuments(); break;
-    case 'shopee':    loadShopee(); break;
     case 'n8n':       initN8nPage(); break;
     case 'customers': loadCustomers(); break;
     case 'learning':  loadLearningQueue(); break;
@@ -164,4 +193,38 @@ function refreshCurrentPage() {
   loadPage(APP.currentPage);
   setLastUpdated();
   refreshIcons();
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>"']/g, function(m) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+  });
+}
+
+function renderMarkdownSimple(md) {
+  if (!md) return '';
+  let html = escapeHtml(md);
+
+  // Headers
+  html = html.replace(/^### (.*$)/gim, '<h4 style="font-size:14px;font-weight:700;margin:12px 0 6px;color:var(--text-main)">$1</h4>');
+  html = html.replace(/^## (.*$)/gim, '<h3 style="font-size:15px;font-weight:700;margin:14px 0 8px;color:var(--primary)">$1</h3>');
+  html = html.replace(/^# (.*$)/gim, '<h2 style="font-size:16.5px;font-weight:800;margin:16px 0 10px;color:var(--text-main)">$1</h2>');
+
+  // Bold & Italic
+  html = html.replace(/\*\*(.*?)\*\*/gim, '<strong style="font-weight:700;color:var(--text-main)">$1</strong>');
+  html = html.replace(/\*(.*?)\*/gim, '<em>$1</em>');
+
+  // Code inline
+  html = html.replace(/`(.*?)`/gim, '<code style="background:var(--bg-surface2);padding:2px 5px;border-radius:4px;font-family:\'JetBrains Mono\',monospace;font-size:11.5px;color:#A5B4FC">$1</code>');
+
+  // Bullet points
+  html = html.replace(/^\- (.*$)/gim, '<div style="display:flex;gap:8px;margin-bottom:4px"><span style="color:var(--primary)">•</span><span>$1</span></div>');
+  html = html.replace(/^\* (.*$)/gim, '<div style="display:flex;gap:8px;margin-bottom:4px"><span style="color:var(--primary)">•</span><span>$1</span></div>');
+  html = html.replace(/^\+ (.*$)/gim, '<div style="display:flex;gap:8px;margin-bottom:4px;padding-left:14px"><span style="color:var(--text-dim)">-</span><span>$1</span></div>');
+
+  // Linebreaks
+  html = html.replace(/\n/g, '<br>');
+
+  return html;
 }

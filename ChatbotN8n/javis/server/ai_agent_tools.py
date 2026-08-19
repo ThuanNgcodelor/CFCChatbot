@@ -227,6 +227,7 @@ def _load_settings() -> dict:
     return {}
 
 
+# pyrefly: ignore [bad-function-definition]
 async def _n8n_request(method: str, path: str, body: dict = None) -> Optional[httpx.Response]:
     cfg = _load_settings().get("n8n", {})
     url = cfg.get("url", "https://n8n.dinhduongcantho.io.vn")
@@ -419,6 +420,7 @@ async def execute_get_business_stats(brand: str = "all") -> Dict[str, Any]:
                 st = profile.get("lead_stage", "new")
                 stages_map[st] = stages_map.get(st, 0) + 1
 
+            # pyrefly: ignore [not-async]
             lq_len = await r.llen(f"{b}:learning_queue")
 
             result[b] = {
@@ -447,22 +449,30 @@ async def execute_get_business_stats(brand: str = "all") -> Dict[str, Any]:
 
 
 async def execute_get_shopee_catalog_summary(search_keyword: Optional[str] = None) -> Dict[str, Any]:
-    """Tra cứu danh mục sản phẩm Shopee Mall."""
-    catalog_path = Path(__file__).resolve().parent.parent / "knowledge" / "shopee_catalog.json"
-    if not catalog_path.exists():
-        return {"total_products": 0, "products": [], "message": "Chưa có file danh mục Shopee."}
-
+    """Tra cứu danh mục sản phẩm Shopee Mall từ Redis zeo:shopee:catalog:active."""
     try:
-        from shopee_matcher import _fold
-        data = json.loads(catalog_path.read_text(encoding="utf-8"))
-        products = data.get("products", [])
+        from shopee_matcher import load_shopee_catalog, _fold
+        from admin_routes import _get_redis
+        
+        products = []
+        try:
+            r = _get_redis()
+            cached = await r.get("zeo:shopee:catalog:active")
+            await r.aclose()
+            if cached:
+                products = json.loads(cached)
+        except Exception:
+            products = []
+            
+        if not products:
+            products = load_shopee_catalog("zeo")
 
         if search_keyword and search_keyword.strip():
             kw_folded = _fold(search_keyword.strip())
             words = [w for w in kw_folded.split() if len(w) > 1]
             filtered = []
             for p in products:
-                combined_text = _fold(f"{p.get('name', '')} {p.get('category', '')} {p.get('brand', '')} {' '.join(p.get('keywords', []))}")
+                combined_text = _fold(f"{p.get('name', '')} {p.get('brand', '')} {' '.join(p.get('keywords', []))}")
                 if kw_folded in combined_text or (words and all(w in combined_text for w in words)):
                     filtered.append(p)
 
@@ -474,15 +484,15 @@ async def execute_get_shopee_catalog_summary(search_keyword: Optional[str] = Non
 
         return {
             "total_products": len(products),
-            "categories": list(set(p.get("category", "Chung") for p in products)),
             "sample_products": [
                 {
                     "name": p.get("name"),
                     "price": p.get("price"),
-                    "category": p.get("category"),
-                    "link": p.get("link_shopee", "")
+                    "promotion": p.get("promotion", ""),
+                    "variant": p.get("variant", ""),
+                    "link": p.get("shopee_url", "")
                 }
-                for p in products[:6]
+                for p in products[:8]
             ]
         }
     except Exception as e:
@@ -497,6 +507,7 @@ async def execute_get_learning_queue_summary(limit: int = 5) -> Dict[str, Any]:
         
         lq_items = []
         for brand in ["zeo", "cfc"]:
+            # pyrefly: ignore [not-async]
             raw_items = await r.lrange(f"{brand}:learning_queue", 0, limit - 1)
             for item_str in raw_items:
                 try:
@@ -546,9 +557,11 @@ async def execute_get_system_status(component: str = "all") -> Dict[str, Any]:
             dbsize = await r.dbsize()
             try:
                 indexes = await r.execute_command("FT._LIST")
+                # pyrefly: ignore [not-iterable]
                 indexes = [i.decode() if isinstance(i, bytes) else str(i) for i in indexes]
             except Exception:
                 indexes = []
+            # pyrefly: ignore [bad-assignment]
             res["redis"] = {
                 "status": "online",
                 "used_memory_ram": info_mem.get("used_memory_human", "?"),
@@ -560,6 +573,7 @@ async def execute_get_system_status(component: str = "all") -> Dict[str, Any]:
             }
             await r.aclose()
         except Exception as e:
+            # pyrefly: ignore [bad-assignment]
             res["redis"] = {"status": "error", "message": str(e)}
 
     # 2. Ollama Info
@@ -569,17 +583,20 @@ async def execute_get_system_status(component: str = "all") -> Dict[str, Any]:
             async with httpx.AsyncClient(timeout=4.0) as client:
                 resp = await client.get(f"{cfg.get('base_url', 'http://127.0.0.1:11434')}/api/tags")
                 models = [m["name"] for m in resp.json().get("models", [])]
+                # pyrefly: ignore [bad-assignment]
                 res["ollama"] = {
                     "status": "online",
                     "embed_model": cfg.get("embed_model", "bge-m3"),
                     "available_models": models,
                 }
         except Exception as e:
+            # pyrefly: ignore [bad-assignment]
             res["ollama"] = {"status": "offline_or_error", "message": str(e)}
 
     # 3. n8n Info
     if component in ("all", "n8n"):
         n8n_list = await execute_list_n8n_workflows()
+        # pyrefly: ignore [bad-assignment]
         res["n8n"] = {
             "status": "online" if "error" not in n8n_list else "error",
             "total_workflows": n8n_list.get("total", 0),
@@ -587,6 +604,7 @@ async def execute_get_system_status(component: str = "all") -> Dict[str, Any]:
         }
 
     # 4. Token & Engine Info
+    # pyrefly: ignore [bad-assignment]
     res["ai_engine"] = {
         "active_provider": "Groq Cloud API",
         "model": "llama-3.3-70b-versatile",

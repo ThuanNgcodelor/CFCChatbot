@@ -3,6 +3,7 @@ eval_test_suite.py — Bộ Kiểm Thử Ngữ Nghĩa Toàn Diện cho Chatbot Z
 Đánh giá độ chính xác phân loại Intent, Nội dung câu trả lời, Điểm tin cậy và Tốc độ xử lý.
 """
 
+from rag_search import get_redis
 import asyncio
 import json
 import sys
@@ -256,19 +257,24 @@ async def run_eval():
         case_passed = True
         print(f"\n[{case_idx:02d}/{len(MULTI_TURN_CASES)}] {case['name']}")
         for turn_idx, turn in enumerate(case["turns"], 1):
+            # pyrefly: ignore [bad-argument-type, bad-index]
             req = ChatPipelineRequest(brand=case["brand"], sender_id=sender_id, text=turn["q"])
             t0 = time.perf_counter()
             res = await process_chat_pipeline(req)
             latency = (time.perf_counter() - t0) * 1000
             total_latency += latency
+            # pyrefly: ignore [bad-index]
             matched = (res.intent == turn["expected_intent"]) or (
+                # pyrefly: ignore [bad-index]
                 turn["expected_intent"] == "contextual_price_unverified" and res.intent in ["contextual_price_unverified", "specific_product_pricing"]
             )
             case_passed = case_passed and matched
             print(
                 f"   Turn {turn_idx}: {'✅' if matched else '❌'} "
+                # pyrefly: ignore [bad-index]
                 f"Got={res.intent} Expected={turn['expected_intent']} | {latency:.1f}ms"
             )
+            # pyrefly: ignore [bad-index]
             print(f"      Q: \"{turn['q']}\"")
             print(f"      A: {res.answer[:120]}...")
             await asyncio.sleep(0.08)

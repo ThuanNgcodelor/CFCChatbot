@@ -163,12 +163,210 @@ async function deleteShopeeProduct(idx) {
 }
 
 async function syncShopeeSheetNow() {
-  toast('Đang đồng bộ danh mục Shopee từ Google Sheets...', 'success');
+  openGoogleSheetHub('shopee');
+}
+
+function openGoogleSheetHub(target = 'shopee') {
+  const modal = document.getElementById('google-sheet-hub-modal');
+  if (!modal) return;
+  const targetSelect = document.getElementById('hub-sheet-target');
+  if (targetSelect) targetSelect.value = target;
+
+  const urlInput = document.getElementById('hub-sheet-url');
+  if (urlInput && !urlInput.value) {
+    urlInput.value = '';
+  }
+  modal.classList.add('open');
+  refreshIcons();
+}
+
+function closeGoogleSheetHub() {
+  document.getElementById('google-sheet-hub-modal')?.classList.remove('open');
+}
+
+function switchHubMethod(method) {
+  const btnUrl = document.getElementById('hub-tab-btn-url');
+  const btnFile = document.getElementById('hub-tab-btn-file');
+  const secUrl = document.getElementById('hub-method-url');
+  const secFile = document.getElementById('hub-method-file');
+
+  if (method === 'url') {
+    btnUrl?.classList.add('active');
+    btnFile?.classList.remove('active');
+    if (secUrl) secUrl.style.display = 'block';
+    if (secFile) secFile.style.display = 'none';
+  } else {
+    btnFile?.classList.add('active');
+    btnUrl?.classList.remove('active');
+    if (secFile) secFile.style.display = 'block';
+    if (secUrl) secUrl.style.display = 'none';
+  }
+}
+
+async function fetchSheetTabsList() {
+  const url = document.getElementById('hub-sheet-url')?.value.trim();
+  const apiKey = document.getElementById('hub-sheet-key')?.value.trim();
+  const select = document.getElementById('hub-sheet-tab-select');
+  const btn = document.getElementById('btn-fetch-tabs');
+
+  if (!url) {
+    toast('Vui lòng dán link Google Sheet trước', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> <span>Đang tải Tab...</span>';
+  }
+
   try {
-    const res = await fetchJSON('/admin/shopee/sync-sheet', { method: 'POST' });
-    toast(`Sync thành công ${res.synced_count} sản phẩm từ Google Sheets!`, 'success');
-    loadShopee();
-  } catch (e) {
-    toast('Lỗi sync Google Sheets: ' + e.message, 'error');
+    const res = await fetchJSON('/admin/sheets/get-tabs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_url: url, api_key: apiKey || null })
+    });
+
+    if (res.success && Array.isArray(res.tabs)) {
+      if (select) {
+        select.innerHTML = res.tabs.map(t => `<option value="${escapeHtml(t.title)}">${escapeHtml(t.title)}</option>`).join('');
+      }
+      toast(`Đã tải thành công ${res.total_tabs} Tab từ Google Sheet!`, 'success');
+    } else {
+      toast('Không tìm thấy tab: ' + (res.message || 'Lỗi không xác định'), 'error');
+    }
+  } catch (err) {
+    toast('Lỗi tải danh sách tab: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="list"></i> <span>Tải Danh Sách Tab</span>';
+      refreshIcons();
+    }
+  }
+}
+
+let _previewSheetRows = [];
+
+async function previewGoogleSheet() {
+  const url = document.getElementById('hub-sheet-url')?.value.trim();
+  const apiKey = document.getElementById('hub-sheet-key')?.value.trim();
+  const sheetName = document.getElementById('hub-sheet-tab-select')?.value || '';
+  const previewWrap = document.getElementById('hub-preview-area');
+  const previewTable = document.getElementById('hub-preview-table');
+  const previewCount = document.getElementById('hub-preview-count');
+  const btnSync = document.getElementById('btn-hub-sync');
+
+  if (!url) {
+    toast('Vui lòng nhập link Google Sheet', 'error');
+    return;
+  }
+
+  if (previewWrap) previewWrap.style.display = 'block';
+  if (previewTable) previewTable.innerHTML = '<tr><td style="padding:20px;text-align:center"><span class="spinner"></span> Đang nạp dữ liệu bảng tính...</td></tr>';
+
+  try {
+    const res = await fetchJSON('/admin/sheets/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_url: url, sheet_name: sheetName || null, api_key: apiKey || null, max_rows: 30 })
+    });
+
+    if (res.success && res.columns && res.columns.length) {
+      _previewSheetRows = res.rows || [];
+      if (previewCount) previewCount.textContent = `Đã đọc thành công ${res.total_rows} dòng (${res.preview_count} dòng xem trước)`;
+      
+      let thead = `<tr>${res.columns.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr>`;
+      let tbody = _previewSheetRows.map(r => `
+        <tr>${res.columns.map(c => `<td>${escapeHtml(r[c] || '')}</td>`).join('')}</tr>
+      `).join('');
+
+      if (previewTable) previewTable.innerHTML = `<table class="sheet-preview-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+      if (btnSync) btnSync.disabled = false;
+      toast(`Đã nạp ${res.total_rows} dòng dữ liệu từ Google Sheet!`, 'success');
+    } else {
+      if (previewTable) previewTable.innerHTML = `<tr><td style="padding:20px;color:var(--danger)">Không đọc được dữ liệu: ${res.message || 'File rỗng'}</td></tr>`;
+    }
+  } catch (err) {
+    if (previewTable) previewTable.innerHTML = `<tr><td style="padding:20px;color:var(--danger);white-space:pre-wrap;line-height:1.6">${escapeHtml(err.message)}</td></tr>`;
+    toast('Lỗi đọc Sheet: ' + err.message, 'error');
+  }
+}
+
+async function syncGoogleSheetFromHub() {
+  const url = document.getElementById('hub-sheet-url')?.value.trim();
+  const apiKey = document.getElementById('hub-sheet-key')?.value.trim();
+  const sheetName = document.getElementById('hub-sheet-tab-select')?.value || '';
+  const target = document.getElementById('hub-sheet-target')?.value || 'shopee';
+  const brand = document.getElementById('hub-sheet-brand')?.value || 'zeo';
+  const btnSync = document.getElementById('btn-hub-sync');
+
+  if (!url) {
+    toast('Vui lòng nhập link Google Sheet', 'error');
+    return;
+  }
+
+  if (btnSync) {
+    btnSync.disabled = true;
+    btnSync.innerHTML = '<span class="spinner"></span> Đang đồng bộ vào Redis...';
+  }
+
+  try {
+    const res = await fetchJSON('/admin/sheets/sync-direct', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_url: url, sheet_name: sheetName || null, target_type: target, brand, api_key: apiKey || null })
+    });
+
+    if (res.success) {
+      toast(`Đồng bộ thành công ${res.synced_count || 0} mục vào Redis (${target.toUpperCase()})!`, 'success');
+      closeGoogleSheetHub();
+      if (target === 'shopee') loadShopee();
+    } else {
+      toast('Đồng bộ thất bại: ' + (res.message || 'Lỗi không xác định'), 'error');
+    }
+  } catch (err) {
+    toast('Lỗi đồng bộ: ' + err.message, 'error');
+  } finally {
+    if (btnSync) {
+      btnSync.disabled = false;
+      btnSync.innerHTML = '<i data-lucide="zap"></i><span>Đồng Bộ Vào Redis Ngay</span>';
+      refreshIcons();
+    }
+  }
+}
+
+async function uploadCsvDirectFromHub() {
+  const fileInput = document.getElementById('hub-file-input');
+  const target = document.getElementById('hub-sheet-target')?.value || 'shopee';
+  const brand = document.getElementById('hub-sheet-brand')?.value || 'zeo';
+
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    toast('Vui lòng chọn file CSV / Excel từ máy tính', 'error');
+    return;
+  }
+
+  const file = fileInput.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('target_type', target);
+  formData.append('brand', brand);
+
+  toast('Đang tải lên và đồng bộ vào Redis...', 'success');
+
+  try {
+    const resp = await fetch('/admin/sheets/upload-csv', {
+      method: 'POST',
+      body: formData,
+    });
+    const res = await resp.json();
+    if (resp.ok && res.success) {
+      toast(`Đã nạp thành công ${res.synced_count || 0} mục từ file "${file.name}" vào Redis!`, 'success');
+      closeGoogleSheetHub();
+      if (target === 'shopee') loadShopee();
+    } else {
+      toast('Lỗi upload: ' + (res.detail || res.message || 'Thất bại'), 'error');
+    }
+  } catch (err) {
+    toast('Lỗi tải file: ' + err.message, 'error');
   }
 }

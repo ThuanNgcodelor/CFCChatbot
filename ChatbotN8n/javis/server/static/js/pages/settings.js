@@ -23,8 +23,6 @@ async function loadSettings() {
     // Telegram
     set('set-telegram-token', cfg.telegram?.bot_token);
     set('set-telegram-chatid', cfg.telegram?.chat_id);
-    // Shopee
-    set('set-shopee-sheet-url', cfg.shopee?.sheet_url);
     // RAG
     set('set-rag-high', cfg.rag?.high_confidence_threshold || 0.78);
     set('set-rag-med', cfg.rag?.medium_confidence_threshold || 0.55);
@@ -59,9 +57,6 @@ async function saveSettings() {
       enabled: true,
       bot_token: get('set-telegram-token'),
       chat_id: get('set-telegram-chatid'),
-    },
-    shopee: {
-      sheet_url: get('set-shopee-sheet-url'),
     },
     rag: {
       high_confidence_threshold: parseFloat(get('set-rag-high')) || 0.78,

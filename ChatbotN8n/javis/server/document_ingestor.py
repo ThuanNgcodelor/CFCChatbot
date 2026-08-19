@@ -161,6 +161,7 @@ async def ingest_markdown_file(file_path: Path, brand: Optional[str] = None) -> 
                 continue
 
             doc_key = f"{index_name}:doc:{chunk['source_file']}:{chunk['chunk_id']}"
+            # pyrefly: ignore [not-async]
             await r.hset(doc_key, mapping={
                 "embedding": vec_to_bytes(vec),
                 "heading": chunk["heading"],

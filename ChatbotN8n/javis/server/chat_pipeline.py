@@ -518,6 +518,7 @@ async def _build_contextual_more_info_answer(
         remaining_intents = [spec["technology_intent"]]
 
     chosen_intent = remaining_intents[0]
+    # pyrefly: ignore [bad-argument-type]
     item = await get_faq_by_intent(brand, chosen_intent)
     answer = str(item.get("answer", "")).strip()
     if not answer:
@@ -535,6 +536,7 @@ async def _build_contextual_more_info_answer(
             f"1. {answer}\n\n"
             f"Mình chưa thấy dữ liệu xác nhận công nghệ khác ngoài các thông tin trên, nên mình không tự bổ sung thêm nha."
         )
+        # pyrefly: ignore [bad-return]
         return msg, "contextual_technology_more_info", chosen_intent
 
     msg = (
@@ -542,6 +544,7 @@ async def _build_contextual_more_info_answer(
         f"1. {answer}\n\n"
         f"Bạn muốn mình kiểm tra tiếp giá, quy cách hay cách mua hàng cho sản phẩm này không ạ?"
     )
+    # pyrefly: ignore [bad-return]
     return msg, "contextual_product_more_info", chosen_intent
 
 
@@ -2063,6 +2066,7 @@ async def _async_save_session(
         }
         if conversation_state:
             active_entities = conversation_state.get("active_entities", {})
+            # pyrefly: ignore [no-matching-overload]
             session_data.update({
                 "conversation_state": conversation_state,
                 "current_product": active_entities.get("product", ""),
@@ -2073,6 +2077,7 @@ async def _async_save_session(
                 "last_source_id": conversation_state.get("last_source_id", ""),
             })
         if trace:
+            # pyrefly: ignore [bad-assignment]
             session_data["last_trace"] = trace
         await r.set(session_key, json.dumps(session_data, ensure_ascii=False))
 
@@ -2083,7 +2088,9 @@ async def _async_save_session(
             "trace": trace or {},
             "timestamp": now_str,
         }, ensure_ascii=False)
+        # pyrefly: ignore [not-async]
         await r.rpush(history_key, msg_record)
+        # pyrefly: ignore [not-async]
         await r.ltrim(history_key, -50, -1)
     except Exception as e:
         logger.warning("Error in _async_save_session: %s", e)

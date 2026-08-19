@@ -60,12 +60,16 @@ async function uploadDocument(inputEl) {
 }
 
 function openImportSheetModal() {
-  document.getElementById('import-sheet-modal')?.classList.add('open');
-  refreshIcons();
+  if (typeof openGoogleSheetHub === 'function') {
+    openGoogleSheetHub('faq');
+  } else {
+    document.getElementById('google-sheet-hub-modal')?.classList.add('open');
+    refreshIcons();
+  }
 }
 
 function closeImportSheetModal() {
-  document.getElementById('import-sheet-modal')?.classList.remove('open');
+  document.getElementById('google-sheet-hub-modal')?.classList.remove('open');
 }
 
 async function submitImportSheet() {

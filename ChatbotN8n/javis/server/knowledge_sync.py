@@ -204,6 +204,7 @@ async def sync_brand(brand: str = "zeo") -> dict:
                 "priority": int(item.get("priority", 0)),
             }
             
+            # pyrefly: ignore [not-async]
             await r.hset(doc_key, mapping=mapping)
             synced += 1
             logger.info("✓ [%s] %s", brand.upper(), item.get("intent"))

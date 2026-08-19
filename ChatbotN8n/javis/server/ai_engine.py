@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, List
 
 import httpx
+from shopee_matcher import _fold
 
 logger = logging.getLogger(__name__)
 
@@ -133,9 +134,13 @@ async def call_groq(
     if not key:
         return None
 
-    model_name = model or cfg.get("model", "llama-3.3-70b-versatile")
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    primary_model = model or cfg.get("model", "openai/gpt-oss-120b")
+    candidate_models = [primary_model]
+    for fallback_m in ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound"]:
+        if fallback_m not in candidate_models:
+            candidate_models.append(fallback_m)
 
+    url = "https://api.groq.com/openai/v1/chat/completions"
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -145,22 +150,27 @@ async def call_groq(
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "model": model_name,
-        "messages": messages,
-        "temperature": temperature,
-    }
 
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            choices = data.get("choices", [])
-            if choices:
-                return choices[0].get("message", {}).get("content", "").strip()
-    except Exception as e:
-        logger.warning("Lỗi khi gọi Groq API: %s", e)
+    for model_name in candidate_models:
+        payload = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        return choices[0].get("message", {}).get("content", "").strip()
+                elif resp.status_code == 404:
+                    continue  # thử model tiếp theo
+                else:
+                    logger.warning("Groq API error (%s): %s", resp.status_code, resp.text[:150])
+        except Exception as e:
+            logger.warning("Lỗi khi gọi Groq API (%s): %s", model_name, e)
     return None
 
 
@@ -256,6 +266,41 @@ def _should_enable_tools(message: str) -> bool:
     return any(t in folded for t in triggers)
 
 
+def _match_autonomous_tool(user_message: str, brand: str = "all") -> Optional[tuple]:
+    """Tự động nhận diện công cụ cần thực thi ngay lập tức dựa trên ngữ cảnh câu hỏi."""
+    folded = _fold(user_message)
+    
+    # 1. Báo cáo kinh doanh, Leads, Khách hàng CRM
+    if any(k in folded for k in ["khach hang", "leads", "lead", "tong hop tinh hinh", "bao cao kinh doanh", "tinh hinh kinh doanh", "hom nay", "doanh so", "so lieu", "sdt"]):
+        target_brand = "zeo" if "zeo" in folded and "cfc" not in folded else ("cfc" if "cfc" in folded and "zeo" not in folded else brand)
+        return ("get_business_stats", {"brand": target_brand})
+    
+    # 2. n8n Workflows & Lỗi
+    if any(k in folded for k in ["n8n", "workflow"]):
+        if any(k in folded for k in ["loi", "error", "that bai", "kiem tra loi", "su co"]):
+            return ("get_n8n_executions", {"status": "error", "limit": 10})
+        return ("list_n8n_workflows", {})
+        
+    # 3. Shopee Catalog
+    if any(k in folded for k in ["shopee", "danh muc shopee", "san pham shopee", "gia san pham", "catalogue", "gia ban"]):
+        kw = ""
+        for p in ["nuoc giat", "rua chen", "lau san", "toilet", "canxi", "phan bon", "javen", "vien sui", "ngu coc"]:
+            if p in folded:
+                kw = p
+                break
+        return ("get_shopee_catalog_summary", {"search_keyword": kw} if kw else {})
+        
+    # 4. Learning Queue
+    if any(k in folded for k in ["learning queue", "hang doi", "cho duyet", "cau hoi cho duyet"]):
+        return ("get_learning_queue_summary", {"limit": 5})
+        
+    # 5. Sức khỏe hệ thống
+    if any(k in folded for k in ["he thong", "ram", "cpu", "redis", "suc khoe", "trang thai server", "o dia", "disk"]):
+        return ("get_system_status", {"component": "all"})
+        
+    return None
+
+
 async def run_assistant_agent_chat(
     user_message: str,
     history: Optional[List[dict]] = None,
@@ -263,47 +308,70 @@ async def run_assistant_agent_chat(
     temperature: float = 0.4,
 ) -> dict:
     """
-    Chạy Agent Loop thông minh: Tán gẫu tự nhiên nếu là câu hỏi chung, chỉ gọi Tool khi cần thiết.
+    Chạy Agent Loop thông minh: Tự động thực thi Tool lấy dữ liệu thật và tổng hợp báo cáo trực quan.
     """
     from ai_agent_tools import AGENT_TOOLS_SCHEMA, dispatch_tool_call
 
     cfg = _load_settings().get("ai_providers", {})
     groq_key = cfg.get("groq", {}).get("api_key", "")
     groq_model = cfg.get("groq", {}).get("model", "llama-3.3-70b-versatile")
-    openrouter_key = cfg.get("openrouter", {}).get("api_key", "")
-    openrouter_model = cfg.get("openrouter", {}).get("model", "google/gemini-2.0-flash-exp:free")
 
-    system_prompt = (
-        f"Bạn là CFC AI Assistant — Trợ lý điều hành AI Vạn Năng (Universal Operations Assistant) cho hệ thống ZeO Vietnam và CFC Cò Bay.\n"
-        f"Model: {groq_model} qua Groq Cloud API siêu tốc.\n\n"
-        "BỘ VŨ KHÍ CỦA BẠN (UNIVERSAL TOOLS):\n"
-        "1. execute_system_command: Siêu công cụ thực thi lệnh Shell / Bash / CLI (vd: 'df -h' kiểm tra ổ đĩa, 'ps aux' kiểm tra tiến trình, 'redis-cli info' đọc Redis, 'curl -s wttr.in/...' xem thời tiết, 'cat /path' đọc file, 'grep' tìm log...). Bạn có thể tự do viết bất kỳ câu lệnh nào để phục vụ người dùng!\n"
-        "2. trigger_n8n_webhook: Kích hoạt các workflow n8n (Google Calendar, Gmail, Telegram, Zalo, Google Sheets).\n"
-        "3. list_n8n_workflows & toggle_n8n_workflow: Quản trị và bật/tắt workflow tự động hoá n8n.\n"
-        "4. get_business_stats & get_shopee_catalog_summary: Báo cáo CRM và tra cứu Shopee Mall.\n"
-        "5. get_system_status: Báo cáo nhanh sức khỏe Redis, RAM, Ollama, n8n.\n\n"
-        "TÍNH CÁCH & QUY TẮC:\n"
-        "- ĐA NĂNG & THÔNG MINH: Tự động chạy lệnh hoặc kích hoạt tool khi người dùng cần bất kỳ dữ liệu thực tế nào.\n"
-        "- Với câu hỏi đố vui, khoa học, triết học, lập trình, tán gẫu: Trả lời cuốn hút, hóm hỉnh, sâu sắc, KHÔNG gọi tool thừa.\n"
-        "- Khi chạy lệnh hệ thống: Giải thích ngắn gọn kết quả một cách thân thiện, chuyên nghiệp."
-    )
+    # 1. Kiểm tra nhận diện công cụ tự động (Autonomous Tool Dispatcher)
+    auto_tool = _match_autonomous_tool(user_message, brand)
+    if auto_tool:
+        fn_name, fn_args = auto_tool
+        try:
+            logger.info("Autonomous Tool Execution: %s with args %s", fn_name, fn_args)
+            tool_result = await dispatch_tool_call(fn_name, fn_args)
+            action_cards = [{
+                "tool": fn_name,
+                "args": fn_args,
+                "result": tool_result,
+            }]
+            
+            # Yêu cầu LLM tổng hợp báo cáo từ dữ liệu thật
+            synth_prompt = (
+                f"Người dùng hỏi: \"{user_message}\"\n\n"
+                f"Dữ liệu thực tế vừa được hệ thống truy xuất tự động từ công cụ '{fn_name}':\n"
+                f"{json.dumps(tool_result, ensure_ascii=False, indent=2)}\n\n"
+                "Hãy đóng vai Trợ lý Điều Hành AI, tổng hợp dữ liệu trên thành một báo cáo súc tích, chuyên nghiệp cho Quản trị viên. "
+                "Làm nổi bật các chỉ số quan trọng (Leads, SĐT, Tình trạng), sử dụng định dạng Markdown đẹp mắt, có gạch đầu dòng rõ ràng. "
+                "Tuyệt đối không giải thích lý thuyết về cách gọi công cụ, mà hãy trình bày trực tiếp các con số thực tế."
+            )
+            
+            summary_res = await generate_ai_text(synth_prompt)
+            final_text = summary_res.get("text", "")
+            if not final_text:
+                final_text = f"Đã thực thi thành công công cụ **{fn_name}** và truy xuất dữ liệu từ hệ thống."
 
-    # Chuẩn bị hội thoại
-    messages = [{"role": "system", "content": system_prompt}]
-    if history:
-        for h in history[-8:]:  # Giữ tối đa 8 tin nhắn gần nhất
-            r = h.get("role", "user")
-            c = h.get("content", "")
-            if r in ("user", "assistant") and c:
-                messages.append({"role": r, "content": c})
+            return {
+                "success": True,
+                "provider": summary_res.get("provider", "local"),
+                "model": summary_res.get("model", "qwen2.5"),
+                "text": final_text,
+                "tools_used": [fn_name],
+                "action_cards": action_cards,
+            }
+        except Exception as e:
+            logger.warning("Auto tool execution error: %s", e)
 
-    messages.append({"role": "user", "content": user_message})
-
-    needs_tools = _should_enable_tools(user_message)
-
-    # Thử gọi qua Groq trước nếu có key
+    # 2. Thử gọi qua Groq với Tool Calling Schema nếu có API Key
     if groq_key:
         try:
+            system_prompt = (
+                f"Bạn là CFC AI Assistant — Trợ lý điều hành AI Vạn Năng cho ZeO Vietnam và CFC Cò Bay.\n"
+                "Khi người dùng yêu cầu số liệu kinh doanh, danh mục Shopee, n8n, hoặc sức khỏe hệ thống, hãy gọi tool tương ứng để lấy dữ liệu thực tế.\n"
+                "Với câu hỏi trò chuyện, đố vui, kỹ thuật: Trả lời cuốn hút, hóm hỉnh, sâu sắc."
+            )
+            messages = [{"role": "system", "content": system_prompt}]
+            if history:
+                for h in history[-8:]:
+                    r = h.get("role", "user")
+                    c = h.get("content", "")
+                    if r in ("user", "assistant") and c:
+                        messages.append({"role": r, "content": c})
+            messages.append({"role": "user", "content": user_message})
+
             url = "https://api.groq.com/openai/v1/chat/completions"
             headers = {
                 "Authorization": f"Bearer {groq_key}",
@@ -313,10 +381,9 @@ async def run_assistant_agent_chat(
                 "model": groq_model,
                 "messages": messages,
                 "temperature": temperature,
+                "tools": AGENT_TOOLS_SCHEMA,
+                "tool_choice": "auto",
             }
-            if needs_tools:
-                payload["tools"] = AGENT_TOOLS_SCHEMA
-                payload["tool_choice"] = "auto"
 
             async with httpx.AsyncClient(timeout=35.0) as client:
                 resp = await client.post(url, headers=headers, json=payload)
@@ -324,16 +391,13 @@ async def run_assistant_agent_chat(
                     data = resp.json()
                     choice = data.get("choices", [{}])[0]
                     msg = choice.get("message", {})
-
                     tool_calls = msg.get("tool_calls", [])
-                    action_cards = []
-                    tools_used = []
 
                     if tool_calls:
-                        # Append assistant message chứa tool_calls
+                        action_cards = []
+                        tools_used = []
                         messages.append(msg)
 
-                        # Thực thi từng tool
                         for tc in tool_calls:
                             tc_id = tc.get("id", "call_1")
                             fn_name = tc.get("function", {}).get("name", "")
@@ -345,15 +409,11 @@ async def run_assistant_agent_chat(
 
                             tools_used.append(fn_name)
                             tool_result = await dispatch_tool_call(fn_name, fn_args)
-
-                            # Lưu action card cho giao diện
                             action_cards.append({
                                 "tool": fn_name,
                                 "args": fn_args,
                                 "result": tool_result,
                             })
-
-                            # Append tool response
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc_id,
@@ -362,12 +422,11 @@ async def run_assistant_agent_chat(
                             })
 
                         # Gọi lần 2 để AI tổng hợp kết quả
-                        second_payload = {
+                        resp2 = await client.post(url, headers=headers, json={
                             "model": groq_model,
                             "messages": messages,
                             "temperature": temperature,
-                        }
-                        resp2 = await client.post(url, headers=headers, json=second_payload)
+                        })
                         if resp2.status_code == 200:
                             data2 = resp2.json()
                             final_text = data2.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -380,7 +439,6 @@ async def run_assistant_agent_chat(
                                 "action_cards": action_cards,
                             }
                     else:
-                        # AI trả lời trực tiếp không cần tool
                         return {
                             "success": True,
                             "provider": "groq",
@@ -390,14 +448,15 @@ async def run_assistant_agent_chat(
                             "action_cards": [],
                         }
         except Exception as e:
-            logger.warning(f"Groq agent chat error: {e}")
+            logger.warning("Groq agent chat error: %s", e)
 
-    # Fallback sang trả lời văn bản thông thường
+    # 3. Trả lời thông thường (Chit-chat / Q&A)
+    system_prompt = "Bạn là CFC AI Assistant — Trợ lý điều hành AI cho ZeO Vietnam và CFC Cò Bay. Trả lời tự nhiên, chuyên nghiệp và thân thiện."
     fallback_res = await generate_ai_text(user_message, system_prompt)
     return {
         "success": fallback_res.get("success", False),
         "provider": fallback_res.get("provider", "none"),
-        "model": "standard-fallback",
+        "model": fallback_res.get("model", "qwen2.5"),
         "text": fallback_res.get("text", "Không thể sinh phản hồi từ AI."),
         "tools_used": [],
         "action_cards": [],

@@ -39,7 +39,9 @@ function renderReport(r) {
         <span class="badge badge-yellow">${m.learning_queue_count || 0} Learning Queue</span>
       </div>
     </div>
-    <div style="font-size:14px;line-height:1.75;color:var(--text-main);white-space:pre-wrap;font-family:inherit;background:var(--bg-app);padding:20px;border-radius:var(--r-md);border:1px solid var(--border)">${r.report_markdown}</div>
+    <div class="msg-content" style="font-size:14px;line-height:1.8;color:var(--text-main);background:var(--bg-app);padding:24px;border-radius:var(--r-md);border:1px solid var(--border)">
+      ${typeof renderMarkdownSimple === 'function' ? renderMarkdownSimple(r.report_markdown) : r.report_markdown.replace(/\n/g, '<br>')}
+    </div>
   `;
   refreshIcons();
 }

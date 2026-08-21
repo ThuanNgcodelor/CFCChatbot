@@ -1,6 +1,6 @@
 # Tổng Hợp Hệ Thống Chatbot ZeO / CFC Hiện Hành
 
-Ngày cập nhật: 2026-08-18 (P0 Production Upgrade: Single-Brain Architecture + 100% Eval Score)  
+Ngày cập nhật: 2026-08-21 (P0 PriceConstraint + Numeric Hard Filter + 100% Regression)
 Phạm vi: `ChatbotN8n/javis/`, `ChatbotN8n/workflows/local-n8n/`, dữ liệu Google Sheet/CSV, Redis, Ollama, RAG và các file vận hành liên quan.
 
 Tài liệu này thay cho file tóm tắt cũ `TOM_TAT_HE_THONG_CHATBOT_ZEO_CFC_CHO_GPT.md`. File cũ không bị xóa để giữ lịch sử, nhưng khi cần phân tích hoặc nâng cấp hệ thống thì nên dùng tài liệu này.
@@ -101,7 +101,8 @@ Bot không chắc / guardrail fail
 │   │   │   ├── document_ingestor.py     # Nạp tài liệu MD vào Vector Index
 │   │   │   ├── shopee_matcher.py        # Khớp link Shopee Mall khi chat
 │   │   │   ├── telegram_notifier.py     # Bắn thông báo Telegram
-│   │   │   ├── eval_test_suite.py       # Bộ 98 test cases kiểm thử NLU
+│   │   │   ├── eval_test_suite.py       # Bộ 104 test cases kiểm thử NLU
+│   │   │   ├── tests/                   # Unit tests độc lập (PriceConstraint, hard filters)
 │   │   │   ├── settings.json            # File cấu hình API keys
 │   │   │   ├── requirements.txt         # Thư viện Python
 │   │   │   └── static/                  # Frontend Web Admin (HTML/CSS/JS)
@@ -372,11 +373,14 @@ Cấu hình mẫu:
 
 Vai trò:
 
-- Đọc catalog Shopee từ `ChatbotN8n/javis/knowledge/shopee_catalog.json`.
+- Đọc catalog Shopee từ Redis `{brand}:shopee:catalog:active`.
+- Fallback về `ChatbotN8n/google_upload/zeo_shopee_catalog_template.csv` khi Redis chưa có snapshot.
 - Nhận diện câu hỏi Shopee/link mua hàng.
 - Match sản phẩm theo keyword/alias.
 - Trả suggested reply kèm link Shopee nếu có.
 - Nhận diện promotion/deal/voucher.
+- Parse giá thành `PriceConstraint` có operator `LT/LTE/GT/GTE/BETWEEN/EXACT/APPROX`.
+- Áp dụng category, tồn kho và price comparator như hard constraints trước khi xếp hạng.
 
 Nếu không có link chính thức trong catalog/Sheet thì bot không nên tự bịa link.
 
@@ -1081,13 +1085,13 @@ ChatbotN8n/javis/server/.venv/bin/python ChatbotN8n/javis/server/eval_test_suite
   - Nhận diện và tư vấn đa lượt theo nhu cầu thực tế (`match_need_preference`: tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ).
   - Báo giá realtime và dẫn link Shopee Mall trực tiếp cho sản phẩm đích danh (`match_specific_product_price`).
   - Nhận diện Top Bán Chạy / Mới Ra Mắt theo từng nhóm ngành danh mục.
-- **Hiệu năng & Tốc độ đỉnh cao**: Tốc độ xử lý trung bình **8.7ms/câu** nhờ cơ chế In-Memory Hot Cache và Fast-Path Router.
+- **Hiệu năng**: Fast-path deterministic thường ở mức vài ms; full suite ngày 21/08/2026 trung bình 92.9ms/câu do bao gồm nhánh LLM timeout/fallback.
 - **Chống ảo giác tuyệt đối (Zero Hallucination Guardrails)**: Tuyệt đối không bịa giá, tồn kho, liều lượng, hay link kênh bán hàng.
-- **Bộ Kiểm Thử NLU Toàn Diện (Regression Suite)**: Đạt **100.0% Pass Rate (98/98 Test Cases)**.
+- **Bộ Kiểm Thử NLU Toàn Diện (Regression Suite)**: Lần xác minh mới nhất đạt **105/105**, cộng thêm 12/12 unit tests (8 PriceConstraint + 4 product-link follow-up).
 
 ## 17. Điểm Yếu / Rủi Ro & Trạng Thái Xử Lý
 
-- **Dữ liệu giá & link Shopee**: *Đã giải quyết 100%* qua module `shopee_matcher.py` và workflow sync tự động từ Google Sheet vào Redis `zeo:shopee:catalog:active`.
+- **Dữ liệu giá & link Shopee**: Đã chuyển sang catalog động qua `shopee_matcher.py` và Redis `zeo:shopee:catalog:active`; vẫn cần freshness/source-version guard ở các phase tiếp theo.
 - **Phình mã nguồn regex**: *Đã giải quyết* bằng việc module hóa tách biệt logic Shopee, tối ưu hóa regex word boundary (`\b...\b`), và phân tầng rõ ràng giữa Fast-Path và Hybrid RAG.
 - **Redis snapshot rỗng khi mới khởi động**: *Đã phòng ngừa* bằng cơ chế tự động nạp fallback JSON nếu Redis chưa có key, đồng thời hỗ trợ webhook endpoint `/api/shopee/refresh-cache`.
 - **RAG Semantic Search**: Hiện sử dụng Redis Vector Search KNN kết hợp Ollama `bge-m3` embedding tiếng Việt. Cần đảm bảo container Redis và Ollama luôn hoạt động ổn định.
@@ -1268,7 +1272,7 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
 ## 23. Module Danh Mục Shopee Động & Đồng Bộ Tự Động (Shopee Dynamic Catalog)
 
 ### 23.1. Mục Tiêu & Nguyên Tắc
-- **Xóa bỏ 100% hardcode**: Không hardcode link, giá, hay danh sách văn bản tĩnh. Toàn bộ danh mục sản phẩm, Top Bán Chạy Nhất (Best Sellers) và Top Mới Ra Mắt (New Arrivals) được dựng động 100% từ Redis snapshot.
+- **Catalog động là nguồn chính**: Giá, sản phẩm, Top Bán Chạy và Top Mới Ra Mắt được dựng từ Redis snapshot; một số URL/hotline/fallback text vẫn đang hardcode và cần dần chuyển về config/Sheet.
 - **Đồng bộ tự động 12h khuya (00:00 hàng ngày)**: Workflow `zeo_shopee_sync.workflow.ts` đọc Google Sheet $\rightarrow$ ghi Redis `zeo:shopee:catalog:active` $\rightarrow$ gọi webhook `POST /api/shopee/refresh-cache`.
 ### 23.2. Cấu Trúc Dữ Liệu Shopee Catalog
 1. **File CSV Danh mục**: `ChatbotN8n/google_upload/zeo_shopee_catalog_template.csv` gồm đúng **52 sản phẩm Shopee Mall chính hãng** được giải mã và chuẩn hóa trực tiếp từ 2 file cào dữ liệu:
@@ -1286,8 +1290,11 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
 Để đóng vai trò một chuyên viên chăm sóc khách hàng (CSKH) xuất sắc, hệ thống đã nâng cấp toàn diện các luồng nghiệp vụ trong `chat_pipeline.py` và `shopee_matcher.py`:
 
 1. **Lọc theo Tầm Giá / Ngân Sách (`match_products_by_budget`)**:
-   - Nhận diện linh hoạt câu hỏi ngân sách: *"dưới 100k", "tầm 50k", "50k - 150k", "dưới 200 nghìn"*.
+   - Nhận diện linh hoạt câu hỏi ngân sách: *"dưới 100k", "không quá 100k", "tầm/khoảng/quanh/gần 200k", "50k - 150k", "0.2 triệu"*.
+   - Phân biệt chính xác `dưới` (`<`) với `không quá` (`<=`), `trên` (`>`) với `từ ... trở lên` (`>=`).
+   - Với `APPROX`, tìm trong biên ±15%; chỉ khi rỗng mới mở rộng một lần đến ±25% và nói rõ với khách.
    - Quét Redis Shopee Catalog, chọn lọc 3-4 sản phẩm tiêu biểu thuộc các nhóm ngành khác nhau (giặt giũ, rửa chén, tẩy rửa) phù hợp tầm giá.
+   - Category/tồn kho là hard filter; nếu không có kết quả thì trả no-result grounded, không lấy sản phẩm sai nhóm và không rơi sang semantic RAG.
    - Định dạng giá ưu đãi, % giảm giá (`6%`, `53%`) và link Shopee Mall kèm câu hỏi gợi mở tiếp tục tư vấn.
 
 2. **Tư Vấn Đa Lượt Theo Lựa Chọn Nhu Cầu (`match_need_preference`)**:
@@ -1328,7 +1335,7 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Khách hỏi tẩy sàn / lau sàn (*"có cái nào mà tẩy sàn nhà ko"*, *"xin ít sản phẩm để tẩy sàn nhà đi"*): Bắt đúng nhóm Nước lau sàn ZeO & Oplus đậm đặc 2X.
 
 11. **Kết Quả Đánh Giá NLU Regression Suite**:
-   - **98/98 Test Cases (100.0% Pass Rate)**, tốc độ phản hồi trung bình **7.9ms/câu**.
+   - Trạng thái mới nhất: **105/105 regression PASS** và **12/12 unit PASS** (8 PriceConstraint + 4 product-link follow-up, 21/08/2026).
 
 ---
 
@@ -1422,9 +1429,14 @@ Ngày cập nhật: **19/08/2026**
 - **Bóc tách câu ghép đa mệnh đề theo dấu câu (`_detect_and_process_multi_intent`)**: Xử lý mượt mà các câu hỏi kép phân tách bởi dấu phẩy, dấu chấm hỏi hoặc liên từ (ví dụ: *"có sản phẩm nào dưới 200k ko nhỉ, có giao về rạch giá đc ko"* -> giải đáp đồng thời cả Phân khúc giá dưới 200k và Chính sách giao hàng về Rạch Giá).
 
 ### 25.7 Kết Quả Đánh Giá NLU Regression Suite Mới Nhất
-- **104/104 Test Cases (100.0% Pass Rate)**:
-  - 12 nhóm kiểm thử đơn lẻ + 9 kịch bản hội thoại đa lượt (Multi-turn Context Memory).
-  - Tốc độ phản hồi trung bình toàn hệ thống: **2.3ms - 3.2ms/câu**.
+- **105/105 Test Cases (100.0% Pass Rate)**:
+  - 12 nhóm kiểm thử đơn lẻ + 10 kịch bản hội thoại đa lượt (Multi-turn Context Memory).
+  - Case mới xác minh `khoảng 200k -> xin link sản phẩm đó` trả URL sản phẩm trực tiếp, không phải link gian hàng chung.
+- **PriceConstraint unit suite: 8/8 PASS**:
+  - Comparator, `APPROX`, khoảng giá, triệu/thập phân, strict boundary, hard category, out-of-stock và range widening.
+- **Product-link follow-up unit suite: 4/4 PASS**:
+  - Giữ `product_id`, rank, price snapshot và URL trong `last_products_shown`.
+  - Resolve `sản phẩm đó` về đúng record; lookup catalog hiện hành theo `product_id` và fallback exact product name cho session cũ.
 
 ---
 
@@ -1433,12 +1445,12 @@ Ngày cập nhật: **19/08/2026**
 Ngày cập nhật: **19/08/2026**
 
 ### 26.1 Nguyên Tắc Vận Hành Mới
-- **Loại bỏ bẫy Hardcode/Regex**: Chuyển đổi từ mô hình *"Bắt từ khóa cứng (Rule-First Sieve)"* sang *"Trí tuệ nhân tạo làm não bộ chính (LLM-First Brain)"*.
+- **Trạng thái thực tế 21/08/2026**: Pipeline là kiến trúc hybrid có kiểm soát, không phải LLM-only. Numeric constraint, an toàn, complaint, CRM và các intent rõ ràng tiếp tục dùng deterministic router; LLM chỉ tổng hợp facts hoặc hỗ trợ nhánh confidence thấp.
 - **Phân định ranh giới rõ ràng**:
   1. **Data Layer (Code/Redis/Sheet)**: Đóng vai trò là công cụ cung cấp sự thật (Data/Tool Provider) — nạp Bảng giá thực, Danh mục Shopee, Kiến thức FAQ từ Google Sheet vào Vector Index (`bge-m3`).
   2. **Reasoning Layer (`reason_and_answer_cskh` trong `ai_engine.py`)**: Đóng vai trò là Não bộ tư duy duy nhất — đọc lịch sử hội thoại 3-5 lượt gần nhất, bóc tách đại từ tham chiếu (*"cái số 2"*, *"loại đó"*, *"hồi nãy"*), phân tích câu hỏi kép và đối chiếu với Facts để sinh câu trả lời CSKH 5 sao.
   3. **Guardrail Layer**: Giữ lại 2 bộ lọc an toàn bất biến: Bắt SĐT/Địa chỉ lưu CRM Lead và Bắt sự cố hàng bể vỡ khẩn cấp bắn Telegram Admin.
-- **Lợi ích vận hành**: Khi người vận hành thêm sản phẩm mới hoặc cập nhật chính sách trên Google Sheet, hệ thống tự động đồng bộ và AI tự đọc hiểu để tư vấn mọi tình huống phát sinh mà **không cần can thiệp hay sửa đổi bất kỳ dòng code nào**.
+- **Lợi ích vận hành**: Cập nhật dữ liệu trong schema hiện có có thể phản ánh qua sync mà không sửa code; operator, policy hoặc hành vi nghiệp vụ mới vẫn phải qua test và có thể cần thay đổi parser/router.
 
 ### 26.2 Khắc Phục Lỗi Phản Hồi Câu Ngắn & Nhớ Ngữ Cảnh Chọn Nhóm (Short-Query & Slot-Filling Context)
 - **Vấn đề đã xử lý**: Khi Bot hỏi *"Bạn đang quan tâm nhóm nào?"*, khách hàng nhắn ngắn gọn (`nước giặt`, `rửa chén`, `lau sàn`, `nhóm 1`, `số 2`), bot trước đây bị bẫy `_has_product_view_action` và văng vào vòng lặp fallback.
@@ -1454,20 +1466,90 @@ Ngày cập nhật: **19/08/2026**
   2. Bổ sung điều kiện loại trừ từ khóa sỉ (`nhap`, `si`, `dai ly`) tại các nhánh catalog thông thường để không bị bắt nhầm thành hỏi thông tin sản phẩm.
   3. Cá nhân hóa câu trả lời B2B: Tự động trích xuất tên sản phẩm khách muốn nhập (ví dụ: *Oplus Nước rửa chén*) $\rightarrow$ Xác nhận chính sách chiết khấu đại lý tốt, xin Số điện thoại + Khu vực để chuyên viên liên hệ báo giá sỉ, đồng thời cung cấp link Shopee Mall nếu khách muốn mua lẻ trải nghiệm.
 ### 26.5 Kết Quả Kiểm Thử Đạt 100% Pass Rate
-- `eval_test_suite.py`: **104/104 Tests PASS (100.0%)**, tốc độ phản hồi trung bình **2.9ms/câu**.
+- `eval_test_suite.py`: **105/105 Tests PASS (100.0%)**; có regression budget result -> direct product link.
 - `run_test_md_scenarios.py`: Tất cả các kịch bản thực tế của người dùng (`--scenario user`, `--scenario user_slot`, `--scenario 01`, `--scenario 02`, `--scenario 03`, `--scenario 26`, `--scenario 27`) đều đạt **100.0% Perfect Pass**.
 
 ### 26.6 Công Thức Kết Hợp Hoàn Hảo: Redis (Bộ Nhớ Dài Hạn) + Ollama (Bộ Não Suy Luận)
-- **Trạng thái**: **ĐÃ XỬ LÝ VÀ TÍCH HỢP HOÀN THIỆN (CÓ)**.
+- **Trạng thái**: Structured product memory đã triển khai lát cắt đầu tiên cho danh sách theo giá và follow-up xin link; write-through/versioning đầy đủ vẫn thuộc phần còn lại của Phase 2.
 - **Cơ chế hoạt động thực tế trong mã nguồn**:
   1. **Redis (Long-Term Memory & State Store)**:
      - Lưu trữ snapshot kiến thức FAQ từ Google Sheet và Danh mục Shopee Catalog.
-     - Lưu trữ trạng thái phiên chat `f"{brand}:session:{sender_id}"` (TTL 24h): Nhớ 5 tin nhắn gần nhất (`chat_history`), sản phẩm vừa gợi ý (`last_products_shown`), thông tin khách hàng đã thu thập (`lead_profile`: SĐT, địa chỉ/khu vực).
+     - Lưu trạng thái phiên chat `f"{brand}:session:messenger:{sender_id}"` và `recent_turns` tối đa 6 lượt. Hiện key chưa đặt TTL.
+     - Kết quả budget hiện lưu `product_id`, rank, category, price snapshot, URL và `shown_at` trong `last_products_shown`; `source_version` được giữ khi nguồn có cung cấp.
+     - Follow-up `xin link sản phẩm đó` resolve theo `product_id`, lookup catalog hiện hành và fallback exact product name cho session cũ chỉ có name/category/intent.
   2. **Ollama Local (Reasoning & Conversational Brain)**:
-     - Nhận vào danh sách `messages` đa lượt (Multi-turn Context) gồm System Prompt CSKH chuẩn + Lịch sử 5 câu gần nhất từ Redis + Facts thực tế từ Google Sheet/Shopee.
+     - Pipeline hiện truyền `conversation_summary` cho CSKH synthesizer; tham số full `chat_history`/`catalog_products` có trong engine nhưng chưa được cấp ở mọi call site.
      - Tự động suy luận ngữ cảnh: Giải mã đại từ (*"cái số 2"*, *"loại đó"*), hiểu hành động chọn danh mục sau khi xem catalog (*"nước giặt"*, *"số 1"*), nhận diện ý định mua sỉ/đại lý (*"cần nhập nước rửa chén oplus loại 400g"*).
      - Sinh câu trả lời chuẩn văn phong CSKH 5 sao, trung thực 100% theo dữ liệu thực tế và tự động lọc bỏ icon rác/sến súa.
   3. **Cơ chế Fallback thông minh đa tầng**:
-     - Thử tuần tự: `Ollama Local` $\rightarrow$ `Groq Cloud (Llama 3.3 70B)` $\rightarrow$ `Google Gemini` $\rightarrow$ `Fast Lexical/Sheet deterministic`. Đảm bảo hệ thống luôn phản hồi mượt mà trong mọi điều kiện mạng và tải máy chủ.
+     - CSKH synthesizer ưu tiên `Ollama Local`, sau đó theo provider list của `generate_ai_text`; deterministic facts/fallback vẫn là lớp bảo vệ cuối.
 
+---
 
+## 27. Kế Hoạch Triển Khai RAG Giá & Structured Memory (21/08/2026)
+
+### Phase 1 — PriceConstraint & Constraint-First Retrieval — ĐÃ HOÀN THÀNH
+
+- `parse_price_constraint()` chuẩn hóa `LT/LTE/GT/GTE/BETWEEN/EXACT/APPROX` và tiền Việt (`k/nghìn/ngàn/tr/triệu`).
+- `APPROX` dùng ±15%, mở rộng tối đa một lần tới ±25% khi không có candidate.
+- Tồn kho, category và price comparator là hard constraints.
+- `APPROX` xếp theo khoảng cách tuyệt đối tới target; các operator khác giữ business badge ordering.
+- No-result trả deterministic answer, không semantic fallback sang sản phẩm sai điều kiện.
+- `last_trace` lưu constraint, `range_widened`, `no_results` và `selected_product_ids`.
+- Đã sửa false split multi-intent cho `còn không/còn hàng` và câu mô tả vết bẩn/da tay có dấu phẩy.
+
+Acceptance đã xác minh:
+
+```text
+PriceConstraint unit tests:      8/8 PASS
+Product-link follow-up tests:    4/4 PASS
+NLU regression suite:          105/105 PASS
+GET /health:                Redis OK, Ollama OK, bge-m3 available
+API khoảng 200k:            grounded result + widened disclosure
+API dưới 200k + nước giặt:  đúng category, mọi giá < 200.000đ
+Redis trace:                APPROX target=200000 + product IDs
+```
+
+### Phase 2 — Structured Product Memory & Critical State — ĐANG TRIỂN KHAI
+
+- **Đã hoàn thành lát cắt product-link**: `last_products_shown` lưu `product_id`, rank, category, price snapshot, URL và timestamp cho kết quả budget.
+- **Đã hoàn thành lát cắt product-link**: resolve `sản phẩm đó` về `product_id`, lookup catalog mới nhất trước khi trả link; session cũ fallback exact product name.
+- Tiếp theo: mở rộng cùng cơ chế cho `cái số N/nó/loại đó` ở giá, tồn kho và các danh sách catalog khác; bổ sung source version bắt buộc.
+- Thêm `last_query.price_constraint`, `turn_seq` và `session_version`.
+- Critical conversational state dùng write-through/versioned update; transcript/analytics tiếp tục async.
+- Đặt TTL có chủ đích và test restart/multi-worker, không dựa riêng vào RAM cache.
+
+Gate: `ReferenceResolutionAccuracy`, không stale price, không mất state khi restart.
+
+### Phase 3 — Product Search Schema & True Hybrid Retrieval
+
+- Chỉ triển khai khi benchmark cho thấy Python filtering hiện tại không đủ.
+- Index catalog theo typed fields: `product_id`, `brand`, `category`, `price_current NUMERIC`, `in_stock`, `updated_at`, text aliases và vector.
+- Numeric/tag pre-filter trước lexical/vector; hợp nhất candidate bằng RRF hoặc score calibration.
+- Không thay Redis ở phase này; chưa A/B embedding khi chưa có golden-set retrieval.
+
+Gate: `RangeViolationRate = 0`, Recall@K/MRR tăng và p95 không suy giảm đáng kể.
+
+### Phase 4 — Ollama Structured Fallback & Grounding Validator
+
+- Rule parser xử lý comparator/số; Ollama JSON Schema chỉ fallback cho câu khó hoặc confidence thấp.
+- Validator đối chiếu `product_id`, price, stock, URL và source version trước khi phát câu trả lời.
+- Nếu validation fail: deterministic fallback + learning queue, không tự sửa fact bằng LLM.
+
+Gate: `UnsupportedClaimRate = 0` cho giá/tồn kho/link và clarification rate hợp lý.
+
+### Phase 5 — Observability, Shadow & Rollout
+
+- Golden set theo operator, typo, không dấu, multi-intent, reference, catalog update và no-result.
+- Offline replay → shadow mode → progressive rollout.
+- Dashboard theo dõi parse accuracy, range violations, reference resolution, stale price, fallback và p95.
+
+### Lệnh Khởi Động/Test An Toàn
+
+`testing/start_all.sh` hỗ trợ:
+
+```bash
+./testing/start_all.sh --test
+```
+
+Chế độ này không mở public tunnel, không `pkill`; chỉ khởi động/tái sử dụng Redis, Ollama và FastAPI local, chờ readiness rồi chạy unit + API price smoke tests. Chế độ `--background` không còn tự dừng process cũ theo pattern rộng; chỉ ghi PID của process do lần chạy hiện tại tạo.

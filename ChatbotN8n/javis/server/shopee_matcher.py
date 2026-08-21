@@ -15,6 +15,8 @@ import json
 import logging
 import re
 import unicodedata
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
@@ -206,99 +208,228 @@ def _detect_category_from_text(text: str) -> Optional[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. PARSE BUDGET & GỢI Ý THEO TẦM GIÁ / NGÂN SÁCH
 # ─────────────────────────────────────────────────────────────────────────────
+class PriceOperator(str, Enum):
+    LT = "LT"
+    LTE = "LTE"
+    GT = "GT"
+    GTE = "GTE"
+    BETWEEN = "BETWEEN"
+    EXACT = "EXACT"
+    APPROX = "APPROX"
+
+
+@dataclass(frozen=True)
+class PriceConstraint:
+    operator: PriceOperator
+    target: Optional[int] = None
+    min_value: Optional[int] = None
+    max_value: Optional[int] = None
+    inclusive_min: bool = True
+    inclusive_max: bool = True
+    currency: str = "VND"
+    raw_span: str = ""
+    confidence: float = 1.0
+
+    def matches(self, price: int) -> bool:
+        if self.operator == PriceOperator.LT:
+            return self.max_value is not None and price < self.max_value
+        if self.operator == PriceOperator.LTE:
+            return self.max_value is not None and price <= self.max_value
+        if self.operator == PriceOperator.GT:
+            return self.min_value is not None and price > self.min_value
+        if self.operator == PriceOperator.GTE:
+            return self.min_value is not None and price >= self.min_value
+        if self.operator == PriceOperator.EXACT:
+            return self.target is not None and price == self.target
+        lower_ok = self.min_value is None or price >= self.min_value
+        upper_ok = self.max_value is None or price <= self.max_value
+        return lower_ok and upper_ok
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operator": self.operator.value,
+            "target": self.target,
+            "min_value": self.min_value,
+            "max_value": self.max_value,
+            "inclusive_min": self.inclusive_min,
+            "inclusive_max": self.inclusive_max,
+            "currency": self.currency,
+            "raw_span": self.raw_span,
+            "confidence": self.confidence,
+        }
+
+
+_MONEY_TOKEN_RE = re.compile(
+    r"(?<![a-z0-9])(?P<number>\d+(?:[.,]\d+)?)(?![.,]\d)\s*"
+    r"(?P<unit>trieu|tr|k|ngan|nghin|000|d|dong)?(?![a-z0-9])"
+)
+_MEASUREMENT_SUFFIX_RE = re.compile(r"^(kg|g|gam|ml|lit|l|chai|can|tui|goi|bo)\b")
+
+
+def _money_value(number: str, unit: str) -> tuple[Optional[int], float]:
+    """Chuẩn hóa một token tiền Việt về VND và trả confidence của đơn vị."""
+    raw = number.strip()
+    unit = unit.strip()
+    try:
+        if unit in {"trieu", "tr"}:
+            return int(round(float(raw.replace(",", ".")) * 1_000_000)), 1.0
+        if unit in {"k", "ngan", "nghin", "000"}:
+            return int(round(float(raw.replace(",", ".")) * 1_000)), 1.0
+
+        # 200.000đ / 200,000đ: dấu ngăn cách hàng nghìn, không phải số thập phân.
+        if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", raw):
+            return int(re.sub(r"[.,]", "", raw)), 0.98 if unit else 0.9
+
+        value = float(raw.replace(",", "."))
+        if unit in {"d", "dong"}:
+            return int(round(value)), 1.0
+        if value < 1_000:
+            # Tương thích cách nói phổ biến "dưới 200" trong ngữ cảnh ngân sách,
+            # nhưng hạ confidence vì người dùng không nói rõ nghìn/triệu.
+            return int(round(value * 1_000)), 0.65
+        return int(round(value)), 0.85
+    except (TypeError, ValueError):
+        return None, 0.0
+
+
+def _extract_money_tokens(folded: str) -> list[dict[str, Any]]:
+    tokens: list[dict[str, Any]] = []
+    for match in _MONEY_TOKEN_RE.finditer(folded):
+        unit = match.group("unit") or ""
+        suffix = folded[match.end():].lstrip()
+        if not unit and _MEASUREMENT_SUFFIX_RE.match(suffix):
+            continue
+        value, confidence = _money_value(match.group("number"), unit)
+        if value is None:
+            continue
+        tokens.append({
+            "value": value,
+            "confidence": confidence,
+            "start": match.start(),
+            "end": match.end(),
+            "raw": match.group(0),
+        })
+    return tokens
+
+
+def _approx_bounds(target: int, tolerance: float) -> tuple[int, int]:
+    return int(round(target * (1.0 - tolerance))), int(round(target * (1.0 + tolerance)))
+
+
+def parse_price_constraint(text: str, approx_tolerance: float = 0.15) -> Optional[PriceConstraint]:
+    """Parse comparator + số tiền thành constraint có kiểu dữ liệu và semantics rõ ràng."""
+    original_lower = str(text or "").lower()
+    folded = re.sub(r"\s+", " ", _fold(text)).strip()
+    tokens = _extract_money_tokens(folded)
+    if not tokens:
+        return None
+
+    # Khoảng A-B / từ A đến B. Cho phép đơn vị chỉ xuất hiện ở một đầu.
+    if len(tokens) >= 2:
+        first, second = tokens[0], tokens[1]
+        connector = folded[first["end"]:second["start"]]
+        prefix = folded[max(0, first["start"] - 12):first["start"]]
+        if re.search(r"(?:-|–|—|\bden\b|\btoi\b|\bva\b)", connector) or re.search(r"\btu\s*$", prefix):
+            low, high = sorted((first["value"], second["value"]))
+            return PriceConstraint(
+                operator=PriceOperator.BETWEEN,
+                min_value=low,
+                max_value=high,
+                raw_span=folded[first["start"]:second["end"]],
+                confidence=min(first["confidence"], second["confidence"]),
+            )
+
+    token = tokens[0]
+    value = token["value"]
+    confidence = token["confidence"]
+    raw_span = token["raw"].strip()
+
+    # Comparator rõ ràng phải thắng các từ đệm "tầm/khoảng".
+    if re.search(r"(?:khong qua|toi da|do lai|quay dau|<=)", folded):
+        return PriceConstraint(PriceOperator.LTE, max_value=value, inclusive_min=True, inclusive_max=True, raw_span=raw_span, confidence=confidence)
+    if re.search(r"(?:it nhat|toi thieu|tu\s+[^,;]+\s+tro len|>=)", folded):
+        return PriceConstraint(PriceOperator.GTE, min_value=value, inclusive_min=True, inclusive_max=True, raw_span=raw_span, confidence=confidence)
+    if re.search(r"(?:duoi|thap hon|re hon|it hon|(?<!<)<(?![=>]))", folded):
+        return PriceConstraint(PriceOperator.LT, max_value=value, inclusive_min=True, inclusive_max=False, raw_span=raw_span, confidence=confidence)
+    if re.search(r"(?:tren|cao hon|lon hon|(?<!>)>(?![=]))", folded):
+        return PriceConstraint(PriceOperator.GT, min_value=value, inclusive_min=False, inclusive_max=True, raw_span=raw_span, confidence=confidence)
+    if re.search(r"\b(?:khoang|tam|quanh|gan|xap xi|loanh quanh)\b|~", folded) or re.search(r"\bcỡ\b", original_lower):
+        low, high = _approx_bounds(value, approx_tolerance)
+        return PriceConstraint(
+            PriceOperator.APPROX,
+            target=value,
+            min_value=low,
+            max_value=high,
+            raw_span=raw_span,
+            confidence=confidence,
+        )
+    has_explicit_exact = bool(re.search(r"\bđúng\b", original_lower)) or bool(
+        re.search(r"(?:chinh xac|muc gia|ngan sach|\bgia\b)", folded)
+    )
+    if has_explicit_exact or confidence >= 0.9:
+        return PriceConstraint(PriceOperator.EXACT, target=value, min_value=value, max_value=value, raw_span=raw_span, confidence=confidence)
+    return None
+
+
 def parse_budget_range(text: str) -> tuple[Optional[int], Optional[int]]:
-    """Trích xuất khoảng giá min, max từ câu hỏi của khách hàng (vd: dưới 100k, 50k-100k...)."""
-    folded = _fold(text).replace(",", "").replace(".", "")
-
-    # Mẫu "từ X đến Y" hoặc "X - Y" hoặc "X den Y"
-    range_match = re.search(r"(?:tu\s+)?(\d+)\s*(?:k|ngan|nghin|000)?\s*(?:-|den|toi|den muc)\s*(\d+)\s*(?:k|ngan|nghin|000|d|dong)?", folded)
-    if range_match:
-        try:
-            v1 = int(range_match.group(1))
-            v2 = int(range_match.group(2))
-            min_p = v1 * 1000 if v1 < 1000 else v1
-            max_p = v2 * 1000 if v2 < 1000 else v2
-            if min_p > max_p:
-                min_p, max_p = max_p, min_p
-            return (min_p, max_p)
-        except Exception:
-            pass
-
-    # Mẫu "dưới X", "tầm X đổ lại", "X quay đầu", "< X", "khoảng dưới X", "tầm dưới X"
-    under_match = re.search(r"(?:duoi|tam duoi|khoang duoi|do lai|quay dau|<\s*|re hon|it hon|khong qua|tam khoang|tam)\s*(\d+)\s*(?:k|ngan|nghin|000|d|dong)?", folded)
-    if under_match:
-        try:
-            val = int(under_match.group(1))
-            max_p = val * 1000 if val < 1000 else val
-            return (0, max_p)
-        except Exception:
-            pass
-
-    # Mẫu "trên X", "> X"
-    above_match = re.search(r"(?:tren|hon|>\s*)\s*(\d+)\s*(?:k|ngan|nghin|000|d|dong)?", folded)
-    if above_match:
-        try:
-            val = int(above_match.group(1))
-            min_p = val * 1000 if val < 1000 else val
-            return (min_p, None)
-        except Exception:
-            pass
-
-    return (None, None)
+    """API tương thích cũ; logic mới nên dùng parse_price_constraint()."""
+    constraint = parse_price_constraint(text)
+    if constraint is None:
+        return None, None
+    if constraint.operator in {PriceOperator.LT, PriceOperator.LTE}:
+        return 0, constraint.max_value
+    if constraint.operator in {PriceOperator.GT, PriceOperator.GTE}:
+        return constraint.min_value, None
+    return constraint.min_value, constraint.max_value
 
 
 def is_budget_inquiry(text: str) -> bool:
-    """Kiểm tra câu hỏi có chứa ý định hỏi về tầm giá, ngân sách không."""
-    folded = _fold(text)
-    if not any(k in folded for k in ["gia", "tam", "duoi", "khoang", "do lai", "quay dau", "muc gia", "ngan sach", "re"]):
-        return False
-    min_p, max_p = parse_budget_range(text)
-    return max_p is not None or min_p is not None
+    """Nhận diện trực tiếp từ PriceConstraint, không dùng keyword gate riêng."""
+    return parse_price_constraint(text) is not None
 
 
 def match_products_by_budget(query: str, brand: str = "zeo") -> Optional[dict]:
     """Lọc và gợi ý các sản phẩm phù hợp nhất trong khoảng giá người dùng yêu cầu."""
-    min_p, max_p = parse_budget_range(query)
-    if min_p is None and max_p is None:
+    constraint = parse_price_constraint(query)
+    if constraint is None:
         return None
-
-    min_p = min_p or 0
-    max_p = max_p or 999999999
 
     catalog = load_shopee_catalog(brand=brand)
     if not catalog:
         return None
 
-    # Lọc sản phẩm còn hàng trong khoảng giá
-    matched = []
+    # Category và tồn kho là hard constraints: không được fallback sang category khác.
+    target_category = _detect_category_from_text(query)
+    eligible = []
     for p in catalog:
         if not p.get("in_stock", True):
             continue
+        if target_category and p.get("category") != target_category:
+            continue
         try:
             price = int(str(p.get("price", 0)).replace(".", "").replace(",", ""))
-            if min_p <= price <= max_p:
-                matched.append(p)
+            candidate = dict(p)
+            candidate["_price_num"] = price
+            eligible.append(candidate)
         except Exception:
             continue
 
-    if not matched:
-        return None
+    matched = [p for p in eligible if constraint.matches(p["_price_num"])]
+    range_widened = False
 
-    # Kiểm tra xem khách có chỉ định danh mục không
-    target_category = _detect_category_from_text(query)
-    if target_category:
-        cat_matched = [p for p in matched if p.get("category") == target_category]
-        if cat_matched:
-            matched = cat_matched
+    # APPROX: chỉ mở rộng một lần khi primary range không có kết quả.
+    if not matched and constraint.operator == PriceOperator.APPROX and constraint.target is not None:
+        expanded_min, expanded_max = _approx_bounds(constraint.target, 0.25)
+        matched = [p for p in eligible if expanded_min <= p["_price_num"] <= expanded_max]
+        range_widened = bool(matched)
 
-    # Ưu tiên Best Seller, New Arrival, sau đó chọn đa dạng danh mục
+    # APPROX ưu tiên độ gần ngân sách; các operator khác ưu tiên badge nghiệp vụ.
     def sort_p(p):
         badge = str(p.get("badge", ""))
-        if "BEST_SELLER" in badge:
-            return 1
-        if "NEW_ARRIVAL" in badge:
-            return 2
-        return 3
+        badge_rank = 1 if "BEST_SELLER" in badge else (2 if "NEW_ARRIVAL" in badge else 3)
+        if constraint.operator == PriceOperator.APPROX and constraint.target is not None:
+            return abs(p["_price_num"] - constraint.target), badge_rank
+        return badge_rank, p["_price_num"]
 
     matched.sort(key=sort_p)
 
@@ -316,13 +447,38 @@ def match_products_by_budget(query: str, brand: str = "zeo") -> Optional[dict]:
     if len(selected) < 3 and matched:
         selected = matched[:4]
 
-    budget_label = ""
-    if min_p > 0 and max_p < 999999999:
-        budget_label = f"từ {_format_price(min_p)} đến {_format_price(max_p)}"
-    elif max_p < 999999999:
-        budget_label = f"dưới {_format_price(max_p)}"
-    else:
-        budget_label = f"từ {_format_price(min_p)} trở lên"
+    labels = {
+        PriceOperator.LT: f"dưới {_format_price(constraint.max_value)}",
+        PriceOperator.LTE: f"không quá {_format_price(constraint.max_value)}",
+        PriceOperator.GT: f"trên {_format_price(constraint.min_value)}",
+        PriceOperator.GTE: f"từ {_format_price(constraint.min_value)} trở lên",
+        PriceOperator.BETWEEN: f"từ {_format_price(constraint.min_value)} đến {_format_price(constraint.max_value)}",
+        PriceOperator.EXACT: f"đúng {_format_price(constraint.target)}",
+        PriceOperator.APPROX: f"khoảng {_format_price(constraint.target)}",
+    }
+    budget_label = labels[constraint.operator]
+
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+    brand_display = "ZeO Vietnam" if brand.lower() == "zeo" else "CFC Cò Bay"
+
+    if not matched:
+        category_text = f" thuộc nhóm **{target_category}**" if target_category else ""
+        reply = (
+            f"Dạ hiện mình chưa tìm thấy sản phẩm còn hàng{category_text} phù hợp mức giá **{budget_label}**. "
+            "Bạn có muốn mình nới ngân sách hoặc gợi ý lựa chọn gần nhất không ạ?"
+        )
+        return {
+            "matched": True,
+            "intent": "shopee_budget_filter_no_result",
+            "confidence": "high",
+            "score": 1.0,
+            "suggested_reply": reply,
+            "shopee_url": general_link,
+            "selected_products": [],
+            "price_constraint": constraint.to_dict(),
+            "range_widened": False,
+            "no_results": True,
+        }
 
     lines = []
     medals = ["1.", "2.", "3.", "4."]
@@ -334,11 +490,9 @@ def match_products_by_budget(query: str, brand: str = "zeo") -> Optional[dict]:
         lines.append(f"{num} **{p['name']}** — Giá ưu đãi: **{price_str}**{disc}")
 
     products_text = "\n".join(lines)
-    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
-    brand_display = "ZeO Vietnam" if brand.lower() == "zeo" else "CFC Cò Bay"
-
+    widened_note = " (đã mở rộng nhẹ để lấy lựa chọn gần nhất)" if range_widened else ""
     reply = (
-        f"Dạ trong phân khúc giá **{budget_label}**, các dòng sản phẩm bán chạy và được ưa chuộng nhất của {brand_display} gồm có:\n\n"
+        f"Dạ trong phân khúc giá **{budget_label}**{widened_note}, các lựa chọn phù hợp của {brand_display} gồm có:\n\n"
         f"{products_text}\n\n"
         f"👉 Bạn có thể xem trọn bộ ưu đãi và áp mã Freeship Extra tại gian hàng Shopee: {general_link}\n"
         f"Bạn đang quan tâm dòng giặt xả, rửa chén hay tẩy rửa gia đình để mình tư vấn chi tiết hơn nha! 💙"
@@ -351,7 +505,10 @@ def match_products_by_budget(query: str, brand: str = "zeo") -> Optional[dict]:
         "score": 0.98,
         "suggested_reply": reply,
         "shopee_url": general_link,
-        "selected_products": selected,
+        "selected_products": [{k: v for k, v in p.items() if k != "_price_num"} for p in selected],
+        "price_constraint": constraint.to_dict(),
+        "range_widened": range_widened,
+        "no_results": False,
     }
 
 
@@ -1096,6 +1253,64 @@ def is_shopee_inquiry(text: str) -> bool:
     return any(t in folded for t in triggers)
 
 
+def _product_link_result(product: dict, brand: str) -> dict:
+    """Tạo câu trả lời link từ đúng record catalog đã được resolve."""
+    general_link = "https://shopee.vn/zeovietnamofficial" if brand.lower() == "zeo" else "https://shopee.vn/cfccobay"
+    price_str = _format_price(product.get("price"))
+    url = product.get("link_shopee") or product.get("shopee_url") or general_link
+
+    reply = (
+        f"Dạ, link mua **{product['name']}** chính hãng trên Shopee Mall đây nha bạn:\n\n"
+        f"👉 {url}\n\n"
+        f"• **Giá tham khảo hiện tại:** {price_str}\n"
+        f"• **Ưu đãi:** Freeship Extra toàn quốc\n\n"
+        "Bạn bấm vào link để xem giá và ưu đãi mới nhất trên Shopee nhé! 💙"
+    )
+
+    return {
+        "matched": True,
+        "intent": "shopee_product_link",
+        "is_general_store": False,
+        "product_id": product.get("item_id") or product.get("id"),
+        "product_name": product.get("name"),
+        "shopee_url": url,
+        "matched_product": product,
+        "suggested_reply": reply,
+    }
+
+
+def match_shopee_product_reference(reference: dict, brand: str = "zeo") -> Optional[dict]:
+    """Resolve follow-up theo product_id trước, rồi mới fallback exact product name."""
+    catalog = load_shopee_catalog(brand=brand)
+    if not catalog:
+        return None
+
+    product_id = str(reference.get("product_id") or "").strip()
+    product_name = str(reference.get("product") or reference.get("name") or "").strip()
+    matched = None
+
+    if product_id:
+        matched = next(
+            (
+                product
+                for product in catalog
+                if str(product.get("item_id") or product.get("id") or "").strip() == product_id
+            ),
+            None,
+        )
+
+    if matched is None and product_name:
+        folded_name = _fold(product_name).strip()
+        matched = next(
+            (product for product in catalog if _fold(product.get("name", "")).strip() == folded_name),
+            None,
+        )
+
+    if matched is None:
+        return None
+    return _product_link_result(matched, brand)
+
+
 def match_promotions_and_deals(query: str, brand: str = "zeo") -> dict:
     """Trả lời trung thực về các chương trình Sale & Khuyến mãi hiện có của ZeO / CFC."""
     brand_display = "ZeO Vietnam" if brand.lower() == "zeo" else "CFC Cò Bay"
@@ -1239,23 +1454,4 @@ def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
             }
         return None
 
-    price_str = _format_price(best_match.get("price"))
-    url = best_match.get("link_shopee") or best_match.get("shopee_url") or "https://shopee.vn/zeovietnamofficial"
-
-    reply = (
-        f"Dạ, link mua **{best_match['name']}** chính hãng trên Shopee Mall đây nha bạn:\n\n"
-        f"👉 {url}\n\n"
-        f"• **Giá niêm yết:** {price_str}\n"
-        f"• **Ưu đãi:** Freeship Extra toàn quốc\n\n"
-        f"Bạn bấm vào link để đặt hàng giao tận nơi nhé! Cần hỗ trợ thêm bạn cứ nhắn mình nha. 💙"
-    )
-
-    return {
-        "matched": True,
-        "is_general_store": False,
-        "product_id": best_match.get("item_id") or best_match.get("id"),
-        "product_name": best_match.get("name"),
-        "shopee_url": url,
-        "matched_product": best_match,
-        "suggested_reply": reply,
-    }
+    return _product_link_result(best_match, brand)

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from rag_search import get_redis, get_faq_by_intent, semantic_search, refresh_knowledge_cache
 from shopee_matcher import (
     match_shopee_product,
+    match_shopee_product_reference,
     is_shopee_inquiry,
     is_budget_inquiry,
     match_products_by_budget,
@@ -262,6 +263,10 @@ def _default_conversation_state(brand: str) -> dict[str, Any]:
             "product": "",
             "product_intent": "",
             "category": "",
+            "product_id": "",
+            "shopee_url": "",
+            "price": None,
+            "rank": None,
         },
         "last_products_shown": [],
         "customer_constraints": {},
@@ -290,6 +295,10 @@ def _load_conversation_state(existing_session: dict, brand: str) -> dict[str, An
         "product": active_entities.get("product") or existing_session.get("current_product", ""),
         "product_intent": active_entities.get("product_intent") or active_entities.get("intent", ""),
         "category": active_entities.get("category") or existing_session.get("current_category", ""),
+        "product_id": active_entities.get("product_id", ""),
+        "shopee_url": active_entities.get("shopee_url", ""),
+        "price": active_entities.get("price"),
+        "rank": active_entities.get("rank"),
     }
     if not isinstance(state.get("last_products_shown"), list):
         state["last_products_shown"] = []
@@ -302,12 +311,23 @@ def _load_conversation_state(existing_session: dict, brand: str) -> dict[str, An
     return state
 
 
-def _copy_product_item(item: dict) -> dict[str, str]:
-    return {
+def _copy_product_item(item: dict) -> dict[str, Any]:
+    product = {
         "name": str(item.get("name", "")).strip(),
         "category": str(item.get("category", "")).strip(),
         "intent": str(item.get("intent", "")).strip(),
     }
+    product_id = item.get("item_id") or item.get("product_id") or item.get("id")
+    shopee_url = item.get("link_shopee") or item.get("shopee_url") or item.get("url")
+    if product_id not in (None, ""):
+        product["product_id"] = str(product_id).strip()
+    if shopee_url:
+        product["shopee_url"] = str(shopee_url).strip()
+    for field in ("price", "original_price", "discount", "rank", "source_version", "shown_at"):
+        if item.get(field) not in (None, ""):
+            # pyrefly: ignore [bad-assignment]
+            product[field] = item.get(field)
+    return product
 
 
 def _extract_query_entities(norm_text: str, brand: str) -> dict[str, Any]:
@@ -381,6 +401,10 @@ def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[s
             "product": "",
             "product_intent": "",
             "category": "",
+            "product_id": "",
+            "shopee_url": "",
+            "price": None,
+            "rank": None,
             "resolved_query": raw_text,
             "reason": "no_reference",
         }
@@ -401,11 +425,24 @@ def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[s
                     reason = "variant_match"
                     break
         if not chosen and active.get("product"):
-            chosen = {
-                "name": str(active.get("product", "")),
-                "intent": str(active.get("product_intent", "")),
-                "category": str(active.get("category", "")),
-            }
+            active_name = str(active.get("product", ""))
+            # pyrefly: ignore [bad-assignment]
+            chosen = next(
+                (
+                    product_item
+                    for product_item in products
+                    if _normalize_vn(product_item.get("name", "")) == _normalize_vn(active_name)
+                ),
+                {
+                    "name": active_name,
+                    "intent": str(active.get("product_intent", "")),
+                    "category": str(active.get("category", "")),
+                    "product_id": str(active.get("product_id", "")),
+                    "shopee_url": str(active.get("shopee_url", "")),
+                    "price": active.get("price"),
+                    "rank": active.get("rank"),
+                },
+            )
             reason = "active_entity"
         elif not chosen and len(products) == 1:
             chosen = products[0]
@@ -418,6 +455,10 @@ def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[s
             "product": "",
             "product_intent": "",
             "category": "",
+            "product_id": "",
+            "shopee_url": "",
+            "price": None,
+            "rank": None,
             "resolved_query": raw_text,
             "reason": reason,
         }
@@ -429,6 +470,10 @@ def _resolve_reference(raw_text: str, norm_text: str, conversation_state: dict[s
         "product": product,
         "product_intent": chosen.get("intent", ""),
         "category": chosen.get("category", ""),
+        "product_id": chosen.get("product_id", ""),
+        "shopee_url": chosen.get("shopee_url", ""),
+        "price": chosen.get("price"),
+        "rank": chosen.get("rank"),
         "resolved_query": f"{raw_text} ({product})" if product else raw_text,
         "reason": reason,
     }
@@ -611,12 +656,28 @@ def _build_next_conversation_state(
     query_entities: dict[str, Any],
     reference_resolution: dict[str, Any],
     source_id: str = "",
+    products_shown: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     state = _load_conversation_state({"conversation_state": previous_state}, brand)
     now_str = datetime.now(timezone.utc).isoformat()
-    products = _product_memory_for_intent(intent, bot_reply, brand)
+    products = []
+    if products_shown is not None:
+        for index, item in enumerate(products_shown, start=1):
+            if not isinstance(item, dict):
+                continue
+            product = _copy_product_item(item)
+            if not product.get("name"):
+                continue
+            product["intent"] = product.get("intent") or intent
+            product["rank"] = product.get("rank") or index
+            product["shown_at"] = product.get("shown_at") or now_str
+            products.append(product)
+    else:
+        products = _product_memory_for_intent(intent, bot_reply, brand)
 
-    if products:
+    if products_shown is not None:
+        state["last_products_shown"] = products
+    elif products:
         state["last_products_shown"] = products
     elif query_entities.get("product"):
         state["last_products_shown"] = [{
@@ -633,6 +694,10 @@ def _build_next_conversation_state(
             "product": active_product,
             "product_intent": active_intent,
             "category": active_category,
+            "product_id": reference_resolution.get("product_id", ""),
+            "shopee_url": reference_resolution.get("shopee_url", ""),
+            "price": reference_resolution.get("price"),
+            "rank": reference_resolution.get("rank"),
         }
     elif len(state.get("last_products_shown", [])) == 1:
         only_product = state["last_products_shown"][0]
@@ -640,6 +705,20 @@ def _build_next_conversation_state(
             "product": only_product.get("name", ""),
             "product_intent": only_product.get("intent", ""),
             "category": only_product.get("category", ""),
+            "product_id": only_product.get("product_id", ""),
+            "shopee_url": only_product.get("shopee_url", ""),
+            "price": only_product.get("price"),
+            "rank": only_product.get("rank"),
+        }
+    elif products_shown is not None and not products:
+        state["active_entities"] = {
+            "product": "",
+            "product_intent": "",
+            "category": "",
+            "product_id": "",
+            "shopee_url": "",
+            "price": None,
+            "rank": None,
         }
 
     # Cập nhật covered_fact_ids
@@ -1091,6 +1170,12 @@ async def _detect_and_process_multi_intent(
     lead_stage: str = "new",
 ) -> Optional[ChatPipelineResponse]:
     """Phát hiện và xử lý câu hỏi ghép 2 ý định (Multi-Intent Compound Query)."""
+    # Các câu mô tả triệu chứng/hiệu quả thường dùng dấu phẩy để nối một ý
+    # ("ăn da tay, tay bị bong tróc"; "dùng ổn, tẩy được vết máu").
+    # Để matcher chuyên biệt xử lý toàn câu thay vì tách nhầm thành 2 intent.
+    if is_stain_removal_or_efficacy_inquiry(raw_text) or is_skin_care_dishwashing_inquiry(raw_text):
+        return None
+
     clauses: list[tuple[str, str]] = []
 
     # 1. Thử tách theo dấu phẩy / chấm hỏi / chấm phẩy nếu có 2 vế câu độc lập
@@ -1101,7 +1186,12 @@ async def _detect_and_process_multi_intent(
 
     # 2. Nếu chưa tách được, thử tách theo liên từ
     if not clauses or len(clauses) < 2:
-        conj_match = re.search(r"\b(va|voi lai|con|kem theo|tien the|cho minh hoi them|dong thoi|kèm|tien the cho hoi|dong thoi cho hoi)\b", norm_text)
+        # "còn không/còn hàng/còn nữa" là availability/follow-up, không phải liên từ tách câu.
+        allows_con_split = not re.search(r"\bcon\s+(?:hang|khong|hong|ko|nua)\b", norm_text)
+        conjunctions = r"va|voi lai|kem theo|tien the|cho minh hoi them|dong thoi|kèm|tien the cho hoi|dong thoi cho hoi"
+        if allows_con_split:
+            conjunctions = rf"{conjunctions}|con"
+        conj_match = re.search(rf"\b({conjunctions})\b", norm_text)
         if conj_match:
             conj = conj_match.group(0)
             parts_norm = norm_text.split(conj, 1)
@@ -1307,6 +1397,8 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             score: float = 1.0,
             source_id: str = "",
             fallback_reason: str = "",
+            trace_extra: Optional[dict[str, Any]] = None,
+            products_shown: Optional[list[dict[str, Any]]] = None,
         ) -> None:
             next_state = _build_next_conversation_state(
                 conversation_state,
@@ -1318,6 +1410,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 query_entities=query_entities,
                 reference_resolution=reference_resolution,
                 source_id=source_id,
+                products_shown=products_shown,
             )
             trace = {
                 "normalized_text": norm_text,
@@ -1334,6 +1427,8 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 "score": score,
                 "fallback_reason": fallback_reason,
             }
+            if trace_extra:
+                trace.update(trace_extra)
             # Cập nhật ngay RAM cache để turn kế tiếp đọc tức thì (0ms)
             _local_session_cache[session_key] = {
                 "last_user_message": raw_text,
@@ -1713,7 +1808,23 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         if brand.lower() == "zeo" and is_budget_inquiry(raw_text) and not is_return_or_claim:
             budget_res = match_products_by_budget(raw_text, brand=brand)
             if budget_res:
-                _remember_response(budget_res["suggested_reply"], budget_res.get("intent", "shopee_budget_filter"), "browsing_catalog")
+                _remember_response(
+                    budget_res["suggested_reply"],
+                    budget_res.get("intent", "shopee_budget_filter"),
+                    "browsing_catalog",
+                    score=float(budget_res.get("score", 0.98)),
+                    trace_extra={
+                        "price_constraint": budget_res.get("price_constraint", {}),
+                        "range_widened": bool(budget_res.get("range_widened")),
+                        "no_results": bool(budget_res.get("no_results")),
+                        "selected_product_ids": [
+                            str(product.get("item_id", ""))
+                            for product in budget_res.get("selected_products", [])
+                            if product.get("item_id")
+                        ],
+                    },
+                    products_shown=budget_res.get("selected_products", []),
+                )
                 return ChatPipelineResponse(
                     answer=_prettify_answer(budget_res["suggested_reply"]),
                     intent=budget_res.get("intent", "shopee_budget_filter"),
@@ -1869,9 +1980,23 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         # 5. Shopee Link & Product Matcher
         shopee_match = None
         if is_shopee_inquiry(raw_text) and not is_return_or_claim:
-            shopee_match = match_shopee_product(raw_text, brand=brand)
+            if reference_resolution.get("resolved"):
+                shopee_match = match_shopee_product_reference(reference_resolution, brand=brand)
+            if not shopee_match:
+                shopee_query = (
+                    reference_resolution.get("resolved_query", raw_text)
+                    if reference_resolution.get("resolved")
+                    else raw_text
+                )
+                shopee_match = match_shopee_product(shopee_query, brand=brand)
             if shopee_match:
-                _remember_response(shopee_match["suggested_reply"], shopee_match.get("intent", "shopee_product_link"), "browsing_catalog")
+                matched_product = shopee_match.get("matched_product")
+                _remember_response(
+                    shopee_match["suggested_reply"],
+                    shopee_match.get("intent", "shopee_product_link"),
+                    "browsing_catalog",
+                    products_shown=[matched_product] if isinstance(matched_product, dict) else None,
+                )
                 return ChatPipelineResponse(
                     answer=_prettify_answer(shopee_match["suggested_reply"]),
                     intent=shopee_match.get("intent", "shopee_product_link"),

@@ -213,6 +213,18 @@ MULTI_TURN_CASES = [
             {"q": "cái này tẩy được vết máu ko sốp", "expected_intent": "laundry_stain_removal_guide"},
         ],
     },
+    {
+        "name": "zeo_budget_result_then_direct_product_link",
+        "brand": "zeo",
+        "turns": [
+            {"q": "vậy có sản phẩm nào khoảng 200k ko nhỉ", "expected_intent": "shopee_budget_filter"},
+            {
+                "q": "xin link sản phẩm đó đi",
+                "expected_intent": "shopee_product_link",
+                "expect_direct_product_link": True,
+            },
+        ],
+    },
 ]
 
 
@@ -286,6 +298,13 @@ async def run_eval():
                 # pyrefly: ignore [bad-index]
                 turn["expected_intent"] == "contextual_price_unverified" and res.intent in ["contextual_price_unverified", "specific_product_pricing"]
             )
+            # pyrefly: ignore [missing-attribute]
+            if turn.get("expect_direct_product_link"):
+                general_store_urls = {
+                    "https://shopee.vn/zeovietnamofficial",
+                    "https://shopee.vn/cfccobay",
+                }
+                matched = matched and bool(res.shopee_url) and res.shopee_url not in general_store_urls
             case_passed = case_passed and matched
             print(
                 f"   Turn {turn_idx}: {'✅' if matched else '❌'} "

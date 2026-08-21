@@ -45,6 +45,10 @@ echo ""
 if [[ "$MODE" == "1" ]]; then
 # ── MODE 1: Mỗi service 1 tab Terminal riêng ─────────────────────
 
+  echo "${BLUE}▶ [0/4]${NC} Kiểm tra & Khởi động ${BOLD}Redis Stack (Docker)${NC}..."
+  (cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/infra/redis && docker compose up -d 2>/dev/null || true)
+  sleep 1
+
   echo "${BLUE}▶ [1/4]${NC} Khởi động ${BOLD}n8n${NC}..."
   open_tab "🔁 n8n" "WEBHOOK_URL=https://n8n.dinhduongcantho.io.vn/ N8N_EDITOR_BASE_URL=https://n8n.dinhduongcantho.io.vn N8N_HOST=n8n.dinhduongcantho.io.vn N8N_PROTOCOL=https npx n8n start; exec zsh"
   sleep 1
@@ -61,11 +65,12 @@ if [[ "$MODE" == "1" ]]; then
   open_tab "🐍 Python API :8000" "cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis/server && source .venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload; exec zsh"
 
   echo ""
-  echo "${GREEN}${BOLD}✅ Đã mở 4 tab Terminal:${NC}"
-  echo "   ${CYAN}🔁 n8n${NC}              → https://n8n.dinhduongcantho.io.vn"
-  echo "   ${CYAN}☁️  Cloudflared${NC}      → Tunnel đang chạy"
-  echo "   ${CYAN}🤖 Ollama${NC}           → http://localhost:11434"
-  echo "   ${CYAN}🐍 Python API${NC}       → http://localhost:8000/admin"
+  echo "${GREEN}${BOLD}✅ Đã mở 4 tab Terminal & Khởi động hoàn tất:${NC}"
+  echo "   ${CYAN}🔁 n8n Webhook / Editor${NC} → https://n8n.dinhduongcantho.io.vn"
+  echo "   ${CYAN}🐍 FastAPI Admin UI    ${NC} → https://dinhduongcantho.io.vn/admin (hoặc http://localhost:8000/admin)"
+  echo "   ${CYAN}☁️  Cloudflared Tunnel  ${NC} → Đang chạy (n8n & FastAPI)"
+  echo "   ${CYAN}🤖 Ollama Local        ${NC} → http://localhost:11434"
+  echo "   ${CYAN}🔴 Redis Stack         ${NC} → localhost:6379"
   echo ""
 
 # ══════════════════════════════════════════════════════════════════
@@ -79,6 +84,9 @@ else
   pkill -f "ollama serve" 2>/dev/null && echo "   ollama stopped" || true
   pkill -f "uvicorn|python main.py" 2>/dev/null && echo "   Python API stopped" || true
   sleep 1
+
+  echo "${BLUE}▶ [0/4]${NC} Kiểm tra & Khởi động ${BOLD}Redis Stack (Docker)${NC}..."
+  (cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/infra/redis && docker compose up -d 2>/dev/null || true)
 
   echo "${BLUE}▶ [1/4]${NC} Khởi động ${BOLD}n8n${NC} → log: $LOG_DIR/n8n.log"
   WEBHOOK_URL=https://n8n.dinhduongcantho.io.vn/ \
@@ -118,13 +126,13 @@ else
   echo ""
   echo "${GREEN}${BOLD}✅ Tất cả đã chạy nền!${NC}"
   echo ""
-  echo "   ${CYAN}🔁 n8n${NC}         PID $N8N_PID  → tail -f $LOG_DIR/n8n.log"
-  echo "   ${CYAN}☁️  Cloudflared${NC} PID $CF_PID   → tail -f $LOG_DIR/cloudflared.log"
-  echo "   ${CYAN}🤖 Ollama${NC}      PID $OLLAMA_PID → tail -f $LOG_DIR/ollama.log"
-  echo "   ${CYAN}🐍 Python API${NC}  PID $PY_PID   → tail -f $LOG_DIR/python_api.log"
+  echo "   ${CYAN}🔁 n8n Webhook / Editor${NC} → https://n8n.dinhduongcantho.io.vn"
+  echo "   ${CYAN}🐍 FastAPI Admin UI    ${NC} → https://dinhduongcantho.io.vn/admin (hoặc http://localhost:8000/admin)"
+  echo "   ${CYAN}☁️  Cloudflared PID $CF_PID   ${NC} → tail -f $LOG_DIR/cloudflared.log"
+  echo "   ${CYAN}🤖 Ollama      PID $OLLAMA_PID ${NC} → tail -f $LOG_DIR/ollama.log"
+  echo "   ${CYAN}🐍 Python API  PID $PY_PID   ${NC} → tail -f $LOG_DIR/python_api.log"
   echo ""
   echo "   ${YELLOW}Dừng tất cả:${NC} ./stop_all.sh"
-  echo "   ${YELLOW}Admin UI   :${NC} http://localhost:8000/admin"
   echo ""
 
 fi

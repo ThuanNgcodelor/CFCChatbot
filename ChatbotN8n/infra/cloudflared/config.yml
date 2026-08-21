@@ -1,0 +1,30 @@
+# ==============================================================================
+# Cloudflare Tunnel Configuration cho CFC AI / ZeO System
+# Vị trí file mặc định: ~/.cloudflared/config.yml
+# ==============================================================================
+
+tunnel: n8n-dinhduongcantho
+# credentials-file: /Users/hyden/.cloudflared/<TUNNEL_ID>.json  # Thay <TUNNEL_ID> nếu dùng file credentials cục bộ
+
+ingress:
+  # --------------------------------------------------------------------------
+  # 1. n8n Service (Port 5678)
+  # --------------------------------------------------------------------------
+  - hostname: n8n.dinhduongcantho.io.vn
+    service: http://localhost:5678
+
+  # --------------------------------------------------------------------------
+  # 2. Python FastAPI (Port 8000) - Admin Dashboard & AI Chat Pipeline
+  # --------------------------------------------------------------------------
+  # Domain chính cho Admin & API
+  - hostname: dinhduongcantho.io.vn
+    service: http://localhost:8000
+
+  # (Tuỳ chọn) Subdomain riêng cho API nếu muốn phân tách
+  - hostname: api.dinhduongcantho.io.vn
+    service: http://localhost:8000
+
+  # --------------------------------------------------------------------------
+  # 3. Catch-all rule (Bắt buộc phải nằm ở cuối cùng)
+  # --------------------------------------------------------------------------
+  - service: http_status:404

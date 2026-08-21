@@ -15,6 +15,7 @@ Quy trình:
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import unicodedata
@@ -31,6 +32,8 @@ from shopee_matcher import (
     match_shopee_product_reference,
     is_shopee_inquiry,
     is_budget_inquiry,
+    is_price_extreme_inquiry,
+    match_price_extreme,
     match_products_by_budget,
     match_specific_product_price,
     is_bestseller_inquiry,
@@ -49,7 +52,7 @@ from shopee_matcher import (
     is_stain_removal_or_efficacy_inquiry,
     match_stain_removal_or_efficacy,
 )
-from ai_engine import synthesize_cskh_answer, reason_and_answer_cskh
+from ai_engine import synthesize_cskh_answer, reason_and_answer_cskh, plan_chat_intent_with_ollama
 from telegram_notifier import notify_new_lead, notify_admin_unanswered, notify_urgent_complaint
 
 logger = logging.getLogger(__name__)
@@ -61,6 +64,40 @@ _global_lock = asyncio.Lock()
 # In-memory session & customer cache để tránh race-condition giữa các turn liên tiếp
 _local_session_cache: dict[str, dict] = {}
 _local_customer_cache: dict[str, dict] = {}
+
+
+def _llm_nlu_config() -> tuple[str, float, float]:
+    """
+    Cấu hình lớp Ollama NLU planner.
+    Mặc định off để không làm chậm test/eval; bật bằng settings.json hoặc env:
+      LLM_NLU_MODE=assist
+    """
+    mode = os.getenv("LLM_NLU_MODE", "").strip().lower()
+    timeout_raw = os.getenv("LLM_NLU_TIMEOUT", "").strip()
+    threshold_raw = os.getenv("LLM_NLU_CONFIDENCE", "").strip()
+
+    cfg_path = Path(__file__).parent / "settings.json"
+    if cfg_path.exists():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            nlu_cfg = cfg.get("llm_nlu", {}) if isinstance(cfg.get("llm_nlu", {}), dict) else {}
+            mode = mode or str(nlu_cfg.get("mode", "")).strip().lower()
+            timeout_raw = timeout_raw or str(nlu_cfg.get("timeout_seconds", "")).strip()
+            threshold_raw = threshold_raw or str(nlu_cfg.get("min_confidence", "")).strip()
+        except Exception as exc:
+            logger.debug("Không đọc được cấu hình llm_nlu: %s", exc)
+
+    if mode not in {"assist", "off"}:
+        mode = "off"
+    try:
+        timeout = float(timeout_raw)
+    except Exception:
+        timeout = 1.6
+    try:
+        threshold = float(threshold_raw)
+    except Exception:
+        threshold = 0.72
+    return mode, max(0.3, min(timeout, 5.0)), max(0.5, min(threshold, 0.98))
 
 
 async def _get_sender_lock(lock_key: str) -> asyncio.Lock:
@@ -494,6 +531,9 @@ def _looks_like_availability_request(norm_text: str) -> bool:
 
 def _detect_need_choice(norm_text: str) -> Optional[str]:
     """Nhận diện lựa chọn nhu cầu của khách hàng (tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ)."""
+    if re.search(r"\b(cai nao|loai nao|dong nao|san pham nao|biet cai nao|goi y|tu van)\b.*\b(thom|luu huong|mui huong)\b", norm_text):
+        return "thom_lau"
+
     # Nếu câu hỏi dạng 'có ... không' (vd: có thơm lâu không, có sạch không) -> Factual FAQ, không phải chọn nhu cầu
     if re.search(r"\bco\s+.*\s+(khong|hong|ko|k)\b", norm_text):
         return None
@@ -506,7 +546,7 @@ def _detect_need_choice(norm_text: str) -> Optional[str]:
     if re.search(r"\b(nhu cau tiet kiem|tiet kiem|loai re|re nhat|gia re nhat|it tien|kinh te|re tien|tiet kiem tien|re hon|muon re|re nhat di)\b", norm_text):
         return "tiet_kiem"
     # 2. Thơm lâu
-    if re.search(r"\b(nhu cau thom|thom lau|mui nuoc hoa|nuoc hoa|luu huong|thom nhat|mui thom|huong thom|thom nhat di)\b", norm_text):
+    if re.search(r"\b(nhu cau thom|thom lau|thom thom|mui nuoc hoa|nuoc hoa|luu huong|thom nhat|mui thom|huong thom|thom nhat di)\b", norm_text):
         return "thom_lau"
     # 3. Sạch sâu
     if re.search(r"\b(nhu cau sach|sach sau|vet ban|vet ban cung dau|sach manh|tay sach|danh bay vet ban|sach sau di)\b", norm_text):
@@ -515,6 +555,25 @@ def _detect_need_choice(norm_text: str) -> Optional[str]:
     if re.search(r"\b(nhu cau diu|diu nhe|duong da|em be|da tay|da nhay cam|an toan cho da|khong hai da|diu nhe di)\b", norm_text):
         return "diu_nhe"
     return None
+
+
+def _should_try_llm_nlu(norm_text: str, brand: str) -> bool:
+    """Chỉ gọi Ollama NLU cho câu hỏi bán hàng ZeO có khả năng cần tool/catalog."""
+    if brand.lower() != "zeo":
+        return False
+    if len(norm_text.strip()) < 5:
+        return False
+    return bool(re.search(
+        r"\b("
+        r"gia|bao nhieu|mac|dat|cao|re|thap|"
+        r"san pham|sp|link|mua|dat hang|shop|shopee|"
+        r"cai nao|loai nao|dong nao|goi y|tu van|"
+        r"thom|mui huong|luu huong|sach|vet ban|diu nhe|tiet kiem|"
+        r"nuoc giat|bot giat|giat do|nuoc xa|xa vai|rua chen|lau san|tay rua|"
+        r"pano|zeo|oplus|zif|javen"
+        r")\b",
+        norm_text,
+    ))
 
 
 def _active_product_context_key(conversation_state: dict[str, Any], previous_intent: str = "") -> str:
@@ -1784,6 +1843,196 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             _remember_response(multi_res.answer, multi_res.intent, "browsing_catalog")
             return multi_res
 
+        # 0.2. Ollama NLU planner (optional): hiểu câu hỏi tự nhiên -> chọn deterministic tool.
+        llm_nlu_plan: Optional[dict[str, Any]] = None
+        llm_nlu_mode, llm_nlu_timeout, llm_nlu_threshold = _llm_nlu_config()
+        if (
+            llm_nlu_mode == "assist"
+            and not is_return_or_claim
+            and _should_try_llm_nlu(norm_text, brand)
+        ):
+            llm_nlu_plan = await plan_chat_intent_with_ollama(
+                user_query=raw_text,
+                brand=brand,
+                conversation_summary=(
+                    f"previous_intent={previous_intent}; "
+                    f"last_products={json.dumps(conversation_state.get('last_products_shown', [])[:3], ensure_ascii=False)}"
+                ),
+                timeout=llm_nlu_timeout,
+            )
+
+        if llm_nlu_plan and float(llm_nlu_plan.get("confidence", 0.0)) >= llm_nlu_threshold:
+            llm_trace = {
+                "llm_nlu": {
+                    "provider": llm_nlu_plan.get("provider", "ollama"),
+                    "model": llm_nlu_plan.get("model", ""),
+                    "intent": llm_nlu_plan.get("intent", ""),
+                    "confidence": llm_nlu_plan.get("confidence", 0.0),
+                    "sort": llm_nlu_plan.get("sort", ""),
+                    "need_type": llm_nlu_plan.get("need_type", ""),
+                    "category": llm_nlu_plan.get("category", ""),
+                    "product": llm_nlu_plan.get("product", ""),
+                    "reference": bool(llm_nlu_plan.get("reference", False)),
+                    "reason": llm_nlu_plan.get("reason", ""),
+                }
+            }
+            plan_query = raw_text
+            plan_product = str(llm_nlu_plan.get("product", "") or "").strip()
+            plan_category = str(llm_nlu_plan.get("category", "") or "").strip()
+            if plan_product:
+                plan_query = f"{plan_query} {plan_product}"
+            if plan_category:
+                plan_query = f"{plan_query} {plan_category}"
+
+            if llm_nlu_plan.get("intent") == "price_extreme" and llm_nlu_plan.get("sort") in {"highest", "lowest"}:
+                extreme_res = match_price_extreme(plan_query, brand=brand, mode=str(llm_nlu_plan.get("sort")))
+                if extreme_res:
+                    _remember_response(
+                        extreme_res["suggested_reply"],
+                        extreme_res.get("intent", "shopee_price_extreme"),
+                        "browsing_catalog",
+                        score=float(extreme_res.get("score", 0.99)),
+                        trace_extra={
+                            **llm_trace,
+                            "price_extreme": extreme_res.get("price_extreme", ""),
+                            "selected_product_ids": [
+                                str(product.get("item_id", ""))
+                                for product in extreme_res.get("selected_products", [])
+                                if product.get("item_id")
+                            ],
+                            "no_results": bool(extreme_res.get("no_results")),
+                        },
+                        products_shown=extreme_res.get("selected_products", []),
+                    )
+                    return ChatPipelineResponse(
+                        answer=_prettify_answer(extreme_res["suggested_reply"]),
+                        intent=extreme_res.get("intent", "shopee_price_extreme"),
+                        confidence="high",
+                        score=float(extreme_res.get("score", 0.99)),
+                        brand=brand.upper(),
+                        has_phone=has_phone,
+                        phone=phone,
+                        area=area,
+                        lead_stage=lead_stage,
+                        shopee_url=extreme_res.get("shopee_url"),
+                        latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                    )
+
+            if llm_nlu_plan.get("intent") == "budget_filter":
+                budget_res = match_products_by_budget(plan_query, brand=brand)
+                if budget_res:
+                    _remember_response(
+                        budget_res["suggested_reply"],
+                        budget_res.get("intent", "shopee_budget_filter"),
+                        "browsing_catalog",
+                        score=float(budget_res.get("score", 0.98)),
+                        trace_extra={
+                            **llm_trace,
+                            "price_constraint": budget_res.get("price_constraint", {}),
+                            "range_widened": bool(budget_res.get("range_widened")),
+                            "no_results": bool(budget_res.get("no_results")),
+                        },
+                        products_shown=budget_res.get("selected_products", []),
+                    )
+                    return ChatPipelineResponse(
+                        answer=_prettify_answer(budget_res["suggested_reply"]),
+                        intent=budget_res.get("intent", "shopee_budget_filter"),
+                        confidence="high",
+                        score=float(budget_res.get("score", 0.98)),
+                        brand=brand.upper(),
+                        has_phone=has_phone,
+                        phone=phone,
+                        area=area,
+                        lead_stage=lead_stage,
+                        shopee_url=budget_res.get("shopee_url"),
+                        latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                    )
+
+            if llm_nlu_plan.get("intent") == "need_consultation" and llm_nlu_plan.get("need_type"):
+                need_res = match_need_preference(str(llm_nlu_plan.get("need_type")), brand=brand)
+                if need_res:
+                    _remember_response(
+                        need_res["suggested_reply"],
+                        need_res.get("intent", "need_consultation"),
+                        "browsing_catalog",
+                        trace_extra=llm_trace,
+                    )
+                    return ChatPipelineResponse(
+                        answer=_prettify_answer(need_res["suggested_reply"]),
+                        intent=need_res.get("intent", "need_consultation"),
+                        confidence="high",
+                        score=0.98,
+                        brand=brand.upper(),
+                        has_phone=has_phone,
+                        phone=phone,
+                        area=area,
+                        lead_stage=lead_stage,
+                        shopee_url=need_res.get("shopee_url"),
+                        latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                    )
+
+            if llm_nlu_plan.get("intent") == "specific_price":
+                specific_price_res = match_specific_product_price(plan_query, brand=brand, context=conversation_state)
+                if specific_price_res:
+                    price_products = specific_price_res.get("selected_products")
+                    matched_product = specific_price_res.get("matched_product")
+                    if not isinstance(price_products, list) and isinstance(matched_product, dict):
+                        price_products = [matched_product]
+                    _remember_response(
+                        specific_price_res["suggested_reply"],
+                        specific_price_res.get("intent", "specific_product_pricing"),
+                        "browsing_catalog",
+                        trace_extra=llm_trace,
+                        products_shown=price_products if isinstance(price_products, list) else None,
+                    )
+                    return ChatPipelineResponse(
+                        answer=_prettify_answer(specific_price_res["suggested_reply"]),
+                        intent=specific_price_res.get("intent", "specific_product_pricing"),
+                        confidence="high",
+                        score=0.99,
+                        brand=brand.upper(),
+                        has_phone=has_phone,
+                        phone=phone,
+                        area=area,
+                        lead_stage=lead_stage,
+                        shopee_url=specific_price_res.get("shopee_url"),
+                        latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                    )
+
+            if llm_nlu_plan.get("intent") == "product_link":
+                shopee_match = None
+                if llm_nlu_plan.get("reference") or reference_resolution.get("resolved"):
+                    shopee_match = match_shopee_product_reference(reference_resolution, brand=brand)
+                if not shopee_match:
+                    shopee_query = (
+                        reference_resolution.get("resolved_query", plan_query)
+                        if reference_resolution.get("resolved")
+                        else plan_query
+                    )
+                    shopee_match = match_shopee_product(shopee_query, brand=brand)
+                if shopee_match:
+                    matched_product = shopee_match.get("matched_product")
+                    _remember_response(
+                        shopee_match["suggested_reply"],
+                        shopee_match.get("intent", "shopee_product_link"),
+                        "browsing_catalog",
+                        trace_extra=llm_trace,
+                        products_shown=[matched_product] if isinstance(matched_product, dict) else None,
+                    )
+                    return ChatPipelineResponse(
+                        answer=_prettify_answer(shopee_match["suggested_reply"]),
+                        intent=shopee_match.get("intent", "shopee_product_link"),
+                        confidence="high",
+                        score=0.95,
+                        brand=brand.upper(),
+                        has_phone=has_phone,
+                        phone=phone,
+                        area=area,
+                        lead_stage=lead_stage,
+                        shopee_url=shopee_match.get("shopee_url") or shopee_match.get("matched_product", {}).get("shopee_url"),
+                        latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                    )
+
         # 0.5. Tư vấn hiệu quả làm sạch / tẩy vết máu / vết ố / dùng ổn không
         if brand.lower() == "zeo" and is_stain_removal_or_efficacy_inquiry(raw_text) and not is_return_or_claim:
             resolved_text = reference_resolution.get("resolved_query", raw_text)
@@ -1801,6 +2050,40 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                     area=area,
                     lead_stage=lead_stage,
                     shopee_url=stain_res.get("shopee_url"),
+                    latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                )
+
+        # 1. Tầm giá / Ngân sách (vd: dưới 100k, 50k-100k)
+        if brand.lower() == "zeo" and is_price_extreme_inquiry(raw_text) and not is_return_or_claim:
+            extreme_res = match_price_extreme(raw_text, brand=brand)
+            if extreme_res:
+                _remember_response(
+                    extreme_res["suggested_reply"],
+                    extreme_res.get("intent", "shopee_price_extreme"),
+                    "browsing_catalog",
+                    score=float(extreme_res.get("score", 0.99)),
+                    trace_extra={
+                        "price_extreme": extreme_res.get("price_extreme", ""),
+                        "selected_product_ids": [
+                            str(product.get("item_id", ""))
+                            for product in extreme_res.get("selected_products", [])
+                            if product.get("item_id")
+                        ],
+                        "no_results": bool(extreme_res.get("no_results")),
+                    },
+                    products_shown=extreme_res.get("selected_products", []),
+                )
+                return ChatPipelineResponse(
+                    answer=_prettify_answer(extreme_res["suggested_reply"]),
+                    intent=extreme_res.get("intent", "shopee_price_extreme"),
+                    confidence="high",
+                    score=float(extreme_res.get("score", 0.99)),
+                    brand=brand.upper(),
+                    has_phone=has_phone,
+                    phone=phone,
+                    area=area,
+                    lead_stage=lead_stage,
+                    shopee_url=extreme_res.get("shopee_url"),
                     latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
                 )
 
@@ -1863,7 +2146,16 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             resolved_text = reference_resolution.get("resolved_query", raw_text)
             specific_price_res = match_specific_product_price(resolved_text, brand=brand, context=conversation_state)
             if specific_price_res:
-                _remember_response(specific_price_res["suggested_reply"], specific_price_res.get("intent", "specific_product_pricing"), "browsing_catalog")
+                price_products = specific_price_res.get("selected_products")
+                matched_product = specific_price_res.get("matched_product")
+                if not isinstance(price_products, list) and isinstance(matched_product, dict):
+                    price_products = [matched_product]
+                _remember_response(
+                    specific_price_res["suggested_reply"],
+                    specific_price_res.get("intent", "specific_product_pricing"),
+                    "browsing_catalog",
+                    products_shown=price_products if isinstance(price_products, list) else None,
+                )
                 return ChatPipelineResponse(
                     answer=_prettify_answer(specific_price_res["suggested_reply"]),
                     intent=specific_price_res.get("intent", "specific_product_pricing"),

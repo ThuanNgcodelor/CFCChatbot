@@ -101,7 +101,7 @@ Bot không chắc / guardrail fail
 │   │   │   ├── document_ingestor.py     # Nạp tài liệu MD vào Vector Index
 │   │   │   ├── shopee_matcher.py        # Khớp link Shopee Mall khi chat
 │   │   │   ├── telegram_notifier.py     # Bắn thông báo Telegram
-│   │   │   ├── eval_test_suite.py       # Bộ 104 test cases kiểm thử NLU
+│   │   │   ├── eval_test_suite.py       # Bộ 107 test cases kiểm thử NLU
 │   │   │   ├── tests/                   # Unit tests độc lập (PriceConstraint, hard filters)
 │   │   │   ├── settings.json            # File cấu hình API keys
 │   │   │   ├── requirements.txt         # Thư viện Python
@@ -1084,10 +1084,11 @@ ChatbotN8n/javis/server/.venv/bin/python ChatbotN8n/javis/server/eval_test_suite
   - Tự động parse và lọc sản phẩm theo ngân sách / tầm giá (`match_products_by_budget`).
   - Nhận diện và tư vấn đa lượt theo nhu cầu thực tế (`match_need_preference`: tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ).
   - Báo giá realtime và dẫn link Shopee Mall trực tiếp cho sản phẩm đích danh (`match_specific_product_price`).
+  - Có lớp **Ollama NLU Planner** tùy chọn (`llm_nlu.mode=assist`): Ollama chỉ phân loại ý định JSON, sau đó code deterministic mới chọn catalog/giá/link để tránh bịa.
   - Nhận diện Top Bán Chạy / Mới Ra Mắt theo từng nhóm ngành danh mục.
 - **Hiệu năng**: Fast-path deterministic thường ở mức vài ms; full suite ngày 21/08/2026 trung bình 92.9ms/câu do bao gồm nhánh LLM timeout/fallback.
 - **Chống ảo giác tuyệt đối (Zero Hallucination Guardrails)**: Tuyệt đối không bịa giá, tồn kho, liều lượng, hay link kênh bán hàng.
-- **Bộ Kiểm Thử NLU Toàn Diện (Regression Suite)**: Lần xác minh mới nhất đạt **105/105**, cộng thêm 12/12 unit tests (8 PriceConstraint + 4 product-link follow-up).
+- **Bộ Kiểm Thử NLU Toàn Diện (Regression Suite)**: Lần xác minh mới nhất đạt **107/107**, cộng thêm 19/19 unit tests (11 PriceConstraint/price-ranking + 6 product/context follow-up + 2 Ollama NLU planner).
 
 ## 17. Điểm Yếu / Rủi Ro & Trạng Thái Xử Lý
 
@@ -1335,7 +1336,7 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Khách hỏi tẩy sàn / lau sàn (*"có cái nào mà tẩy sàn nhà ko"*, *"xin ít sản phẩm để tẩy sàn nhà đi"*): Bắt đúng nhóm Nước lau sàn ZeO & Oplus đậm đặc 2X.
 
 11. **Kết Quả Đánh Giá NLU Regression Suite**:
-   - Trạng thái mới nhất: **105/105 regression PASS** và **12/12 unit PASS** (8 PriceConstraint + 4 product-link follow-up, 21/08/2026).
+   - Trạng thái mới nhất: **107/107 regression PASS** và **17/17 unit PASS** (11 PriceConstraint/price-ranking + 6 product/context follow-up, 21/08/2026).
 
 ---
 
@@ -1429,14 +1430,20 @@ Ngày cập nhật: **19/08/2026**
 - **Bóc tách câu ghép đa mệnh đề theo dấu câu (`_detect_and_process_multi_intent`)**: Xử lý mượt mà các câu hỏi kép phân tách bởi dấu phẩy, dấu chấm hỏi hoặc liên từ (ví dụ: *"có sản phẩm nào dưới 200k ko nhỉ, có giao về rạch giá đc ko"* -> giải đáp đồng thời cả Phân khúc giá dưới 200k và Chính sách giao hàng về Rạch Giá).
 
 ### 25.7 Kết Quả Đánh Giá NLU Regression Suite Mới Nhất
-- **105/105 Test Cases (100.0% Pass Rate)**:
-  - 12 nhóm kiểm thử đơn lẻ + 10 kịch bản hội thoại đa lượt (Multi-turn Context Memory).
+- **107/107 Test Cases (100.0% Pass Rate)**:
+  - 12 nhóm kiểm thử đơn lẻ + 11 kịch bản hội thoại đa lượt (Multi-turn Context Memory).
   - Case mới xác minh `khoảng 200k -> xin link sản phẩm đó` trả URL sản phẩm trực tiếp, không phải link gian hàng chung.
-- **PriceConstraint unit suite: 8/8 PASS**:
+- **PriceConstraint/price-ranking unit suite: 11/11 PASS**:
   - Comparator, `APPROX`, khoảng giá, triệu/thập phân, strict boundary, hard category, out-of-stock và range widening.
-- **Product-link follow-up unit suite: 4/4 PASS**:
+  - Câu `mắc nhất/đắt nhất/cao nhất` đọc catalog, sort theo giá hiện hành, bỏ hàng hết và không bị context cũ kéo sai.
+- **Product/context follow-up unit suite: 6/6 PASS**:
   - Giữ `product_id`, rank, price snapshot và URL trong `last_products_shown`.
   - Resolve `sản phẩm đó` về đúng record; lookup catalog hiện hành theo `product_id` và fallback exact product name cho session cũ.
+  - Câu hỏi explicit như `Giá nước xả vải ZeO shop ơi` không được dùng nhầm sản phẩm cũ trong context.
+  - Câu nhu cầu `cái nào giặt đồ thơm thơm` được route sang tư vấn thơm lâu thay vì catalog chung.
+- **Ollama NLU planner unit suite: 2/2 PASS**:
+  - Planner dạng JSON có thể route wording khó như `món nào giá chát nhất vậy` vào tool `match_price_extreme(..., mode="highest")`.
+  - Ollama không sinh câu trả lời khách; giá/link vẫn lấy từ Shopee catalog và matcher deterministic.
 
 ---
 
@@ -1466,7 +1473,7 @@ Ngày cập nhật: **19/08/2026**
   2. Bổ sung điều kiện loại trừ từ khóa sỉ (`nhap`, `si`, `dai ly`) tại các nhánh catalog thông thường để không bị bắt nhầm thành hỏi thông tin sản phẩm.
   3. Cá nhân hóa câu trả lời B2B: Tự động trích xuất tên sản phẩm khách muốn nhập (ví dụ: *Oplus Nước rửa chén*) $\rightarrow$ Xác nhận chính sách chiết khấu đại lý tốt, xin Số điện thoại + Khu vực để chuyên viên liên hệ báo giá sỉ, đồng thời cung cấp link Shopee Mall nếu khách muốn mua lẻ trải nghiệm.
 ### 26.5 Kết Quả Kiểm Thử Đạt 100% Pass Rate
-- `eval_test_suite.py`: **105/105 Tests PASS (100.0%)**; có regression budget result -> direct product link.
+- `eval_test_suite.py`: **107/107 Tests PASS (100.0%)**; có regression budget result -> direct product link và mắc nhất -> top price.
 - `run_test_md_scenarios.py`: Tất cả các kịch bản thực tế của người dùng (`--scenario user`, `--scenario user_slot`, `--scenario 01`, `--scenario 02`, `--scenario 03`, `--scenario 26`, `--scenario 27`) đều đạt **100.0% Perfect Pass**.
 
 ### 26.6 Công Thức Kết Hợp Hoàn Hảo: Redis (Bộ Nhớ Dài Hạn) + Ollama (Bộ Não Suy Luận)
@@ -1480,6 +1487,7 @@ Ngày cập nhật: **19/08/2026**
   2. **Ollama Local (Reasoning & Conversational Brain)**:
      - Pipeline hiện truyền `conversation_summary` cho CSKH synthesizer; tham số full `chat_history`/`catalog_products` có trong engine nhưng chưa được cấp ở mọi call site.
      - Tự động suy luận ngữ cảnh: Giải mã đại từ (*"cái số 2"*, *"loại đó"*), hiểu hành động chọn danh mục sau khi xem catalog (*"nước giặt"*, *"số 1"*), nhận diện ý định mua sỉ/đại lý (*"cần nhập nước rửa chén oplus loại 400g"*).
+     - Lớp NLU planner tùy chọn (`llm_nlu.mode=assist` hoặc env `LLM_NLU_MODE=assist`) gọi Ollama local để trả JSON intent/tool cho các câu bán hàng khó hiểu; pipeline chỉ áp dụng khi confidence đạt ngưỡng và matcher deterministic trả được kết quả.
      - Sinh câu trả lời chuẩn văn phong CSKH 5 sao, trung thực 100% theo dữ liệu thực tế và tự động lọc bỏ icon rác/sến súa.
   3. **Cơ chế Fallback thông minh đa tầng**:
      - CSKH synthesizer ưu tiên `Ollama Local`, sau đó theo provider list của `generate_ai_text`; deterministic facts/fallback vẫn là lớp bảo vệ cuối.
@@ -1501,9 +1509,10 @@ Ngày cập nhật: **19/08/2026**
 Acceptance đã xác minh:
 
 ```text
-PriceConstraint unit tests:      8/8 PASS
-Product-link follow-up tests:    4/4 PASS
-NLU regression suite:          105/105 PASS
+Price/ranking unit tests:       11/11 PASS
+Product/context follow-up tests: 6/6 PASS
+Ollama NLU planner tests:        2/2 PASS
+NLU regression suite:          107/107 PASS
 GET /health:                Redis OK, Ollama OK, bge-m3 available
 API khoảng 200k:            grounded result + widened disclosure
 API dưới 200k + nước giặt:  đúng category, mọi giá < 200.000đ
@@ -1514,6 +1523,10 @@ Redis trace:                APPROX target=200000 + product IDs
 
 - **Đã hoàn thành lát cắt product-link**: `last_products_shown` lưu `product_id`, rank, category, price snapshot, URL và timestamp cho kết quả budget.
 - **Đã hoàn thành lát cắt product-link**: resolve `sản phẩm đó` về `product_id`, lookup catalog mới nhất trước khi trả link; session cũ fallback exact product name.
+- **Đã sửa stale-context pricing**: câu mới có category rõ ràng như `nước xả vải` trở thành hard filter trong báo giá, không cho `active_entities`/`last_products_shown` cũ làm lệch sang sản phẩm trước đó.
+- **Đã sửa short need detection**: câu kiểu `cái nào giặt đồ thơm thơm` được hiểu là nhu cầu `thơm lâu`.
+- **Đã thêm price-ranking intent**: câu kiểu `sản phẩm nào mắc nhất`, `giá cái nào mắc nhất`, `đắt nhất/cao nhất` trả top sản phẩm theo giá từ Shopee catalog, không rơi về catalog overview hoặc sản phẩm đầu tiên trong context.
+- **Đã thêm Ollama NLU planner tùy chọn**: câu wording khó có thể được Ollama phân loại JSON rồi chuyển sang tool deterministic; mặc định `off`, bật bằng `llm_nlu.mode=assist` hoặc `LLM_NLU_MODE=assist`.
 - Tiếp theo: mở rộng cùng cơ chế cho `cái số N/nó/loại đó` ở giá, tồn kho và các danh sách catalog khác; bổ sung source version bắt buộc.
 - Thêm `last_query.price_constraint`, `turn_seq` và `session_version`.
 - Critical conversational state dùng write-through/versioned update; transcript/analytics tiếp tục async.
@@ -1532,6 +1545,7 @@ Gate: `RangeViolationRate = 0`, Recall@K/MRR tăng và p95 không suy giảm đ�
 
 ### Phase 4 — Ollama Structured Fallback & Grounding Validator
 
+- **Đã có lát cắt đầu tiên**: `plan_chat_intent_with_ollama()` trả JSON schema cho `price_extreme`, `budget_filter`, `product_link`, `need_consultation`, `specific_price`, `unknown`; pipeline chỉ cho planner chọn tool, không cho trả text trực tiếp.
 - Rule parser xử lý comparator/số; Ollama JSON Schema chỉ fallback cho câu khó hoặc confidence thấp.
 - Validator đối chiếu `product_id`, price, stock, URL và source version trước khi phát câu trả lời.
 - Nếu validation fail: deterministic fallback + learning queue, không tự sửa fact bằng LLM.

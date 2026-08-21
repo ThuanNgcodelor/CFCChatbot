@@ -11,6 +11,12 @@
     "embed_dim": 1024,
     "fallback_embed_model": "qwen2.5:7b-instruct"
   },
+  "llm_nlu": {
+    "mode": "off",
+    "model": "qwen2.5:7b-instruct",
+    "timeout_seconds": 1.6,
+    "min_confidence": 0.72
+  },
   "rag": {
     "top_k": 5,
     "high_confidence_threshold": 0.78,

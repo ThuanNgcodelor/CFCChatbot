@@ -11,10 +11,11 @@ if str(SERVER_DIR) not in sys.path:
 from chat_pipeline import (  # noqa: E402
     _build_next_conversation_state,
     _default_conversation_state,
+    _detect_need_choice,
     _normalize_vn,
     _resolve_reference,
 )
-from shopee_matcher import match_shopee_product_reference  # noqa: E402
+from shopee_matcher import match_shopee_product_reference, match_specific_product_price  # noqa: E402
 
 
 class ProductLinkFollowupTests(unittest.TestCase):
@@ -82,6 +83,39 @@ class ProductLinkFollowupTests(unittest.TestCase):
             result = match_shopee_product_reference(resolved, brand="zeo")
         self.assertEqual(result["product_id"], "43672853910")
         self.assertEqual(result["shopee_url"], self.product["link_shopee"])
+
+    def test_explicit_price_query_does_not_reuse_stale_product_context(self):
+        fabric_softener = {
+            "item_id": "56612838999",
+            "name": "Nước xả vải Nano Clean ZeO Hương hoa trắng xạ hương",
+            "brand": "ZeO",
+            "category": "Nước xả vải",
+            "price": 83200,
+            "original_price": 128000,
+            "discount": "0.35",
+            "keywords": ["nước xả vải", "nano clean", "zeo"],
+            "variants": ["ZeO"],
+            "link_shopee": "https://shopee.vn/product/20523065/56612838999",
+            "in_stock": True,
+        }
+        context = {
+            "active_entities": {"product": self.product["name"], "category": "Nước giặt"},
+            "last_products_shown": [self.product],
+            "last_bot_reply": self.product["name"],
+        }
+        with patch("shopee_matcher.load_shopee_catalog", return_value=[self.product, fabric_softener]):
+            result = match_specific_product_price("Giá nước xả vải zeo shop ơi", brand="zeo", context=context)
+
+        self.assertIsNotNone(result)
+        self.assertIn("Nước xả vải", result["suggested_reply"])
+        self.assertIn("56612838999", result["shopee_url"])
+        self.assertNotIn("Combo 4 nước giặt", result["suggested_reply"])
+
+    def test_fragrant_laundry_recommendation_is_detected_as_need_choice(self):
+        self.assertEqual(
+            _detect_need_choice(_normalize_vn("Vậy có biết cái nào giặt đồ nó thơm thơm ko nhỉ")),
+            "thom_lau",
+        )
 
 
 if __name__ == "__main__":

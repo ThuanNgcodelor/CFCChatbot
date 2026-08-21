@@ -55,6 +55,7 @@ TEST_CASES = [
     {"q": "Cho xin link nước lau sàn", "category": "purchase", "expected_intent": "shopee_product_link"},
     {"q": "Giá bao nhiêu?", "category": "pricing", "expected_intent": "zeo_price_inquiry_general"},
     {"q": "Nước giặt giá bao nhiêu tiền 1 can?", "category": "pricing", "expected_intent": "zeo_price_inquiry_general"},
+    {"q": "sản phẩm nào mắc nhất nhỉ", "category": "pricing", "expected_intent": "shopee_price_extreme"},
 
     # ─── 5. TÍNH NĂNG, CÔNG NGHỆ & CHỨNG NHẬN ───
     {"q": "Bột giặt ZeO dùng công nghệ gì?", "category": "tech", "expected_intent": "zeo_detergent_technology"},
@@ -225,6 +226,19 @@ MULTI_TURN_CASES = [
             },
         ],
     },
+    {
+        "name": "zeo_catalog_then_most_expensive_price",
+        "brand": "zeo",
+        "turns": [
+            {"q": "sản phẩm nào mắc nhất nhỉ", "expected_intent": "shopee_price_extreme"},
+            {
+                "q": "giá cái nào mắc nhất",
+                "expected_intent": "shopee_price_extreme",
+                "expect_answer_contains": "681.812",
+                "expect_answer_not_contains": "147.582",
+            },
+        ],
+    },
 ]
 
 
@@ -305,6 +319,12 @@ async def run_eval():
                     "https://shopee.vn/cfccobay",
                 }
                 matched = matched and bool(res.shopee_url) and res.shopee_url not in general_store_urls
+            # pyrefly: ignore [missing-attribute]
+            if turn.get("expect_answer_contains"):
+                matched = matched and str(turn["expect_answer_contains"]) in res.answer
+            # pyrefly: ignore [missing-attribute]
+            if turn.get("expect_answer_not_contains"):
+                matched = matched and str(turn["expect_answer_not_contains"]) not in res.answer
             case_passed = case_passed and matched
             print(
                 f"   Turn {turn_idx}: {'✅' if matched else '❌'} "

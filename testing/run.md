@@ -19,6 +19,23 @@ source .venv/bin/activate
 python main.py
 # Mở trình duyệt truy cập Admin Dashboard: http://localhost:8000/admin
 
+
+# Bật Ollama NLU Planner để test câu hỏi tự nhiên khó hiểu hơn.
+# Ollama chỉ phân loại intent JSON; giá/link vẫn lấy từ catalog deterministic.
+cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis/server
+source .venv/bin/activate
+export LLM_NLU_MODE=assist
+export LLM_NLU_TIMEOUT=1.6
+export LLM_NLU_CONFIDENCE=0.72
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+
+# Smoke test nên chạy sau khi bật LLM_NLU_MODE=assist:
+# 1) shop ơi món nào giá chát nhất vậy
+# 2) cho xin link sản phẩm đó
+# 3) giá nước xả vải zeo shop ơi
+# 4) vậy có biết cái nào giặt đồ nó thơm thơm ko nhỉ
+
 docker exec -it zeo-redis redis-cli -a "crS9Lb7f/ywrTCiRP22gc32QCLZpirWIkczbnhjYIdU1o02Z"
 
 

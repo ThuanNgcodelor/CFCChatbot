@@ -11,6 +11,8 @@ if str(SERVER_DIR) not in sys.path:
 from shopee_matcher import (  # noqa: E402
     PriceOperator,
     is_budget_inquiry,
+    is_price_extreme_inquiry,
+    match_price_extreme,
     match_products_by_budget,
     parse_price_constraint,
 )
@@ -106,6 +108,35 @@ class ProductBudgetFilterTests(unittest.TestCase):
         result = self.search("nước giặt khoảng 200k", catalog=catalog)
         self.assertTrue(result["range_widened"])
         self.assertEqual(result["selected_products"][0]["item_id"], "P245")
+
+
+class PriceExtremeTests(unittest.TestCase):
+    def setUp(self):
+        self.catalog = [
+            {"item_id": "LOW", "name": "Gói dùng thử", "brand": "ZeO", "category": "Nước xả vải", "price": 17_100, "in_stock": True, "link_shopee": "https://shopee.vn/low"},
+            {"item_id": "MID", "name": "Combo đang xem", "brand": "PANO", "category": "Nước giặt", "price": 147_582, "in_stock": True, "link_shopee": "https://shopee.vn/mid"},
+            {"item_id": "MAX", "name": "Thùng nước giặt Pano Active 6 túi", "brand": "PANO", "category": "Nước giặt", "price": 681_812, "in_stock": True, "link_shopee": "https://shopee.vn/max"},
+            {"item_id": "OLD_MAX", "name": "Hết hàng mắc nhất", "brand": "PANO", "category": "Nước giặt", "price": 900_000, "in_stock": False, "link_shopee": "https://shopee.vn/old-max"},
+        ]
+
+    def test_detects_highest_price_queries(self):
+        self.assertTrue(is_price_extreme_inquiry("sản phẩm nào mắc nhất nhỉ"))
+        self.assertTrue(is_price_extreme_inquiry("giá cái nào đắt nhất"))
+        self.assertTrue(is_price_extreme_inquiry("giá cao nhất là sản phẩm nào"))
+
+    def test_highest_price_uses_catalog_not_stale_context(self):
+        with patch("shopee_matcher.load_shopee_catalog", return_value=self.catalog):
+            result = match_price_extreme("giá cái nào mắc nhất", brand="zeo")
+        self.assertEqual(result["intent"], "shopee_price_extreme")
+        self.assertEqual(result["matched_product"]["item_id"], "MAX")
+        self.assertIn("681.812đ", result["suggested_reply"])
+        self.assertNotIn("OLD_MAX", [p["item_id"] for p in result["selected_products"]])
+
+    def test_highest_price_respects_category(self):
+        with patch("shopee_matcher.load_shopee_catalog", return_value=self.catalog):
+            result = match_price_extreme("nước xả vải mắc nhất", brand="zeo")
+        self.assertEqual(result["matched_product"]["item_id"], "LOW")
+        self.assertIn("Nước xả vải", result["suggested_reply"])
 
 
 if __name__ == "__main__":

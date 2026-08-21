@@ -388,6 +388,95 @@ def is_budget_inquiry(text: str) -> bool:
     return parse_price_constraint(text) is not None
 
 
+def is_price_extreme_inquiry(text: str) -> bool:
+    folded = _fold(text)
+    return bool(re.search(
+        r"\b(mac nhat|dat nhat|cao nhat|gia cao nhat|gia mac nhat|gia dat nhat|"
+        r"re nhat|gia re nhat|thap nhat|gia thap nhat)\b",
+        folded,
+    ))
+
+
+def match_price_extreme(query: str, brand: str = "zeo", mode: Optional[str] = None) -> Optional[dict]:
+    """Trả sản phẩm có giá cao nhất/thấp nhất từ Shopee catalog hiện hành."""
+    folded = _fold(query)
+    target_category = _detect_category_from_text(query)
+    forced_mode = (mode or "").strip().lower()
+    is_lowest = forced_mode == "lowest" or bool(re.search(r"\b(re nhat|gia re nhat|thap nhat|gia thap nhat)\b", folded))
+    is_highest = forced_mode == "highest" or bool(re.search(r"\b(mac nhat|dat nhat|cao nhat|gia cao nhat|gia mac nhat|gia dat nhat)\b", folded))
+    if not (is_lowest or is_highest):
+        return None
+
+    catalog = load_shopee_catalog(brand=brand)
+    if not catalog:
+        return None
+
+    brand_upper = brand.upper()
+    candidates = []
+    for item in catalog:
+        item_brand = str(item.get("brand", "")).upper()
+        if not (item_brand == brand_upper or (brand_upper == "ZEO" and item_brand in ["ZEO", "PANO", "OPLUS"])):
+            continue
+        if not item.get("in_stock", True):
+            continue
+        if target_category and item.get("category") != target_category:
+            continue
+        try:
+            product = dict(item)
+            product["_price_num"] = int(str(item.get("price", 0)).replace(".", "").replace(",", ""))
+            candidates.append(product)
+        except Exception:
+            continue
+
+    if not candidates:
+        category_text = f" trong nhóm **{target_category}**" if target_category else ""
+        reply = (
+            f"Dạ hiện mình chưa tìm thấy sản phẩm còn hàng{category_text} để so sánh giá. "
+            "Bạn muốn mình gợi ý theo nhóm nước giặt, rửa chén, lau sàn hay tẩy rửa không ạ?"
+        )
+        return {
+            "matched": True,
+            "intent": "shopee_price_extreme_no_result",
+            "confidence": "high",
+            "score": 0.98,
+            "suggested_reply": reply,
+            "selected_products": [],
+            "no_results": True,
+        }
+
+    candidates.sort(key=lambda item: item["_price_num"], reverse=is_highest)
+    selected = candidates[:3]
+    mode_label = "mắc nhất" if is_highest else "rẻ nhất"
+    category_text = f" trong nhóm **{target_category}**" if target_category else ""
+
+    lines = []
+    for index, product in enumerate(selected, start=1):
+        price_str = _format_price(product.get("price"))
+        original_str = _format_price(product.get("original_price"))
+        discount_str = _format_discount(product.get("discount", ""))
+        discount_text = f" (Giảm {discount_str} từ giá gốc {original_str})" if discount_str else ""
+        url = product.get("link_shopee") or product.get("shopee_url") or "https://shopee.vn/zeovietnamofficial"
+        lines.append(f"{index}. **{product['name']}** — Giá ưu đãi: **{price_str}**{discount_text}\n   👉 {url}")
+
+    reply = (
+        f"Dạ sản phẩm **{mode_label}**{category_text} hiện đang có trong Shopee catalog của ZeO là:\n\n"
+        f"{chr(10).join(lines)}\n\n"
+        "Giá có thể thay đổi theo voucher/sàn, bạn bấm link để xem ưu đãi mới nhất nha."
+    )
+    return {
+        "matched": True,
+        "intent": "shopee_price_extreme",
+        "confidence": "high",
+        "score": 0.99,
+        "product_name": selected[0].get("name"),
+        "shopee_url": selected[0].get("link_shopee") or selected[0].get("shopee_url"),
+        "suggested_reply": reply,
+        "matched_product": selected[0],
+        "selected_products": selected,
+        "price_extreme": "highest" if is_highest else "lowest",
+    }
+
+
 def match_products_by_budget(query: str, brand: str = "zeo") -> Optional[dict]:
     """Lọc và gợi ý các sản phẩm phù hợp nhất trong khoảng giá người dùng yêu cầu."""
     constraint = parse_price_constraint(query)
@@ -671,6 +760,7 @@ def match_specific_product_price(query: str, brand: str = "zeo", context: Option
     if "]" in user_part:
         user_part = user_part.split("]", 1)[-1]
     user_part = re.sub(r"\bgia re\b", "", user_part)
+    target_category = _detect_category_from_text(user_part)
 
     # Loại trừ câu hỏi về tính năng / hiệu quả làm sạch / tẩy vết bẩn / dùng ổn không
     if re.search(r"\b(tay duoc|tay sach|vet mau|vet o|vet ban|dung on|dung tot|co tot|co sach|co tay|on ko|on khong|tay trang|thom ko|thanh phan|cong dung|huong dan|cach dung|di ung|an da tay)\b", user_part):
@@ -687,8 +777,17 @@ def match_specific_product_price(query: str, brand: str = "zeo", context: Option
     if not has_price_ask:
         return None
 
-    # Nếu câu hỏi có quy cách/dung tích nhưng thiếu tên nhóm (vd: "can 3.8kg giá bao nhiêu"), bổ sung từ ngữ cảnh
-    if context and isinstance(context, dict):
+    explicit_product_terms = [
+        "rua chen", "rua bat", "bot giat", "nuoc giat", "lau san", "toilet", "bon cau",
+        "javel", "javen", "tay mau", "xa vai", "nuoc xa", "lau kinh", "treo xe", "tinh dau",
+        "vitamin e", "nha dam", "cam chanh", "oai huong", "tao dua", "bio enzyme", "2in1",
+        "nano clean", "pano", "oplus", "zif",
+    ]
+    has_explicit_product_in_user_text = bool(target_category) or any(k in user_part for k in explicit_product_terms)
+
+    # Chỉ bổ sung ngữ cảnh khi câu hỏi thiếu định danh sản phẩm, ví dụ "can 3.8kg giá bao nhiêu".
+    # Nếu khách đã nêu rõ "nước xả vải"/"nước rửa chén", context cũ không được làm lệch matching.
+    if context and isinstance(context, dict) and not has_explicit_product_in_user_text:
         active_entities = context.get("active_entities")
         if isinstance(active_entities, list):
             query_folded = query_folded + " " + " ".join(_fold(e) for e in active_entities)
@@ -735,6 +834,45 @@ def match_specific_product_price(query: str, brand: str = "zeo", context: Option
     ]
     if not brand_products:
         brand_products = catalog
+    if target_category:
+        brand_products = [
+            p for p in brand_products
+            if p.get("category") == target_category and p.get("in_stock", True)
+        ]
+        if not brand_products:
+            return None
+
+        has_specific_variant = bool(re.search(
+            r"\b(combo|goi|can|chai|tui|hop)\b|nano clean|"
+            r"\b(300g|400g|720g|750g|1kg|1\.8kg|2\.4kg|2\.7kg|3\.5kg|3\.8kg|5\.5kg|9kg|650ml|1000ml)\b",
+            user_part,
+        ))
+        if len(brand_products) > 1 and not has_specific_variant:
+            lines = []
+            for idx, product in enumerate(brand_products[:3], start=1):
+                price_str = _format_price(product.get("price"))
+                orig_str = _format_price(product.get("original_price"))
+                d_str = _format_discount(product.get("discount", ""))
+                disc_text = f" (Giảm {d_str})" if d_str else ""
+                url = product.get("link_shopee") or product.get("shopee_url") or "https://shopee.vn/zeovietnamofficial"
+                lines.append(f"{idx}. **{product['name']}** — Giá ưu đãi: **{price_str}**{disc_text}\n   👉 {url}")
+
+            reply = (
+                f"Dạ nhóm **{target_category}** của ZeO hiện có các lựa chọn chính hãng trên Shopee Mall:\n\n"
+                f"{chr(10).join(lines)}\n\n"
+                "Giá có thể thay đổi theo voucher/sàn, bạn bấm link để xem ưu đãi mới nhất nha."
+            )
+            return {
+                "matched": True,
+                "intent": "specific_product_pricing",
+                "confidence": "high",
+                "score": 0.99,
+                "product_name": target_category,
+                "shopee_url": brand_products[0].get("link_shopee") or brand_products[0].get("shopee_url"),
+                "suggested_reply": reply,
+                "matched_product": brand_products[0],
+                "selected_products": brand_products[:3],
+            }
 
     best_match = None
     highest_score = 0
@@ -1350,6 +1488,12 @@ def match_shopee_product(query: str, brand: str = "zeo") -> Optional[dict]:
         stain_res = match_stain_removal_or_efficacy(query, brand=brand)
         if stain_res:
             return stain_res
+
+    # 1. Kiểm tra hỏi tầm giá / ngân sách
+    if is_price_extreme_inquiry(query):
+        extreme_res = match_price_extreme(query, brand=brand)
+        if extreme_res:
+            return extreme_res
 
     # 1. Kiểm tra hỏi tầm giá / ngân sách
     if is_budget_inquiry(query):

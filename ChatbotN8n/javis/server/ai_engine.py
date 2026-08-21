@@ -14,7 +14,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Optional, List
 
 import httpx
 from shopee_matcher import _fold
@@ -209,6 +209,119 @@ async def call_ollama(
     except Exception as e:
         logger.warning("Lỗi khi gọi Ollama Local: %s", e)
     return None
+
+
+def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
+    """Parse object JSON từ phản hồi LLM, chịu được ```json fence hoặc text bao quanh."""
+    if not text:
+        return None
+    cleaned = text.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.S | re.I)
+    if fenced:
+        cleaned = fenced.group(1).strip()
+    else:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            cleaned = cleaned[start:end + 1]
+    try:
+        obj = json.loads(cleaned)
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+async def plan_chat_intent_with_ollama(
+    user_query: str,
+    brand: str,
+    conversation_summary: str = "",
+    timeout: float = 1.6,
+) -> Optional[dict[str, Any]]:
+    """
+    Dùng Ollama local như NLU planner: chỉ trả JSON intent/tool, không sinh câu trả lời khách.
+    Tool deterministic/catalog vẫn là source of truth cho giá, link và sản phẩm.
+    """
+    cfg = _load_settings()
+    nlu_cfg = cfg.get("llm_nlu", {}) if isinstance(cfg.get("llm_nlu", {}), dict) else {}
+    ollama_cfg = cfg.get("ollama", {}) if isinstance(cfg.get("ollama", {}), dict) else {}
+    model = (
+        nlu_cfg.get("model")
+        or ollama_cfg.get("chat_model")
+        or ollama_cfg.get("fallback_embed_model")
+        or "qwen2.5:7b-instruct"
+    )
+
+    system_prompt = """Bạn là bộ phân loại ý định NLU cho chatbot bán hàng ZeO.
+NHIỆM VỤ: đọc tin nhắn khách và xuất đúng 1 JSON object. Không trả lời khách, không giải thích, không markdown.
+Các intent hợp lệ:
+- price_extreme: khách hỏi sản phẩm mắc nhất/đắt nhất/cao nhất hoặc rẻ nhất/thấp nhất.
+- budget_filter: khách hỏi sản phẩm theo ngân sách/khoảng giá.
+- product_link: khách xin link/mua sản phẩm cụ thể hoặc sản phẩm đã nhắc trước đó.
+- need_consultation: khách cần gợi ý theo nhu cầu như thơm lâu, tiết kiệm, sạch sâu, dịu nhẹ.
+- specific_price: khách hỏi giá của sản phẩm hoặc nhóm sản phẩm cụ thể.
+- unknown: không đủ chắc.
+Schema bắt buộc:
+{"intent":"unknown","confidence":0.0,"sort":"","need_type":"","category":"","product":"","reference":false,"reason":""}
+Quy tắc:
+- confidence từ 0 đến 1.
+- sort chỉ dùng "highest" hoặc "lowest" cho price_extreme.
+- need_type chỉ dùng "thom_lau", "tiet_kiem", "sach_sau", "diu_nhe".
+- reference=true nếu có đại từ như "sản phẩm đó", "cái đó", "loại hồi nãy", "số 1".
+- Không tự tạo giá, link, tên sản phẩm mới."""
+
+    prompt = f"""Brand: {brand}
+Lịch sử ngắn: {conversation_summary or "(không có)"}
+Tin nhắn khách: {user_query}
+
+Chỉ xuất JSON object đúng schema."""
+
+    try:
+        raw = await asyncio.wait_for(
+            call_ollama(prompt, system_prompt=system_prompt, model=model, temperature=0.0),
+            timeout=timeout,
+        )
+    except Exception as exc:
+        logger.debug("Ollama NLU planner timeout/error: %s", exc)
+        return None
+
+    obj = _extract_json_object(raw or "")
+    if not obj:
+        return None
+
+    allowed_intents = {
+        "price_extreme", "budget_filter", "product_link",
+        "need_consultation", "specific_price", "unknown",
+    }
+    intent = str(obj.get("intent", "unknown")).strip().lower()
+    if intent not in allowed_intents:
+        intent = "unknown"
+
+    try:
+        confidence = float(obj.get("confidence", 0.0))
+    except Exception:
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+
+    sort = str(obj.get("sort", "")).strip().lower()
+    if sort not in {"highest", "lowest"}:
+        sort = ""
+
+    need_type = str(obj.get("need_type", "")).strip().lower()
+    if need_type not in {"thom_lau", "tiet_kiem", "sach_sau", "diu_nhe"}:
+        need_type = ""
+
+    return {
+        "intent": intent,
+        "confidence": confidence,
+        "sort": sort,
+        "need_type": need_type,
+        "category": str(obj.get("category", "")).strip()[:80],
+        "product": str(obj.get("product", "")).strip()[:160],
+        "reference": bool(obj.get("reference", False)),
+        "reason": str(obj.get("reason", "")).strip()[:160],
+        "provider": "ollama",
+        "model": model,
+    }
 
 
 async def generate_ai_text(
@@ -589,4 +702,3 @@ Hãy soạn câu trả lời CSKH 5 sao hoàn chỉnh gửi cho khách:"""
         logger.warning("CSKH Agent synthesis error or timeout (%s): %s", brand, e)
 
     return None
-

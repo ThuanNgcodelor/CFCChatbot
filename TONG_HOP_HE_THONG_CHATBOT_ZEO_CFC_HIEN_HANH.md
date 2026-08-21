@@ -1647,3 +1647,21 @@ Các lỗi từ transcript thực tế đã được khóa bằng code và test:
 Ollama được đặt đúng vai trò **NLU planner**, không phải nguồn sự thật. Kết quả planner phải đi qua deterministic matcher/Sheet/Redis trước khi trả khách. Nếu Ollama timeout, JSON sai hoặc confidence thấp, luồng cũ tiếp tục hoạt động.
 
 Smoke test live đã chạy trên worker tạm `127.0.0.1:8001` với Redis và Ollama thật: health pass, Redis có 52 sản phẩm ZeO, bảy lượt hội thoại trọng yếu đều trả HTTP 200 và đúng intent. Worker `:8001` đã được dừng sau test.
+
+---
+
+## 30. Bộ Case Trình Diễn Cho Quản Lý Khó Tính
+
+File kiểm thử thủ công:
+
+```text
+testing/KICH_BAN_TEST_SEP_KHO_TINH_ZEO.md
+```
+
+Bộ test được chia thành:
+
+- Nhóm A gồm 8 kịch bản nên pass trước khi demo: ràng buộc giá/deep-link, mắc nhất toàn catalog, nước xả không stale context, chọn nhóm số 3, đổi trả có typo, privacy, multi-intent và chống bịa khi thiếu dữ liệu.
+- Nhóm B gồm 5 stress test cần chạy trước khi trình diễn: prompt injection, ép tồn kho realtime, điều kiện mâu thuẫn, an toàn hóa chất và phục hồi sau khi khách công kích.
+- Có tiêu chí PASS/FAIL, lỗi nghiêm trọng, bảng ghi kết quả và ngưỡng go/no-go trước buổi demo.
+
+Giá, sản phẩm và link trong bộ test không đóng đinh theo snapshot cũ; người test phải đối chiếu catalog hiện hành tại thời điểm chạy.

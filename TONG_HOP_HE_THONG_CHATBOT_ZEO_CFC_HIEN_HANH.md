@@ -1,6 +1,6 @@
 # Tổng Hợp Hệ Thống Chatbot ZeO / CFC Hiện Hành
 
-Ngày cập nhật: 2026-08-21 (P0 PriceConstraint + Numeric Hard Filter + 100% Regression)
+Ngày cập nhật: 2026-08-21 (Structured Product Memory + Ollama NLU Planner + 100% Regression)
 Phạm vi: `ChatbotN8n/javis/`, `ChatbotN8n/workflows/local-n8n/`, dữ liệu Google Sheet/CSV, Redis, Ollama, RAG và các file vận hành liên quan.
 
 Tài liệu này thay cho file tóm tắt cũ `TOM_TAT_HE_THONG_CHATBOT_ZEO_CFC_CHO_GPT.md`. File cũ không bị xóa để giữ lịch sử, nhưng khi cần phân tích hoặc nâng cấp hệ thống thì nên dùng tài liệu này.
@@ -21,7 +21,7 @@ Nguyên tắc vận hành:
 - Không tự bịa giá, tồn kho, liều lượng, chứng nhận, địa chỉ đại lý, link kênh bán hàng.
 - Câu không chắc phải fallback rõ ràng (`FallbackReason`), hỏi rõ hơn, lưu learning queue hoặc chuyển admin.
 - Python FastAPI là não xử lý duy nhất (Single Brain Architecture). n8n đóng vai trò I/O adapter nhận/gửi Messenger và trigger webhook.
-- Tốc độ xử lý trung bình đạt **~7ms/câu** (In-Memory Hot Knowledge Cache + Lexical Fast-Path).
+- Kết quả offline regression gần nhất đạt trung bình **2,9ms/câu**; latency thực tế trên Messenger còn phụ thuộc n8n, Ollama, Redis, mạng và Facebook Graph API.
 
 ## 2. Kiến Trúc Tổng Quan
 
@@ -30,14 +30,18 @@ Facebook Messenger
 → n8n chatbot workflow (I/O Gateway)
 → Python FastAPI /api/chat-pipeline (Single Brain)
   ├── Per-Sender Lock (Tuần tự hóa tin nhắn, chống race condition)
-  ├── Profile Recall Fast-Path (Cách ly 100% khỏi FAQ RAG)
-  ├── In-Memory Hot Knowledge Cache (< 1ms O(1) Lookup)
-  ├── Lexical & Hybrid Semantic RAG (< 5ms)
+  ├── Redis/RAM Conversation State + Structured Product Memory
+  ├── Deterministic Router/Tools (giá, link, tồn kho, safety, CRM)
+  ├── Ollama NLU Planner tùy chọn (chỉ trả JSON intent/tool)
+  ├── Lexical & Hybrid Semantic RAG khi chưa có fast-path phù hợp
+  ├── Grounded CSKH Synthesizer (chỉ viết lại facts đã truy xuất)
   ├── Covered Fact Exclusion (Loại trừ fact cũ khi khách hỏi follow-up)
   └── Guardrails & Granular Fallback Classification
-→ Redis session/customer/profile/vector
+→ ChatPipelineResponse có answer/intent/score/link/trace
 → Trả answer về n8n → Messenger
 ```
+
+Sơ đồ báo cáo và prompt tạo hình dùng ngay được đặt tại `SO_DO_WORKFLOW_CHATBOT_ZEO_CFC_CHO_BAO_CAO.md`.
 
 Luồng đồng bộ kiến thức:
 
@@ -129,6 +133,7 @@ Bot không chắc / guardrail fail
 ├── stop_all.sh
 ├── test.md
 ├── BAO_CAO_TRIEN_KHAI_CHATBOT_ZEO_CFC.md
+├── SO_DO_WORKFLOW_CHATBOT_ZEO_CFC_CHO_BAO_CAO.md
 └── TONG_HOP_HE_THONG_CHATBOT_ZEO_CFC_HIEN_HANH.md
 ```
 
@@ -542,7 +547,7 @@ Ollama chạy local:
 http://127.0.0.1:11434
 ```
 
-Model chính:
+Model embedding chính:
 
 ```text
 bge-m3
@@ -559,7 +564,12 @@ Model rewrite fallback trong cấu hình:
 qwen2.5:7b-instruct
 ```
 
-Rewrite chỉ được dùng để viết lại câu trả lời đã có dữ liệu. Không được dùng để tự sáng tác fact.
+Vai trò của model chat:
+
+- `plan_chat_intent_with_ollama()` có thể phân loại câu khó thành JSON intent/tool. `shadow` chỉ ghi nhận dự đoán để đối chiếu; `assist` mới được phép chọn deterministic tool. Mặc định vẫn `off` để không đổi hành vi cũ.
+- Planner không được trả giá, link hay tên sản phẩm trực tiếp; matcher deterministic phải đọc catalog thật rồi mới tạo kết quả.
+- Grounded synthesizer chỉ được viết lại facts đã truy xuất thành văn phong CSKH. Không được tự sáng tác fact.
+- Nếu Ollama timeout, JSON lỗi, confidence thấp hoặc tool không tìm được dữ liệu, pipeline tiếp tục deterministic/RAG/fallback hiện hành.
 
 ## 8. n8n Workflows Trong `local-n8n`
 
@@ -831,7 +841,10 @@ Messenger
 → n8n LocDauVao
 → FastAPI /api/chat-pipeline
 → chat_pipeline đọc Redis profile/session
-→ intent router hoặc RAG
+→ resolve context/reference
+→ deterministic tool hoặc Ollama NLU planner tùy chọn
+→ RAG chỉ khi chưa có route chắc chắn
+→ guardrail/grounding
 → trả ChatPipelineResponse
 → n8n PrepareMessengerReply
 → Facebook Send Message
@@ -846,26 +859,29 @@ Messenger
 4. Đọc Redis customer + session
 5. Load conversation_state
 6. Resolve reference: "nó", "cái thứ 2", "loại đó"
-7. Fast path:
+7. Multi-intent + fast path:
    - số điện thoại
    - hỏi lại thông tin đã lưu
    - chào/cảm ơn/ok
    - complaint
-8. Intent-first router:
+8. Nếu bật `assist`, Ollama NLU planner chỉ đề xuất JSON intent/tool cho câu bán hàng khó; confidence thấp thì bỏ qua
+9. Intent-first deterministic router:
    - out-of-scope
    - company/address/contact
    - website/social
    - product/catalog
-   - price
+   - budget/specific price/price ranking
+   - product link và follow-up `sản phẩm đó`
    - shipping
    - usage/dosage safety
    - contextual follow-up
-9. Shopee matcher nếu hỏi link mua
-10. RAG semantic search nếu chưa bắt được intent
-11. Guardrail theo intent/category/risk
-12. Fallback trung thực nếu score thấp
-13. Lưu session/history/trace
-14. Trả answer
+10. Shopee matcher/catalog tool trả product_id, giá, link và tồn kho đã kiểm chứng
+11. RAG lexical/semantic search nếu chưa bắt được intent chắc chắn
+12. Grounded synthesizer (nếu cần) chỉ viết lại facts đã có
+13. Guardrail theo intent/category/risk
+14. Fallback trung thực nếu score thấp
+15. Lưu session/history/trace và `last_products_shown`
+16. Trả answer
 ```
 
 ### 9.3 Response model
@@ -1084,11 +1100,11 @@ ChatbotN8n/javis/server/.venv/bin/python ChatbotN8n/javis/server/eval_test_suite
   - Tự động parse và lọc sản phẩm theo ngân sách / tầm giá (`match_products_by_budget`).
   - Nhận diện và tư vấn đa lượt theo nhu cầu thực tế (`match_need_preference`: tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ).
   - Báo giá realtime và dẫn link Shopee Mall trực tiếp cho sản phẩm đích danh (`match_specific_product_price`).
-  - Có lớp **Ollama NLU Planner** tùy chọn (`llm_nlu.mode=assist`): Ollama chỉ phân loại ý định JSON, sau đó code deterministic mới chọn catalog/giá/link để tránh bịa.
+  - Có lớp **Ollama NLU Planner** tùy chọn (`off`/`shadow`/`assist`): Ollama chỉ phân loại ý định JSON, sau đó code deterministic mới chọn catalog/giá/link để tránh bịa.
   - Nhận diện Top Bán Chạy / Mới Ra Mắt theo từng nhóm ngành danh mục.
-- **Hiệu năng**: Fast-path deterministic thường ở mức vài ms; full suite ngày 21/08/2026 trung bình 92.9ms/câu do bao gồm nhánh LLM timeout/fallback.
+- **Hiệu năng**: Fast-path deterministic thường ở mức vài ms; lần offline regression gần nhất ngày 21/08/2026 trung bình 2,9ms/câu trong điều kiện fallback local.
 - **Chống ảo giác tuyệt đối (Zero Hallucination Guardrails)**: Tuyệt đối không bịa giá, tồn kho, liều lượng, hay link kênh bán hàng.
-- **Bộ Kiểm Thử NLU Toàn Diện (Regression Suite)**: Lần xác minh mới nhất đạt **107/107**, cộng thêm 19/19 unit tests (11 PriceConstraint/price-ranking + 6 product/context follow-up + 2 Ollama NLU planner).
+- **Bộ Kiểm Thử NLU Toàn Diện (Regression Suite)**: Lần xác minh mới nhất đạt **112/112**, cộng thêm 26/26 unit tests (11 PriceConstraint/price-ranking + 6 product/context follow-up + 2 Ollama NLU planner + 7 conversation guards).
 
 ## 17. Điểm Yếu / Rủi Ro & Trạng Thái Xử Lý
 
@@ -1336,7 +1352,7 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Khách hỏi tẩy sàn / lau sàn (*"có cái nào mà tẩy sàn nhà ko"*, *"xin ít sản phẩm để tẩy sàn nhà đi"*): Bắt đúng nhóm Nước lau sàn ZeO & Oplus đậm đặc 2X.
 
 11. **Kết Quả Đánh Giá NLU Regression Suite**:
-   - Trạng thái mới nhất: **107/107 regression PASS** và **17/17 unit PASS** (11 PriceConstraint/price-ranking + 6 product/context follow-up, 21/08/2026).
+   - Trạng thái mới nhất: **112/112 regression PASS** và **26/26 unit PASS** (11 PriceConstraint/price-ranking + 6 product/context follow-up + 2 Ollama NLU planner + 7 conversation guards, 21/08/2026).
 
 ---
 
@@ -1430,8 +1446,8 @@ Ngày cập nhật: **19/08/2026**
 - **Bóc tách câu ghép đa mệnh đề theo dấu câu (`_detect_and_process_multi_intent`)**: Xử lý mượt mà các câu hỏi kép phân tách bởi dấu phẩy, dấu chấm hỏi hoặc liên từ (ví dụ: *"có sản phẩm nào dưới 200k ko nhỉ, có giao về rạch giá đc ko"* -> giải đáp đồng thời cả Phân khúc giá dưới 200k và Chính sách giao hàng về Rạch Giá).
 
 ### 25.7 Kết Quả Đánh Giá NLU Regression Suite Mới Nhất
-- **107/107 Test Cases (100.0% Pass Rate)**:
-  - 12 nhóm kiểm thử đơn lẻ + 11 kịch bản hội thoại đa lượt (Multi-turn Context Memory).
+- **112/112 Test Cases (100.0% Pass Rate)**:
+  - 98 câu đơn lẻ + 14 kịch bản hội thoại đa lượt (Multi-turn Context Memory).
   - Case mới xác minh `khoảng 200k -> xin link sản phẩm đó` trả URL sản phẩm trực tiếp, không phải link gian hàng chung.
 - **PriceConstraint/price-ranking unit suite: 11/11 PASS**:
   - Comparator, `APPROX`, khoảng giá, triệu/thập phân, strict boundary, hard category, out-of-stock và range widening.
@@ -1447,16 +1463,17 @@ Ngày cập nhật: **19/08/2026**
 
 ---
 
-## 26. Chuyển Đổi Sang Kiến Trúc LLM-First Agentic RAG (Trí Tuệ Nhân Tạo Thuần Thục)
+## 26. Kiến Trúc Hybrid Agentic RAG Có Kiểm Soát
 
-Ngày cập nhật: **19/08/2026**
+Ngày cập nhật: **21/08/2026**
 
 ### 26.1 Nguyên Tắc Vận Hành Mới
 - **Trạng thái thực tế 21/08/2026**: Pipeline là kiến trúc hybrid có kiểm soát, không phải LLM-only. Numeric constraint, an toàn, complaint, CRM và các intent rõ ràng tiếp tục dùng deterministic router; LLM chỉ tổng hợp facts hoặc hỗ trợ nhánh confidence thấp.
 - **Phân định ranh giới rõ ràng**:
   1. **Data Layer (Code/Redis/Sheet)**: Đóng vai trò là công cụ cung cấp sự thật (Data/Tool Provider) — nạp Bảng giá thực, Danh mục Shopee, Kiến thức FAQ từ Google Sheet vào Vector Index (`bge-m3`).
-  2. **Reasoning Layer (`reason_and_answer_cskh` trong `ai_engine.py`)**: Đóng vai trò là Não bộ tư duy duy nhất — đọc lịch sử hội thoại 3-5 lượt gần nhất, bóc tách đại từ tham chiếu (*"cái số 2"*, *"loại đó"*, *"hồi nãy"*), phân tích câu hỏi kép và đối chiếu với Facts để sinh câu trả lời CSKH 5 sao.
-  3. **Guardrail Layer**: Giữ lại 2 bộ lọc an toàn bất biến: Bắt SĐT/Địa chỉ lưu CRM Lead và Bắt sự cố hàng bể vỡ khẩn cấp bắn Telegram Admin.
+  2. **Decision Layer (`chat_pipeline.py`)**: Điều phối deterministic router, reference resolution, structured product memory, catalog matcher, optional Ollama NLU planner và RAG theo độ chắc chắn.
+  3. **Language Layer (`ai_engine.py`)**: Ollama có thể phân loại intent dạng JSON hoặc viết lại facts thành câu CSKH; không được tự quyết định giá/link/tồn kho ngoài tool result.
+  4. **Guardrail Layer**: Chặn unsupported facts, xử lý SĐT/địa chỉ CRM Lead, khiếu nại khẩn cấp và fallback/learning queue.
 - **Lợi ích vận hành**: Cập nhật dữ liệu trong schema hiện có có thể phản ánh qua sync mà không sửa code; operator, policy hoặc hành vi nghiệp vụ mới vẫn phải qua test và có thể cần thay đổi parser/router.
 
 ### 26.2 Khắc Phục Lỗi Phản Hồi Câu Ngắn & Nhớ Ngữ Cảnh Chọn Nhóm (Short-Query & Slot-Filling Context)
@@ -1473,7 +1490,7 @@ Ngày cập nhật: **19/08/2026**
   2. Bổ sung điều kiện loại trừ từ khóa sỉ (`nhap`, `si`, `dai ly`) tại các nhánh catalog thông thường để không bị bắt nhầm thành hỏi thông tin sản phẩm.
   3. Cá nhân hóa câu trả lời B2B: Tự động trích xuất tên sản phẩm khách muốn nhập (ví dụ: *Oplus Nước rửa chén*) $\rightarrow$ Xác nhận chính sách chiết khấu đại lý tốt, xin Số điện thoại + Khu vực để chuyên viên liên hệ báo giá sỉ, đồng thời cung cấp link Shopee Mall nếu khách muốn mua lẻ trải nghiệm.
 ### 26.5 Kết Quả Kiểm Thử Đạt 100% Pass Rate
-- `eval_test_suite.py`: **107/107 Tests PASS (100.0%)**; có regression budget result -> direct product link và mắc nhất -> top price.
+- `eval_test_suite.py`: **112/112 Tests PASS (100.0%)**; gồm regression budget result -> direct product link, mắc nhất -> top price, privacy, nước xả lấy từ Shopee, ngữ cảnh đổi trả và chọn nhóm số 3.
 - `run_test_md_scenarios.py`: Tất cả các kịch bản thực tế của người dùng (`--scenario user`, `--scenario user_slot`, `--scenario 01`, `--scenario 02`, `--scenario 03`, `--scenario 26`, `--scenario 27`) đều đạt **100.0% Perfect Pass**.
 
 ### 26.6 Công Thức Kết Hợp Hoàn Hảo: Redis (Bộ Nhớ Dài Hạn) + Ollama (Bộ Não Suy Luận)
@@ -1487,7 +1504,7 @@ Ngày cập nhật: **19/08/2026**
   2. **Ollama Local (Reasoning & Conversational Brain)**:
      - Pipeline hiện truyền `conversation_summary` cho CSKH synthesizer; tham số full `chat_history`/`catalog_products` có trong engine nhưng chưa được cấp ở mọi call site.
      - Tự động suy luận ngữ cảnh: Giải mã đại từ (*"cái số 2"*, *"loại đó"*), hiểu hành động chọn danh mục sau khi xem catalog (*"nước giặt"*, *"số 1"*), nhận diện ý định mua sỉ/đại lý (*"cần nhập nước rửa chén oplus loại 400g"*).
-     - Lớp NLU planner tùy chọn (`llm_nlu.mode=assist` hoặc env `LLM_NLU_MODE=assist`) gọi Ollama local để trả JSON intent/tool cho các câu bán hàng khó hiểu; pipeline chỉ áp dụng khi confidence đạt ngưỡng và matcher deterministic trả được kết quả.
+     - Lớp NLU planner tùy chọn hỗ trợ `off`, `shadow`, `assist`. Ollama local chỉ trả JSON intent/tool; pipeline chỉ áp dụng kế hoạch ở `assist`, khi confidence đạt ngưỡng và matcher deterministic trả được kết quả.
      - Sinh câu trả lời chuẩn văn phong CSKH 5 sao, trung thực 100% theo dữ liệu thực tế và tự động lọc bỏ icon rác/sến súa.
   3. **Cơ chế Fallback thông minh đa tầng**:
      - CSKH synthesizer ưu tiên `Ollama Local`, sau đó theo provider list của `generate_ai_text`; deterministic facts/fallback vẫn là lớp bảo vệ cuối.
@@ -1512,7 +1529,8 @@ Acceptance đã xác minh:
 Price/ranking unit tests:       11/11 PASS
 Product/context follow-up tests: 6/6 PASS
 Ollama NLU planner tests:        2/2 PASS
-NLU regression suite:          107/107 PASS
+Conversation guard tests:       7/7 PASS
+NLU regression suite:          112/112 PASS
 GET /health:                Redis OK, Ollama OK, bge-m3 available
 API khoảng 200k:            grounded result + widened disclosure
 API dưới 200k + nước giặt:  đúng category, mọi giá < 200.000đ
@@ -1526,7 +1544,11 @@ Redis trace:                APPROX target=200000 + product IDs
 - **Đã sửa stale-context pricing**: câu mới có category rõ ràng như `nước xả vải` trở thành hard filter trong báo giá, không cho `active_entities`/`last_products_shown` cũ làm lệch sang sản phẩm trước đó.
 - **Đã sửa short need detection**: câu kiểu `cái nào giặt đồ thơm thơm` được hiểu là nhu cầu `thơm lâu`.
 - **Đã thêm price-ranking intent**: câu kiểu `sản phẩm nào mắc nhất`, `giá cái nào mắc nhất`, `đắt nhất/cao nhất` trả top sản phẩm theo giá từ Shopee catalog, không rơi về catalog overview hoặc sản phẩm đầu tiên trong context.
-- **Đã thêm Ollama NLU planner tùy chọn**: câu wording khó có thể được Ollama phân loại JSON rồi chuyển sang tool deterministic; mặc định `off`, bật bằng `llm_nlu.mode=assist` hoặc `LLM_NLU_MODE=assist`.
+- **Đã thêm Ollama NLU planner tùy chọn**: câu wording khó có thể được Ollama phân loại JSON. Mặc định `off`; `shadow` dùng để quan sát không đổi quyết định, `assist` mới cho phép chuyển sang tool deterministic.
+- **Đã thêm return-flow state**: các lượt `Trả hàng` -> `Liên hệ sao để trả hàng` -> câu typo `Điện có tốn phí không` tiếp tục bám chính sách đổi trả, không trôi sang phí giao hàng.
+- **Đã sửa catalog nước xả**: câu `Mua nước xả`, `Có nước xả ko`, `Xả vải ZeO` ưu tiên Shopee catalog thật và trả đúng Nano Clean ZeO cùng link sản phẩm; FAQ cũ nói chưa có đã được thay thế.
+- **Đã thêm privacy guard**: không tra cứu/cung cấp thông tin khách hàng khác theo tên qua chatbot công khai.
+- **Đã sửa availability false-positive**: `có sản phẩm` không còn bị hiểu thành `có sẵn`; vì vậy `Cái số 3 có sản phẩm nào thế` mở đúng nhóm lau sàn.
 - Tiếp theo: mở rộng cùng cơ chế cho `cái số N/nó/loại đó` ở giá, tồn kho và các danh sách catalog khác; bổ sung source version bắt buộc.
 - Thêm `last_query.price_constraint`, `turn_seq` và `session_version`.
 - Critical conversational state dùng write-through/versioned update; transcript/analytics tiếp tục async.
@@ -1545,7 +1567,7 @@ Gate: `RangeViolationRate = 0`, Recall@K/MRR tăng và p95 không suy giảm đ�
 
 ### Phase 4 — Ollama Structured Fallback & Grounding Validator
 
-- **Đã có lát cắt đầu tiên**: `plan_chat_intent_with_ollama()` trả JSON schema cho `price_extreme`, `budget_filter`, `product_link`, `need_consultation`, `specific_price`, `unknown`; pipeline chỉ cho planner chọn tool, không cho trả text trực tiếp.
+- **Đã có lát cắt đầu tiên**: `plan_chat_intent_with_ollama()` trả JSON schema cho price/budget/link, product search/availability, chọn nhóm catalog, tư vấn nhu cầu, đổi trả, privacy, clarification và unknown; pipeline không cho planner trả text trực tiếp.
 - Rule parser xử lý comparator/số; Ollama JSON Schema chỉ fallback cho câu khó hoặc confidence thấp.
 - Validator đối chiếu `product_id`, price, stock, URL và source version trước khi phát câu trả lời.
 - Nếu validation fail: deterministic fallback + learning queue, không tự sửa fact bằng LLM.
@@ -1567,3 +1589,61 @@ Gate: `UnsupportedClaimRate = 0` cho giá/tồn kho/link và clarification rate 
 ```
 
 Chế độ này không mở public tunnel, không `pkill`; chỉ khởi động/tái sử dụng Redis, Ollama và FastAPI local, chờ readiness rồi chạy unit + API price smoke tests. Chế độ `--background` không còn tự dừng process cũ theo pattern rộng; chỉ ghi PID của process do lần chạy hiện tại tạo.
+
+---
+
+## 28. Sơ Đồ Workflow Dùng Cho Báo Cáo Và Tạo Hình
+
+File nguồn:
+
+```text
+SO_DO_WORKFLOW_CHATBOT_ZEO_CFC_CHO_BAO_CAO.md
+```
+
+File này gồm:
+
+- Mermaid flowchart của luồng tin nhắn Messenger từ khách đến n8n, Python FastAPI, Redis/Ollama/RAG rồi trả về khách.
+- Mermaid flowchart của luồng đồng bộ Google Sheet/Shopee Catalog vào Redis snapshot và vector index.
+- Mermaid flowchart của learning queue khi bot thiếu dữ liệu hoặc guardrail fail.
+- Prompt tiếng Việt đầy đủ và prompt rút gọn để đưa trực tiếp vào ChatGPT/Image Generator tạo infographic 16:9 cho báo cáo.
+- Checklist kiểm tra hình để tránh mô tả sai vai trò của n8n, Python, Ollama và RAG.
+
+Luồng một dòng dùng trong slide:
+
+```text
+Khách nhắn Messenger
+→ n8n nhận/lọc tin
+→ Python FastAPI đọc memory và chọn deterministic tool / Ollama NLU / RAG
+→ grounding + guardrail
+→ n8n gửi Facebook Graph API
+→ khách nhận câu trả lời
+```
+
+Trạng thái xác minh ngày 21/08/2026:
+
+```text
+Unit tests:       26/26 PASS
+Regression eval: 112/112 PASS, trung bình 2,9ms/câu trong offline test
+FastAPI /health: service OK, Redis OK, Ollama OK, bge-m3 available (isolated worker :8001)
+Vector indexes:   zeo:vec:faq, cfc:vec:faq
+```
+
+Lưu ý: số `2,9ms/câu` chỉ đo phần pipeline trong bộ offline regression; không đại diện tổng thời gian Messenger → n8n → Facebook Graph API ngoài thực tế.
+
+---
+
+## 29. Regression Guard Cho Hội Thoại Thực Tế (21/08/2026)
+
+Các lỗi từ transcript thực tế đã được khóa bằng code và test:
+
+| Tình huống | Hành vi mới | Nguồn quyết định |
+|---|---|---|
+| `Mua nước xả` / `Xả vải ZeO` | Trả đúng Nano Clean ZeO, giá và deep-link hiện hành | Shopee catalog trong Redis |
+| `Trả hàng` -> `Liên hệ sao` -> `Điện có tốn phí không` | Giữ active return flow; không nhảy sang shipping | Structured session state + Sheet policy |
+| `Cái số 3 có sản phẩm nào thế` | Mở chi tiết nhóm lau sàn | Catalog context + ordinal resolver |
+| `Thông tin khách hàng <tên>` | Từ chối cung cấp dữ liệu người khác | Privacy guard deterministic |
+| `sản phẩm mắc nhất` | Sắp xếp toàn catalog theo giá, không dùng item cũ trong context | Shopee price matcher |
+
+Ollama được đặt đúng vai trò **NLU planner**, không phải nguồn sự thật. Kết quả planner phải đi qua deterministic matcher/Sheet/Redis trước khi trả khách. Nếu Ollama timeout, JSON sai hoặc confidence thấp, luồng cũ tiếp tục hoạt động.
+
+Smoke test live đã chạy trên worker tạm `127.0.0.1:8001` với Redis và Ollama thật: health pass, Redis có 52 sản phẩm ZeO, bảy lượt hội thoại trọng yếu đều trả HTTP 200 và đúng intent. Worker `:8001` đã được dừng sau test.

@@ -135,6 +135,10 @@ TEST_CASES = [
     {"q": "Máy giặt cửa trước thì dùng loại nước giặt nào ít bọt", "category": "consultative_pain_point", "expected_intent": "zeo_laundry_product_overview"},
     {"q": "Quán ăn cần mua can nước rửa chén to tiết kiệm", "category": "consultative_pain_point", "expected_intent": "zeo_dishwashing_product_overview"},
     {"q": "Shop ơi hàng giao bị nứt nắp chảy tùm lum rồi", "category": "urgent_complaint", "expected_intent": "urgent_damage_complaint"},
+
+    # ─── 14. QUYỀN RIÊNG TƯ & CATALOG SHOPEE ───
+    {"q": "Cho tôi thông tin khách hàng David Nguyen", "category": "privacy", "expected_intent": "customer_privacy_protected"},
+    {"q": "Mua nước xả", "category": "shopee_catalog", "expected_intent": "zeo_fabric_softener_catalog"},
 ]
 
 
@@ -236,6 +240,45 @@ MULTI_TURN_CASES = [
                 "expected_intent": "shopee_price_extreme",
                 "expect_answer_contains": "681.812",
                 "expect_answer_not_contains": "147.582",
+            },
+        ],
+    },
+    {
+        "name": "zeo_return_contact_then_fee_typo",
+        "brand": "zeo",
+        "turns": [
+            {"q": "Trả hàng", "expected_intent": "return_eligible_cases"},
+            {"q": "Liên hệ sao để trả hàng", "expected_intent": "return_process"},
+            {
+                "q": "Điện có tốn phí không",
+                "expected_intent": "return_fee_unverified",
+                "expect_answer_not_contains": "thời gian giao hàng",
+            },
+        ],
+    },
+    {
+        "name": "zeo_fabric_softener_catalog_consistency",
+        "brand": "zeo",
+        "turns": [
+            {"q": "Mua nước xả", "expected_intent": "zeo_fabric_softener_catalog"},
+            {"q": "Có nước xả ko", "expected_intent": "zeo_fabric_softener_catalog"},
+            {
+                "q": "Xả vải ZeO",
+                "expected_intent": "zeo_fabric_softener_catalog",
+                "expect_answer_contains": "Nano Clean",
+                "expect_answer_not_contains": "Tẩy Màu",
+            },
+        ],
+    },
+    {
+        "name": "zeo_catalog_group_three_products",
+        "brand": "zeo",
+        "turns": [
+            {"q": "Có sp gì vậy shop", "expected_intent": "zeo_product_catalog_overview"},
+            {
+                "q": "Cái số 3 có sản phẩm nào thế",
+                "expected_intent": "zeo_floor_cleaner_product_overview",
+                "expect_answer_not_contains": "tồn kho",
             },
         ],
     },

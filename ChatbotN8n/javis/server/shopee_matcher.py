@@ -42,6 +42,13 @@ def _format_price(price: Any) -> str:
         return str(price or "Ưu đãi")
 
 
+def _price_number(price: Any) -> int:
+    try:
+        return int(str(price).replace(".", "").replace(",", "").replace("đ", "").strip())
+    except Exception:
+        return 0
+
+
 def _format_discount(disc: Any) -> str:
     s = str(disc or "").strip()
     if not s or s in ("0", "0%", "0.0"):
@@ -1389,6 +1396,96 @@ def is_shopee_inquiry(text: str) -> bool:
         "mua o dau", "mua o cho nao", "mua tai dau", "dat online o dau", "dat tren mang o dau"
     ]
     return any(t in folded for t in triggers)
+
+
+def is_fabric_softener_inquiry(text: str) -> bool:
+    """Nhận diện hỏi/mua/tìm nước xả vải độc lập, không lẫn nước giặt xả 2in1."""
+    folded = _fold(text)
+    return bool(re.search(r"\b(nuoc xa vai|nuoc xa|xa vai|fabric softener)\b", folded))
+
+
+def match_fabric_softener_products(query: str, brand: str = "zeo") -> Optional[dict]:
+    """Trả danh mục nước xả từ catalog hiện hành, ưu tiên dữ liệu bán hàng hơn FAQ cũ."""
+    if brand.lower() != "zeo" or not is_fabric_softener_inquiry(query):
+        return None
+
+    folded = _fold(query)
+    catalog = load_shopee_catalog(brand=brand)
+    candidates = []
+    for product in catalog:
+        name_folded = _fold(product.get("name", ""))
+        category_folded = _fold(product.get("category", ""))
+        if not product.get("in_stock", True):
+            continue
+        if "nuoc xa vai" not in category_folded and "nuoc xa vai" not in name_folded:
+            continue
+        candidates.append(product)
+
+    requested_subbrand = ""
+    for subbrand in ("oplus", "pano", "zeo"):
+        if re.search(rf"\b{subbrand}\b", folded):
+            requested_subbrand = subbrand
+            break
+
+    if requested_subbrand:
+        exact_brand = [
+            product for product in candidates
+            if _fold(product.get("brand", "")) == requested_subbrand
+        ]
+        if exact_brand:
+            candidates = exact_brand
+        elif requested_subbrand in {"oplus", "pano"}:
+            return {
+                "matched": True,
+                "intent": "fabric_softener_brand_unavailable",
+                "confidence": "high",
+                "score": 0.99,
+                "selected_products": [],
+                "suggested_reply": (
+                    f"Dạ trong Shopee catalog hiện hành, mình chưa thấy nước xả vải riêng của {requested_subbrand.title()} còn bán. "
+                    "Hiện catalog có dòng Nước xả vải Nano Clean ZeO; bạn có muốn mình gửi sản phẩm và link chính hãng không ạ?"
+                ),
+                "shopee_url": None,
+            }
+
+    if not candidates:
+        return {
+            "matched": True,
+            "intent": "fabric_softener_catalog_empty",
+            "confidence": "high",
+            "score": 0.99,
+            "selected_products": [],
+            "suggested_reply": (
+                "Dạ hiện Shopee catalog chưa có sản phẩm nước xả vải còn hàng để mình giới thiệu chính xác. "
+                "Mình không tự đoán sản phẩm; admin sẽ kiểm tra lại catalog giúp bạn nha."
+            ),
+            "shopee_url": None,
+        }
+
+    candidates.sort(key=lambda product: (_price_number(product.get("price")), str(product.get("name", ""))))
+    selected = candidates[:3]
+    lines = []
+    for index, product in enumerate(selected, start=1):
+        url = product.get("link_shopee") or product.get("shopee_url") or ""
+        line = f"{index}. **{product.get('name', 'Nước xả vải ZeO')}** — {_format_price(product.get('price'))}"
+        if url:
+            line += f"\n👉 {url}"
+        lines.append(line)
+
+    return {
+        "matched": True,
+        "intent": "zeo_fabric_softener_catalog",
+        "confidence": "high",
+        "score": 0.99,
+        "matched_product": selected[0],
+        "selected_products": selected,
+        "shopee_url": selected[0].get("link_shopee") or selected[0].get("shopee_url"),
+        "suggested_reply": (
+            "Dạ có nha bạn. Shopee catalog hiện có các sản phẩm nước xả vải ZeO sau:\n\n"
+            + "\n\n".join(lines)
+            + "\n\nBạn muốn dạng gói dùng thử hay can lớn để mình tư vấn đúng loại ạ?"
+        ),
+    }
 
 
 def _product_link_result(product: dict, brand: str) -> dict:

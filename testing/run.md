@@ -20,17 +20,18 @@ python main.py
 # Mở trình duyệt truy cập Admin Dashboard: http://localhost:8000/admin
 
 
-# Bật Ollama NLU Planner để test câu hỏi tự nhiên khó hiểu hơn.
+# Test Ollama NLU Planner an toàn: shadow chỉ ghi trace, không đổi quyết định trả lời.
 # Ollama chỉ phân loại intent JSON; giá/link vẫn lấy từ catalog deterministic.
 cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis/server
 source .venv/bin/activate
-export LLM_NLU_MODE=assist
+export LLM_NLU_MODE=shadow
 export LLM_NLU_TIMEOUT=1.6
 export LLM_NLU_CONFIDENCE=0.72
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 
-# Smoke test nên chạy sau khi bật LLM_NLU_MODE=assist:
+# Smoke test nên chạy ở shadow trước. Chỉ đổi thành LLM_NLU_MODE=assist
+# sau khi regression pass và trace cho thấy planner đủ chính xác.
 # 1) shop ơi món nào giá chát nhất vậy
 # 2) cho xin link sản phẩm đó
 # 3) giá nước xả vải zeo shop ơi

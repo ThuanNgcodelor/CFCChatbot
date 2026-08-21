@@ -257,8 +257,15 @@ Các intent hợp lệ:
 - price_extreme: khách hỏi sản phẩm mắc nhất/đắt nhất/cao nhất hoặc rẻ nhất/thấp nhất.
 - budget_filter: khách hỏi sản phẩm theo ngân sách/khoảng giá.
 - product_link: khách xin link/mua sản phẩm cụ thể hoặc sản phẩm đã nhắc trước đó.
+- product_search: khách hỏi có/bán/mua một loại sản phẩm cụ thể.
+- product_availability: khách hỏi còn hàng, hết hàng hoặc tồn kho.
+- catalog_group_select: khách chọn nhóm/số thứ tự từ danh mục vừa được giới thiệu.
 - need_consultation: khách cần gợi ý theo nhu cầu như thơm lâu, tiết kiệm, sạch sâu, dịu nhẹ.
 - specific_price: khách hỏi giá của sản phẩm hoặc nhóm sản phẩm cụ thể.
+- return_process: khách hỏi cách liên hệ, các bước hoặc hồ sơ đổi trả.
+- return_fee: khách hỏi đổi/trả có tốn phí không.
+- customer_privacy: khách yêu cầu thông tin của một khách hàng/người khác.
+- clarification: câu bị typo hoặc thiếu dữ kiện cần hỏi lại.
 - unknown: không đủ chắc.
 Schema bắt buộc:
 {"intent":"unknown","confidence":0.0,"sort":"","need_type":"","category":"","product":"","reference":false,"reason":""}
@@ -290,7 +297,9 @@ Chỉ xuất JSON object đúng schema."""
 
     allowed_intents = {
         "price_extreme", "budget_filter", "product_link",
-        "need_consultation", "specific_price", "unknown",
+        "product_search", "product_availability", "catalog_group_select",
+        "need_consultation", "specific_price", "return_process", "return_fee",
+        "customer_privacy", "clarification", "unknown",
     }
     intent = str(obj.get("intent", "unknown")).strip().lower()
     if intent not in allowed_intents:

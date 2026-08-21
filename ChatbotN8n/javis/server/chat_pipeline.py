@@ -51,6 +51,8 @@ from shopee_matcher import (
     match_front_load_washer,
     is_stain_removal_or_efficacy_inquiry,
     match_stain_removal_or_efficacy,
+    is_fabric_softener_inquiry,
+    match_fabric_softener_products,
 )
 from ai_engine import synthesize_cskh_answer, reason_and_answer_cskh, plan_chat_intent_with_ollama
 from telegram_notifier import notify_new_lead, notify_admin_unanswered, notify_urgent_complaint
@@ -69,8 +71,9 @@ _local_customer_cache: dict[str, dict] = {}
 def _llm_nlu_config() -> tuple[str, float, float]:
     """
     Cấu hình lớp Ollama NLU planner.
-    Mặc định off để không làm chậm test/eval; bật bằng settings.json hoặc env:
-      LLM_NLU_MODE=assist
+    Mặc định off để không làm chậm test/eval; hỗ trợ:
+      LLM_NLU_MODE=shadow  # chỉ ghi trace, không đổi câu trả lời
+      LLM_NLU_MODE=assist  # cho phép planner chọn deterministic tool
     """
     mode = os.getenv("LLM_NLU_MODE", "").strip().lower()
     timeout_raw = os.getenv("LLM_NLU_TIMEOUT", "").strip()
@@ -87,7 +90,7 @@ def _llm_nlu_config() -> tuple[str, float, float]:
         except Exception as exc:
             logger.debug("Không đọc được cấu hình llm_nlu: %s", exc)
 
-    if mode not in {"assist", "off"}:
+    if mode not in {"assist", "shadow", "off"}:
         mode = "off"
     try:
         timeout = float(timeout_raw)
@@ -128,6 +131,16 @@ AREA_KEYWORDS = [
 SENSITIVE_KEYWORDS = [
     "hoan tien", "doi tra", "khieu nai", "lua dao", "san pham loi", "hang gia", "tai khoan ngan hang", "chuyen khoan", "so tai khoan"
 ]
+
+RETURN_CONTEXT_INTENTS = {
+    "return_eligible_cases",
+    "return_policy_scope",
+    "return_process",
+    "return_claim_deadlines",
+    "return_resolution_options",
+    "refund_processing_time",
+    "return_fee_unverified",
+}
 
 ZEO_COMPETITOR_PRODUCT_PATTERNS = [
     r"\bomo\b", r"\bariel\b", r"\btide\b", r"\bsurf\b", r"\baba\b", r"\blix\b", r"\bnet\b", r"\bdowny\b", r"\bcomfort\b",
@@ -307,6 +320,7 @@ def _default_conversation_state(brand: str) -> dict[str, Any]:
         },
         "last_products_shown": [],
         "customer_constraints": {},
+        "active_flow": {"name": "", "stage": ""},
         "covered_fact_ids": [],
         "recent_turns": [],
         "conversation_summary": "",
@@ -341,6 +355,8 @@ def _load_conversation_state(existing_session: dict, brand: str) -> dict[str, An
         state["last_products_shown"] = []
     if not isinstance(state.get("customer_constraints"), dict):
         state["customer_constraints"] = {}
+    if not isinstance(state.get("active_flow"), dict):
+        state["active_flow"] = {"name": "", "stage": ""}
     if not isinstance(state.get("covered_fact_ids"), list):
         state["covered_fact_ids"] = []
     if not isinstance(state.get("recent_turns"), list):
@@ -525,8 +541,52 @@ def _looks_like_shipping_request(norm_text: str) -> bool:
 
 def _looks_like_availability_request(norm_text: str) -> bool:
     return _has_any(norm_text, [
-        r"(con hang|het hang|con khong|con hong|con ko|co san|ton kho|het chua|con nua khong|con nua hong)",
+        r"(con hang|het hang|con khong|con hong|con ko|co san hang|co san khong|co san hong|co san ko|ton kho|het chua|con nua khong|con nua hong)",
     ])
+
+
+def _detect_third_party_customer_lookup(norm_text: str) -> bool:
+    """Chặn tra cứu khách theo tên; chỉ profile của chính sender_id được phép recall."""
+    if re.search(r"\b(cua toi|cua minh|cua em|cua anh|cua chi)\b", norm_text):
+        return False
+    return _has_any(norm_text, [
+        r"\b(thong tin|ho so|so dien thoai|dien thoai|sdt|dia chi)\s+(cua\s+)?(khach hang|khach|nguoi mua)\b",
+        r"\b(tra cuu|tim|cho xem|cho toi)\s+.{0,20}\b(khach hang|khach|nguoi mua)\b",
+        r"^thong tin\s+(khach hang|khach)\s+.+$",
+    ])
+
+
+def _detect_return_followup_intent(
+    norm_text: str,
+    previous_intent: str,
+    conversation_state: dict[str, Any],
+) -> Optional[str]:
+    """Giữ luồng đổi trả cho câu rút gọn/typo mà không kéo câu ngoài ngữ cảnh vào policy."""
+    active_flow = conversation_state.get("active_flow") or {}
+    in_return_flow = previous_intent in RETURN_CONTEXT_INTENTS or active_flow.get("name") == "return_request"
+
+    if re.search(r"^(tra hang|doi tra|doi hang)$", norm_text):
+        return "return_eligible_cases"
+    if re.search(
+        r"(lien he|goi|nhan tin).{0,30}(tra hang|doi tra|doi hang)|(tra hang|doi tra|doi hang).{0,30}(lien he|goi ai|lam sao)",
+        norm_text,
+    ):
+        return "return_process"
+    if re.search(r"(quy trinh doi tra|cac buoc doi tra|lam sao de doi tra|lam sao de tra hang)", norm_text):
+        return "return_process"
+    if re.search(r"(thoi han doi tra|bao lau.{0,20}(doi tra|tra hang)|doi tra.{0,20}bao lau)", norm_text):
+        return "return_claim_deadlines"
+    if re.search(r"(doi|tra hang|doi tra).{0,20}(ton phi|mat phi|phi bao nhieu|co phi)", norm_text):
+        return "return_fee_unverified"
+
+    if in_return_flow:
+        if re.search(r"^(lien he sao|lien he the nao|goi ai|nhan tin ai|can gui gi|gui gi|lam sao)$", norm_text):
+            return "return_process"
+        if re.search(r"\b(dien|doi).{0,20}(ton phi|mat phi|co phi|phi khong)\b", norm_text):
+            return "return_fee_unverified"
+        if re.search(r"^(bao lau|may ngay|thoi han bao lau)$", norm_text):
+            return "return_claim_deadlines"
+    return None
 
 
 def _detect_need_choice(norm_text: str) -> Optional[str]:
@@ -567,6 +627,7 @@ def _should_try_llm_nlu(norm_text: str, brand: str) -> bool:
         r"\b("
         r"gia|bao nhieu|mac|dat|cao|re|thap|"
         r"san pham|sp|link|mua|dat hang|shop|shopee|"
+        r"con hang|het hang|ton kho|co san pham|"
         r"cai nao|loai nao|dong nao|goi y|tu van|"
         r"thom|mui huong|luu huong|sach|vet ban|diu nhe|tiet kiem|"
         r"nuoc giat|bot giat|giat do|nuoc xa|xa vai|rua chen|lau san|tay rua|"
@@ -793,6 +854,11 @@ def _build_next_conversation_state(
 
     state["brand"] = brand.upper()
     state["current_intent"] = intent
+    if intent in RETURN_CONTEXT_INTENTS:
+        state["active_flow"] = {"name": "return_request", "stage": intent}
+    else:
+        # Không để ngữ cảnh đổi trả bám vô hạn rồi bắt nhầm các câu ngắn ở chủ đề mới.
+        state["active_flow"] = {"name": "", "stage": ""}
     state["conversation_topic"] = active_category or state.get("conversation_topic", "")
     state["last_source_id"] = source_id or state.get("last_source_id", "")
     state["updated_at"] = now_str
@@ -1447,6 +1513,8 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 }],
             }
 
+        pipeline_trace_extra: dict[str, Any] = {}
+
         def _remember_response(
             answer: str,
             intent: str,
@@ -1486,6 +1554,8 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 "score": score,
                 "fallback_reason": fallback_reason,
             }
+            if pipeline_trace_extra:
+                trace.update(pipeline_trace_extra)
             if trace_extra:
                 trace.update(trace_extra)
             # Cập nhật ngay RAM cache để turn kế tiếp đọc tức thì (0ms)
@@ -1533,6 +1603,19 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         def _fast_response_remember(answer: str, intent: str, *, stage: str = "new", fallback_reason: str = "") -> ChatPipelineResponse:
             _remember_response(answer, intent, stage, fallback_reason=fallback_reason)
             return _fast_response(answer, intent, brand, start_time, lead_stage=stage, fallback_reason=fallback_reason)
+
+        # Privacy guard phải chạy trước lưu SĐT/profile để không nhận nhầm dữ liệu của người thứ ba.
+        if _detect_third_party_customer_lookup(norm_text):
+            privacy_msg = (
+                "Dạ để bảo vệ quyền riêng tư, mình không thể tra cứu hoặc cung cấp thông tin của khách hàng khác theo tên. "
+                "Mình chỉ có thể hỗ trợ thông tin của chính bạn trong phiên Messenger này; nếu cần xử lý hồ sơ nội bộ, admin vui lòng dùng trang quản trị có phân quyền ạ."
+            )
+            return _fast_response_remember(
+                privacy_msg,
+                "customer_privacy_protected",
+                stage="new",
+                fallback_reason="PRIVACY_GUARD",
+            )
 
         # ─────────────────────────────────────────────────────────────
         # FAST-PATH 1: KHÁCH ĐỂ LẠI SỐ ĐIỆN THOẠI & ĐỊA CHỈ (< 20ms)
@@ -1827,6 +1910,23 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         # ─────────────────────────────────────────────────────────────
         is_return_or_claim = bool(re.search(r"\b(doi tra|tra hang|bi loi|bi hong|bao hanh|hoan tien|khieu nai)\b", norm_text))
 
+        return_followup_intent = _detect_return_followup_intent(norm_text, previous_intent, conversation_state)
+        if return_followup_intent == "return_fee_unverified":
+            return_fee_msg = (
+                "Dạ nếu bạn đang hỏi đổi/trả hàng có tốn phí không: chính sách hiện xác nhận công ty sẽ thu hồi hàng lỗi, "
+                "giao sản phẩm thay thế hoặc hoàn tiền sau khi CSKH duyệt, nhưng chưa có mức phí chung được xác nhận cho mọi trường hợp. "
+                "Mình không tự khẳng định miễn phí để tránh báo sai. Bạn liên hệ hotline 1900 5307 và gửi mã đơn cùng ảnh/video; "
+                "CSKH sẽ xác nhận chi phí đúng theo nguyên nhân và kênh mua hàng nha."
+            )
+            return _fast_response_remember(
+                return_fee_msg,
+                "return_fee_unverified",
+                stage="browsing_catalog",
+                fallback_reason="NO_VERIFIED_RETURN_FEE",
+            )
+        if return_followup_intent:
+            return await _sheet_response_remember(return_followup_intent, stage="browsing_catalog")
+
         # 0. Multi-Intent / Compound Query Processing (Ưu tiên xử lý câu hỏi ghép 2 ý trước khi vào đơn lẻ)
         multi_res = await _detect_and_process_multi_intent(
             raw_text=raw_text,
@@ -1847,7 +1947,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         llm_nlu_plan: Optional[dict[str, Any]] = None
         llm_nlu_mode, llm_nlu_timeout, llm_nlu_threshold = _llm_nlu_config()
         if (
-            llm_nlu_mode == "assist"
+            llm_nlu_mode in {"assist", "shadow"}
             and not is_return_or_claim
             and _should_try_llm_nlu(norm_text, brand)
         ):
@@ -1862,20 +1962,25 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
             )
 
         if llm_nlu_plan and float(llm_nlu_plan.get("confidence", 0.0)) >= llm_nlu_threshold:
-            llm_trace = {
-                "llm_nlu": {
-                    "provider": llm_nlu_plan.get("provider", "ollama"),
-                    "model": llm_nlu_plan.get("model", ""),
-                    "intent": llm_nlu_plan.get("intent", ""),
-                    "confidence": llm_nlu_plan.get("confidence", 0.0),
-                    "sort": llm_nlu_plan.get("sort", ""),
-                    "need_type": llm_nlu_plan.get("need_type", ""),
-                    "category": llm_nlu_plan.get("category", ""),
-                    "product": llm_nlu_plan.get("product", ""),
-                    "reference": bool(llm_nlu_plan.get("reference", False)),
-                    "reason": llm_nlu_plan.get("reason", ""),
-                }
+            pipeline_trace_extra["llm_nlu"] = {
+                "mode": llm_nlu_mode,
+                "provider": llm_nlu_plan.get("provider", "ollama"),
+                "model": llm_nlu_plan.get("model", ""),
+                "intent": llm_nlu_plan.get("intent", ""),
+                "confidence": llm_nlu_plan.get("confidence", 0.0),
+                "sort": llm_nlu_plan.get("sort", ""),
+                "need_type": llm_nlu_plan.get("need_type", ""),
+                "category": llm_nlu_plan.get("category", ""),
+                "product": llm_nlu_plan.get("product", ""),
+                "reference": bool(llm_nlu_plan.get("reference", False)),
+                "reason": llm_nlu_plan.get("reason", ""),
             }
+        if (
+            llm_nlu_mode == "assist"
+            and llm_nlu_plan
+            and float(llm_nlu_plan.get("confidence", 0.0)) >= llm_nlu_threshold
+        ):
+            llm_trace = {"llm_nlu": dict(pipeline_trace_extra.get("llm_nlu", {}))}
             plan_query = raw_text
             plan_product = str(llm_nlu_plan.get("product", "") or "").strip()
             plan_category = str(llm_nlu_plan.get("category", "") or "").strip()
@@ -2119,6 +2224,40 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                     area=area,
                     lead_stage=lead_stage,
                     shopee_url=budget_res.get("shopee_url"),
+                    latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                )
+
+        # 1.4. Nước xả vải phải đọc catalog hiện hành, không dùng FAQ "chưa xác minh" đã cũ.
+        if brand.lower() == "zeo" and is_fabric_softener_inquiry(raw_text) and not is_return_or_claim:
+            softener_res = match_fabric_softener_products(raw_text, brand=brand)
+            if softener_res:
+                selected_products = softener_res.get("selected_products", [])
+                _remember_response(
+                    softener_res["suggested_reply"],
+                    softener_res.get("intent", "zeo_fabric_softener_catalog"),
+                    "browsing_catalog",
+                    score=float(softener_res.get("score", 0.99)),
+                    trace_extra={
+                        "catalog_source": "shopee_catalog",
+                        "selected_product_ids": [
+                            str(product.get("item_id", ""))
+                            for product in selected_products
+                            if isinstance(product, dict) and product.get("item_id")
+                        ],
+                    },
+                    products_shown=selected_products if isinstance(selected_products, list) else None,
+                )
+                return ChatPipelineResponse(
+                    answer=_prettify_answer(softener_res["suggested_reply"]),
+                    intent=softener_res.get("intent", "zeo_fabric_softener_catalog"),
+                    confidence="high",
+                    score=float(softener_res.get("score", 0.99)),
+                    brand=brand.upper(),
+                    has_phone=has_phone,
+                    phone=phone,
+                    area=area,
+                    lead_stage="browsing_catalog",
+                    shopee_url=softener_res.get("shopee_url"),
                     latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
                 )
 

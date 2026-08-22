@@ -621,6 +621,10 @@ async def reason_and_answer_cskh(
     Nhận diện câu hỏi tự nhiên, đối chiếu với Dữ liệu thực tế (Facts & Products từ Google Sheet/Redis)
     và Lịch sử trò chuyện để trả lời trọn vẹn, thuyết phục, chuẩn văn phong 5 sao và TUYỆT ĐỐI không bịa đặt.
     """
+    if not (retrieved_facts or "").strip() and not catalog_products:
+        logger.info("Skip CSKH reasoning: empty retrieved_facts and catalog_products")
+        return None
+
     brand_upper = brand.upper()
     brand_display = "ZeO Vietnam (Chăm sóc gia đình sinh học: ZeO, PANO, Oplus)" if brand_upper == "ZEO" else "CFC Cò Bay (Phân bón & Dinh dưỡng cây trồng nông nghiệp Cần Thơ)"
     website_url = "https://zeo.vn/" if brand_upper == "ZEO" else "https://cfccobay.vn/"
@@ -653,8 +657,9 @@ QUY TẮC CỐT LÕI (BẮT BUỘC):
    - Kết thúc bằng một lời gợi mở nhẹ nhàng (ví dụ hỏi thăm thêm nhu cầu, gửi link đặt hàng hoặc hỗ trợ tiếp).
    - Chỉ xuất ra nội dung tin nhắn gửi khách hàng, không viết thêm bất kỳ lời bình luận nào của AI."""
 
-    # Chuẩn bị context
-    facts_block = retrieved_facts.strip() if retrieved_facts else "Hiện chưa có dữ liệu đặc thù cho câu hỏi này. Hãy trả lời dựa trên thông tin chung của thương hiệu hoặc hướng dẫn khách liên hệ hotline/để lại SĐT."
+    # Chuẩn bị context. Không cho model tự trả lời khi không có fact:
+    # caller phải fallback/hỏi rõ/chuyển admin ở lớp deterministic.
+    facts_block = retrieved_facts.strip()
 
     products_str = ""
     if catalog_products and isinstance(catalog_products, list):

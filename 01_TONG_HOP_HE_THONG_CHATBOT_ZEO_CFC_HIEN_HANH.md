@@ -1823,3 +1823,56 @@ Bộ test được chia thành:
 - Có tiêu chí PASS/FAIL, lỗi nghiêm trọng, bảng ghi kết quả và ngưỡng go/no-go trước buổi demo.
 
 Giá, sản phẩm và link trong bộ test không đóng đinh theo snapshot cũ; người test phải đối chiếu catalog hiện hành tại thời điểm chạy.
+
+---
+
+## 31. Cập Nhật Intelligence QueryPlan & Grounded Routing (22/08/2026)
+
+Mục tiêu đợt này không audit lại toàn hệ thống mà tập trung vào khả năng hiểu tiếng Việt tự nhiên, giữ ngữ cảnh, truy xuất đúng và trả lời không bịa.
+
+### 31.1 Tài liệu mới
+
+Đã bổ sung bộ tài liệu intelligence trong `docs/`:
+
+- `11A_INTELLIGENCE_BASELINE.md`: baseline trước/sau, 30 case đại diện và lỗi quan sát.
+- `11B_QUERYPLAN_DESIGN.md`: contract QueryPlan deterministic.
+- `11C_REFERENCE_RESOLUTION_DESIGN.md`: thiết kế giữ/ngắt ngữ cảnh tham chiếu.
+- `11D_RETRIEVAL_BENCHMARK.md`: benchmark trước/sau và hai case còn REVIEW do alias intent.
+- `11E_INTELLIGENCE_IMPLEMENTATION_REPORT.md`: báo cáo implementation, guardrail và test.
+
+### 31.2 Source thay đổi
+
+| File | Vai trò |
+|---|---|
+| `ChatbotN8n/javis/server/query_understanding.py` | Module mới tạo `QueryPlan` deterministic từ câu tiếng Việt đã normalize |
+| `ChatbotN8n/javis/server/chat_pipeline.py` | Tích hợp QueryPlan vào trace/router; thêm route an toàn cho toilet, brand ecosystem, compatibility và CFC lúa |
+| `ChatbotN8n/javis/server/shopee_matcher.py` | Giảm các claim tuyệt đối chưa có nguồn như “100%”, “hoàn toàn không ăn da tay”, “hỏng vi mạch” |
+| `ChatbotN8n/javis/server/ai_engine.py` | Không gọi CSKH LLM khi không có retrieved facts/catalog products |
+| `ChatbotN8n/javis/server/tests/test_query_understanding.py` | Thêm 8 unit test QueryPlan |
+
+### 31.3 Hành vi mới đáng chú ý
+
+- `Bồn cầu bị cặn vôi ố vàng...` được route về nhóm tẩy rửa vệ sinh, không còn bị hiểu là vết bẩn quần áo.
+- `Có bị nồng nặc mùi hôi như mấy loại tẩy con vịt ko?` dùng fact từ `zeo_toilet_cleaner`, không kéo sang gửi link sản phẩm.
+- `ZeO, PANO với Oplus là 3 hãng khác nhau hay sao?` trả overview hệ thương hiệu từ `company_overview`.
+- `Nước giặt PANO 3.5kg có bị trào bọt không?` trả lời thận trọng theo hướng compatibility, không bịa cam kết kỹ thuật.
+- `Tôi chuẩn bị xuống giống 3 hecta lúa...` được nhận diện là CFC agriculture advisory, trả lời an toàn và xin thông tin cho kỹ sư/đại lý, không tự đưa liều lượng.
+- Tin nhắn có số điện thoại vẫn ưu tiên lead capture trước mọi route advisory/context.
+- Câu CFC hỏi giá rõ sản phẩm như `Bao 25kg NPK... giá bao nhiêu?` không bị context lúa trước đó kéo sai sang contextual price.
+
+### 31.4 Kết quả test sau cập nhật
+
+Điều kiện test ngày 22/08/2026: sandbox degraded, Redis/Ollama/Groq không truy cập được; Shopee catalog dùng fallback CSV local.
+
+```text
+Unit tests:                 34/34 PASS
+eval_test_suite.py:        112/112 PASS, ~2.6–2.8ms/câu
+run_test_md_scenarios.py:   53/55 PASS (96.4%)
+```
+
+Hai lượt scenario còn REVIEW là khác tên intent nhưng nội dung đúng nguồn:
+
+- `cleaning_usage_instruction` vs expected alias `usage_instructions`.
+- `pano_laundry_fragrance_options` vs expected alias `pano_fragrance_options`.
+
+Không đổi source intent chỉ để ăn điểm test; nếu muốn báo cáo 55/55 thì nên thêm alias tương đương trong scenario runner.

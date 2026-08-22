@@ -4,29 +4,21 @@
 
 For ZeO/CFC chatbot, n8n workflow, Python RAG, Redis, Google Sheet, Ollama, or eval/test tasks, read this file first:
 
-`TONG_HOP_HE_THONG_CHATBOT_ZEO_CFC_HIEN_HANH.md`
+`01_TONG_HOP_HE_THONG_CHATBOT_ZEO_CFC_HIEN_HANH.md`
 
 Use it as the current project memory to avoid re-reading the whole repository. If the summary conflicts with live code, CSV, workflow files, or Redis behavior, trust the live source and update the summary after the change.
 
-## CodeGraph
+## Direct Source Inspection
 
-This repository has CodeGraph indexes. For code-level exploration, use CodeGraph before broad grep/read loops when available:
+For this project, inspect the relevant source, workflow, data, test, and runtime files directly. Do not use CodeGraph unless the user explicitly asks for it in the current request.
 
-- Use `codegraph_explore` through MCP if it is exposed.
-- Or use shell: `codegraph explore "<question, symbol, or file>"`
-
-Good queries include:
-
-- `chat_pipeline.py process_chat_pipeline context memory`
-- `rag_search.py rerank hybrid search`
-- `knowledge_sync.py Redis vector index`
-- `zeo_chatbot.workflow.ts webhook flow`
-
-After edits, CodeGraph may lag by about one second. If a stale warning appears, read the edited files directly.
+- Use `rg`/`rg --files` to locate files and symbols.
+- Read the smallest relevant set of actual files, then trace callers and data flow directly.
+- Treat generated summaries and indexes as navigation aids only; live source, CSV/Sheet schema, workflow files, tests, and runtime evidence are authoritative.
 
 ## Living Documentation Update Rule
 
-After any material change, update `TONG_HOP_HE_THONG_CHATBOT_ZEO_CFC_HIEN_HANH.md` before finishing.
+After any material change, update `01_TONG_HOP_HE_THONG_CHATBOT_ZEO_CFC_HIEN_HANH.md` before finishing.
 
 Update it when changing:
 

@@ -55,6 +55,7 @@ from shopee_matcher import (
     match_fabric_softener_products,
 )
 from ai_engine import synthesize_cskh_answer, reason_and_answer_cskh, plan_chat_intent_with_ollama
+from query_understanding import build_query_plan
 from telegram_notifier import notify_new_lead, notify_admin_unanswered, notify_urgent_complaint
 
 logger = logging.getLogger(__name__)
@@ -1513,6 +1514,15 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 }],
             }
 
+        query_plan = build_query_plan(
+            raw_text=raw_text,
+            norm_text=norm_text,
+            brand=brand,
+            query_entities=query_entities,
+            reference_resolution=reference_resolution,
+            conversation_state=conversation_state,
+        )
+        query_plan_dict = query_plan.to_dict()
         pipeline_trace_extra: dict[str, Any] = {}
 
         def _remember_response(
@@ -1549,6 +1559,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                     "product": reference_resolution.get("product", ""),
                 },
                 "query_entities": query_entities,
+                "query_plan": query_plan_dict,
                 "source_id": source_id,
                 "confidence": confidence,
                 "score": score,
@@ -1603,6 +1614,111 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
         def _fast_response_remember(answer: str, intent: str, *, stage: str = "new", fallback_reason: str = "") -> ChatPipelineResponse:
             _remember_response(answer, intent, stage, fallback_reason=fallback_reason)
             return _fast_response(answer, intent, brand, start_time, lead_stage=stage, fallback_reason=fallback_reason)
+
+        # QueryPlan guard: câu bồn cầu/toilet/cặn vôi phải đi nhóm tẩy rửa,
+        # không được rơi sang matcher vết bẩn quần áo chỉ vì có "ố vàng".
+        if brand == "zeo" and query_plan.intent == "cleaning_toilet_stain":
+            target_intent = (
+                "zeo_cleaning_hygiene_product_overview"
+                if any(k in norm_text for k in ["can voi", "o vang", "lau nam", "nha tam"])
+                else "zeo_toilet_cleaner"
+            )
+            return await _sheet_response_remember(target_intent, stage="browsing_catalog")
+
+        if brand == "zeo" and query_plan.intent == "brand_ecosystem_overview":
+            item = await get_faq_by_intent(brand, "company_overview")
+            answer = item.get("answer", "").strip() or (
+                "Dạ ZeO, PANO và Oplus là các nhãn hàng thuộc cùng hệ sản phẩm của công ty. "
+                "Mỗi nhãn có nhóm sản phẩm và định vị riêng; bạn đang muốn so sánh dòng giặt giũ, rửa chén hay lau sàn ạ?"
+            )
+            _remember_response(
+                answer,
+                "brand_ecosystem_overview",
+                "browsing_catalog",
+                source_id=item.get("source_id", ""),
+                trace_extra={"source_intent": "company_overview"},
+            )
+            return _fast_response(answer, "brand_ecosystem_overview", brand, start_time, lead_stage="browsing_catalog")
+
+        if brand == "zeo" and re.search(r"\b(nong nac|hac mui|mui hoi|con vit|kho tho)\b", norm_text) and (
+            "toilet" in norm_text
+            or "bon cau" in norm_text
+            or "tay" in norm_text
+            or conversation_state.get("active_entities", {}).get("category") in {"toilet_cleaner", "cleaning_hygiene", "bleach"}
+            or previous_intent in {"zeo_cleaning_hygiene_product_overview", "zeo_toilet_cleaner"}
+        ):
+            item = await get_faq_by_intent(brand, "zeo_toilet_cleaner")
+            answer = item.get("answer", "").strip() or (
+                "Dạ với nhóm tẩy toilet/bồn cầu, dữ liệu hiện có mô tả sản phẩm ZeO có hương trái cây và hỗ trợ khử mùi. "
+                "Nếu bạn nhạy mùi, mình khuyên mở cửa thông thoáng và dùng đúng hướng dẫn trên bao bì nha."
+            )
+            _remember_response(
+                answer,
+                "cleaning_fragrance_safety",
+                "browsing_catalog",
+                source_id=item.get("source_id", ""),
+                trace_extra={"source_intent": "zeo_toilet_cleaner"},
+            )
+            return _fast_response(answer, "cleaning_fragrance_safety", brand, start_time, lead_stage="browsing_catalog")
+
+        if brand == "cfc" and not has_phone and query_plan.intent == "agriculture_advisory_query" and re.search(r"\b(lua|xuong giong|hecta|ha|kien giang)\b", norm_text):
+            item = await get_faq_by_intent(brand, "cfc_dosage_usage_review")
+            base_answer = item.get("answer", "").strip()
+            answer = (
+                "Dạ với lúa mới chuẩn bị xuống giống, Cò Bay cần biết thêm giống lúa, giai đoạn đất, diện tích/khu vực và tình trạng ruộng để kỹ sư tư vấn đúng quy trình.\n\n"
+                f"{base_answer or 'Mình chưa có công thức bón cố định trong hệ thống chat nên không tự đưa liều lượng để tránh sai kỹ thuật.'}\n\n"
+                "Bạn gửi giúp mình số điện thoại và khu vực canh tác, kỹ sư/đại lý Cò Bay sẽ liên hệ tư vấn sát ruộng hơn nha."
+            )
+            _remember_response(
+                answer,
+                "cfc_rice_fertilizer_guide",
+                "collecting_contact",
+                confidence="medium",
+                score=query_plan.intent_confidence,
+                source_id=item.get("source_id", ""),
+                fallback_reason="AGRONOMY_REQUIRES_EXPERT_REVIEW",
+                trace_extra={"source_intent": "cfc_dosage_usage_review"},
+            )
+            return _fast_response(
+                answer,
+                "cfc_rice_fertilizer_guide",
+                brand,
+                start_time,
+                lead_stage="collecting_contact",
+                fallback_reason="AGRONOMY_REQUIRES_EXPERT_REVIEW",
+            )
+
+        # QueryPlan guard: câu hỏi tương thích máy giặt cửa trước chỉ trả lời thận trọng,
+        # không bịa cam kết kỹ thuật nếu Sheet/catalog chưa có fact kiểm chứng.
+        if (
+            brand == "zeo"
+            and query_plan.intent == "product_compatibility"
+            and (
+                query_plan.entities.get("variant")
+                or any(b in {"pano", "oplus", "zeo"} for b in query_plan.entities.get("mentioned_brands", []))
+            )
+        ):
+            compatibility_msg = (
+                "Dạ với máy giặt cửa trước/cửa ngang, mình khuyên ưu tiên nước giặt dễ hòa tan và dùng đúng lượng theo hướng dẫn của máy để hạn chế trào bọt.\n\n"
+                "Hiện dữ liệu chat chưa có tài liệu kỹ thuật riêng để cam kết từng mã PANO/Oplus là “chuyên dụng” cho mọi dòng máy cửa trước, nên mình không nói quá phần này ạ.\n"
+                "Bạn gửi giúp mình model máy hoặc quy cách sản phẩm đang xem, admin sẽ kiểm tra kỹ hơn; nếu cần mình có thể gửi các lựa chọn nước giặt PANO/Oplus đang có trên Shopee Mall."
+            )
+            _remember_response(
+                compatibility_msg,
+                "pano_washing_machine_compatibility",
+                "browsing_catalog",
+                confidence="medium",
+                score=query_plan.intent_confidence,
+                fallback_reason="TECHNICAL_FACT_LIMITED",
+            )
+            return _fast_response(
+                compatibility_msg,
+                "pano_washing_machine_compatibility",
+                brand,
+                start_time,
+                lead_stage="browsing_catalog",
+                fallback_reason="TECHNICAL_FACT_LIMITED",
+            )
 
         # Privacy guard phải chạy trước lưu SĐT/profile để không nhận nhầm dữ liệu của người thứ ba.
         if _detect_third_party_customer_lookup(norm_text):
@@ -2502,7 +2618,15 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
 
         if reference_resolution.get("references_previous_turn"):
             resolved_product = reference_resolution.get("product", "")
-            if reference_resolution.get("resolved") and _has_price_signal(norm_text) and not any(k in norm_text for k in ["gia si", "mua si", "lay si", "chinh sach si", "chiet khau", "dai ly"]):
+            explicit_cfc_price_query = brand.lower() == "cfc" and bool(
+                re.search(r"\b(npk|bao|kg|chuyen lua|phan bon|huu co)\b", norm_text)
+            )
+            if (
+                reference_resolution.get("resolved")
+                and _has_price_signal(norm_text)
+                and not explicit_cfc_price_query
+                and not any(k in norm_text for k in ["gia si", "mua si", "lay si", "chinh sach si", "chiet khau", "dai ly"])
+            ):
                 msg = (
                     f"Dạ mình hiểu bạn đang hỏi giá của {resolved_product}. "
                     "Hiện hệ thống chưa có giá chính xác cho sản phẩm/nhóm này nên mình không tự báo giá để tránh sai. "
@@ -2869,6 +2993,7 @@ async def process_chat_pipeline(req: ChatPipelineRequest) -> ChatPipelineRespons
                 "product": reference_resolution.get("product", ""),
             },
             "query_entities": query_entities,
+            "query_plan": query_plan_dict,
         }
         asyncio.create_task(_async_save_session(
             brand=brand,

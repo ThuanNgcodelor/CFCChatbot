@@ -1187,8 +1187,8 @@ def match_skin_care_dishwashing(query: str, brand: str = "zeo") -> Optional[dict
     )
 
     reply = (
-        "Dạ nước rửa chén của ZeO/PANO/Oplus có độ pH trung tính, chiết xuất từ thiên nhiên và **HOÀN TOÀN KHÔNG ĂN DA TAY** bạn nhé.\n\n"
-        "Đặc biệt nếu tay bạn mỏng, nhạy cảm hay dễ bị khô ráp/tróc vảy khi rửa bát, bên mình khuyên dùng các dòng dưỡng ẩm bảo vệ da tay sau:\n\n"
+        "Dạ nếu tay bạn mỏng, nhạy cảm hoặc dễ khô ráp khi rửa bát, mình khuyên ưu tiên các dòng có định hướng dịu nhẹ/dưỡng ẩm như Vitamin E, Nha Đam hoặc Chanh tự nhiên.\n\n"
+        "Mình không cam kết tuyệt đối “không ăn da tay” cho mọi cơ địa; nếu da đang kích ứng, bạn nên dùng găng tay hoặc thử lượng nhỏ trước nha.\n\n"
         f"{items_str}\n\n"
         f"👉 Bạn có thể xem thêm tại Shopee Mall: {general_link}\n"
         "Cần tư vấn thêm quy cách nào bạn cứ nhắn mình hỗ trợ nhé! 💙"
@@ -1239,7 +1239,7 @@ def match_baby_or_sensitive_laundry(query: str, brand: str = "zeo") -> Optional[
     reply = (
         "Dạ đối với quần áo trẻ nhỏ, em bé hoặc người có làn da nhạy cảm, bên mình khuyên dùng các dòng giặt sinh học dịu nhẹ sau:\n\n"
         f"{items_str}\n\n"
-        "Các sản phẩm này sử dụng hoạt chất dịu nhẹ, không chứa hóa chất tẩy gắt và đã qua kiểm nghiệm an toàn da liễu nha bạn. 💙\n"
+        "Các lựa chọn này được định hướng dịu nhẹ hơn cho nhu cầu giặt xả hằng ngày. Hiện dữ liệu chat chưa có chứng nhận da liễu riêng để mình cam kết tuyệt đối cho mọi cơ địa, nên nếu bé có da quá nhạy cảm bạn nên thử lượng nhỏ trước nha. 💙\n"
         f"👉 Link gian hàng chính hãng: {general_link}"
     )
     return {
@@ -1285,8 +1285,8 @@ def match_front_load_washer(query: str, brand: str = "zeo") -> Optional[dict]:
     )
 
     reply = (
-        "Dạ máy giặt cửa trước (cửa ngang) rất cần loại nước giặt công thức đậm đặc, **ít bọt và dễ hòa tan** để tránh trào bọt gây tắc nghẽn hoặc hỏng vi mạch máy.\n\n"
-        "Bên mình gợi ý 3 lựa chọn nước giặt chuyên dụng chuẩn cho máy cửa trước sau:\n\n"
+        "Dạ máy giặt cửa trước/cửa ngang thường nên ưu tiên nước giặt dễ hòa tan và dùng đúng liều lượng để hạn chế trào bọt.\n\n"
+        "Mình chưa có tài liệu kỹ thuật riêng trong dữ liệu chat để cam kết từng mã là chuyên dụng cho mọi dòng máy, nhưng có thể gợi ý các lựa chọn nước giặt phù hợp để bạn tham khảo:\n\n"
         f"{items_str}\n\n"
         "Bạn muốn dùng dạng túi 3.5kg hay can to 3.8kg để mình gửi link ưu đãi tốt nhất cho bạn nhé? 💙"
     )
@@ -1306,6 +1306,9 @@ def is_stain_removal_or_efficacy_inquiry(text: str) -> bool:
     folded = _fold(text)
     # Loại trừ hỏi giá rõ ràng
     if bool(re.search(r"\b(bao nhieu tien|gia bao nhieu|xin gia|bang gia)\b", folded)):
+        return False
+    # Bồn cầu/toilet/cặn vôi là nhóm tẩy rửa vệ sinh, không phải vết bẩn quần áo.
+    if any(k in folded for k in ["bon cau", "toilet", "wc", "men su", "can voi", "nha tam"]):
         return False
     triggers = [
         "vet mau", "vet o", "vet ban", "vet dau mo", "vet mo hoi", "vet cafe", "vet tra",
@@ -1328,8 +1331,8 @@ def match_stain_removal_or_efficacy(query: str, brand: str = "zeo", context: Opt
 
     if is_blood:
         reply = (
-            "Dạ các dòng Bột giặt / Nước giặt của ZeO và PANO **HOÀN TOÀN TẨY ĐƯỢC VẾT MÁU** và các vết bẩn gốc protein (máu, mồ hôi, sữa) rất hiệu quả bạn nhé! 💙\n\n"
-            "🌟 **Mẹo tẩy sạch vết máu 100% không để lại vệt ố:**\n"
+            "Dạ với vết máu và các vết bẩn gốc protein như mồ hôi/sữa, các dòng giặt giũ ZeO/PANO có thể hỗ trợ xử lý tốt nếu giặt đúng cách và xử lý sớm. Mình không cam kết sạch 100% cho mọi chất liệu/vết bẩn lâu ngày nha bạn. 💙\n\n"
+            "🌟 **Mẹo xử lý vết máu:**\n"
             "1. **Xả ngay bằng nước lạnh:** Tuyệt đối không dùng nước nóng vì nhiệt độ cao sẽ làm protein trong máu đông chặt vào thớ vải.\n"
             "2. **Thoa trực tiếp:** Lấy một lượng nhỏ Bột giặt/Nước giặt PANO hoặc Bio Enzyme ZeO thoa trực tiếp lên vết máu, ngâm 10–15 phút để hoạt chất men phân hủy vết bẩn.\n"
             "3. **Vò nhẹ & giặt lại:** Vò nhẹ rồi giặt bình thường bằng tay hoặc máy giặt.\n\n"
@@ -1347,7 +1350,7 @@ def match_stain_removal_or_efficacy(query: str, brand: str = "zeo", context: Opt
     else:
         reply = (
             "Dạ các sản phẩm giặt giũ của ZeO/PANO/Oplus được ứng dụng công nghệ làm sạch sinh học (Enzyme Thụy Điển, ION hòa tan nhanh và hạt VEILEX khử mùi), "
-            "giúp đánh bay các vết bẩn cứng đầu như dầu mỡ, bùn đất, thức ăn, mồ hôi mà không làm mục vải hay phai màu quần áo bạn nhé. 💙\n\n"
+            "hỗ trợ xử lý các vết bẩn thường gặp như dầu mỡ, bùn đất, thức ăn, mồ hôi. Với đồ dễ phai màu hoặc chất liệu đặc biệt, bạn nên thử ở vùng nhỏ trước và làm theo hướng dẫn trên bao bì nha. 💙\n\n"
             "Sản phẩm ít cặn, dễ hòa tan kể cả trong nước lạnh và giữ hương thơm bền lâu suốt cả ngày.\n"
             f"👉 Link gian hàng Shopee Mall chính hãng: {general_link}\n"
             "Bạn đang cần giặt đồ trắng, đồ màu hay quần áo trẻ em để mình hướng dẫn cách giặt tối ưu nhất nhé!"

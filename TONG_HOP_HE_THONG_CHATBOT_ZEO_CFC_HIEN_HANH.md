@@ -1,11 +1,24 @@
 # Tổng Hợp Hệ Thống Chatbot ZeO / CFC Hiện Hành
 
-Ngày cập nhật: 2026-08-21 (Structured Product Memory + Ollama NLU Planner + 100% Regression)
+Ngày cập nhật: 2026-08-22 (đối chiếu trực tiếp source, workflow, dữ liệu và test hiện có)
 Phạm vi: `ChatbotN8n/javis/`, `ChatbotN8n/workflows/local-n8n/`, dữ liệu Google Sheet/CSV, Redis, Ollama, RAG và các file vận hành liên quan.
 
-Tài liệu này thay cho file tóm tắt cũ `TOM_TAT_HE_THONG_CHATBOT_ZEO_CFC_CHO_GPT.md`. File cũ không bị xóa để giữ lịch sử, nhưng khi cần phân tích hoặc nâng cấp hệ thống thì nên dùng tài liệu này.
+Đây là tài liệu sống của dự án. Khi nội dung tài liệu khác source/runtime thì ưu tiên source và trạng thái runtime thực tế, sau đó cập nhật lại tài liệu này. Lần rà soát này chỉ xác nhận source trong workspace; không tự suy ra trạng thái production từ file local.
 
-Lưu ý bảo mật: không đưa password Redis, token n8n, API key, Facebook token, Telegram token hoặc credential thật vào ChatGPT/GPT bên ngoài.
+Lưu ý bảo mật: không đưa password Redis, token n8n, API key, Facebook token, Telegram token, cookie hoặc browser auth-state thật vào tài liệu/ChatGPT/GPT bên ngoài. File `ChatbotN8n/javis/server/scripts/shopee_auth.json` hiện đang được Git theo dõi và chứa trạng thái đăng nhập trình duyệt; cần revoke/rotate phiên liên quan, bỏ file khỏi Git history/index và thay bằng file mẫu hoặc secret runtime.
+
+### Trạng thái kiểm chứng của tài liệu
+
+| Phạm vi | Trạng thái ngày 22/08/2026 |
+|---|---|
+| Source FastAPI, router, matcher, RAG | Đã đối chiếu trực tiếp file hiện có |
+| 8 workflow `.workflow.ts` local | Đã đối chiếu cấu trúc, node, connection, schedule và endpoint; tất cả file local đang `active: false` |
+| CSV/JSONL trong workspace | Đã đếm bằng parser; số liệu được ghi tại mục 4 và 15 |
+| FastAPI local `:8000` | Health từng pass trong phiên audit ngày 22/08, nhưng lần kiểm tra cuối cùng không kết nối được port 8000; không coi service đang chạy ở thời điểm bàn giao |
+| Redis runtime local | ZeO FAQ 65 customer records, CFC FAQ 19; ZeO catalog 52 records (49 stock/3 out), chưa có CFC catalog |
+| Test code hiện có | Unit 26/26 và offline eval 112/112 đã chạy ngày 22/08; scenario `--all` chỉ đạt 48/55 lượt, xem mục 15 |
+| n8n production và Messenger thật | Chưa xác minh lại trong lần cập nhật tài liệu này |
+| `.n8n-state.json` | Chỉ là metadata đồng bộ lịch sử, không dùng để kết luận workflow production đang active |
 
 ## 1. Mục Tiêu Hệ Thống
 
@@ -16,12 +29,12 @@ Hệ thống dùng để trả lời khách hàng tự động cho 2 nhóm thư�
 
 Nguyên tắc vận hành:
 
-- Google Sheet là nguồn kiến thức chính (Single Source of Truth).
-- Nếu dữ liệu không có trong Sheet/Redis thì bot tuyệt đối không được tự bịa.
+- Google Sheet/CSV là nguồn biên soạn chính cho FAQ và catalog; runtime đọc Redis snapshot/cache, còn catalog có fallback CSV local.
+- Nếu dữ liệu không có trong nguồn đã kiểm chứng thì bot phải fallback/hỏi rõ/chuyển admin, không được tự tạo fact.
 - Không tự bịa giá, tồn kho, liều lượng, chứng nhận, địa chỉ đại lý, link kênh bán hàng.
-- Câu không chắc phải fallback rõ ràng (`FallbackReason`), hỏi rõ hơn, lưu learning queue hoặc chuyển admin.
-- Python FastAPI là não xử lý duy nhất (Single Brain Architecture). n8n đóng vai trò I/O adapter nhận/gửi Messenger và trigger webhook.
-- Kết quả offline regression gần nhất đạt trung bình **2,9ms/câu**; latency thực tế trên Messenger còn phụ thuộc n8n, Ollama, Redis, mạng và Facebook Graph API.
+- Câu không chắc phải fallback rõ ràng (`FallbackReason`), hỏi rõ hơn hoặc chuyển admin. Enqueue learning queue là yêu cầu còn thiếu trong implementation hiện tại.
+- Trong hai workflow chatbot local hiện tại, Python FastAPI là lớp quyết định chính; n8n làm I/O gateway nhận/gửi Messenger và trigger webhook.
+- Mốc offline regression ngày 21/08/2026 đạt trung bình **2,9ms/câu** trong môi trường fallback local. Đây không phải latency end-to-end Messenger và không phải SLA production.
 
 ## 2. Kiến Trúc Tổng Quan
 
@@ -34,12 +47,14 @@ Facebook Messenger
   ├── Deterministic Router/Tools (giá, link, tồn kho, safety, CRM)
   ├── Ollama NLU Planner tùy chọn (chỉ trả JSON intent/tool)
   ├── Lexical & Hybrid Semantic RAG khi chưa có fast-path phù hợp
-  ├── Grounded CSKH Synthesizer (chỉ viết lại facts đã truy xuất)
+  ├── CSKH Synthesizer (được prompt bám facts; chưa có output validator đầy đủ)
   ├── Covered Fact Exclusion (Loại trừ fact cũ khi khách hỏi follow-up)
   └── Guardrails & Granular Fallback Classification
-→ ChatPipelineResponse có answer/intent/score/link/trace
+→ ChatPipelineResponse có answer/intent/score/shopee_url/fallback_reason/latency
 → Trả answer về n8n → Messenger
 ```
+
+Trace chi tiết được lưu vào Redis session/history; `ChatPipelineResponse` hiện không trả field `trace` ra API.
 
 Sơ đồ báo cáo và prompt tạo hình dùng ngay được đặt tại `SO_DO_WORKFLOW_CHATBOT_ZEO_CFC_CHO_BAO_CAO.md`.
 
@@ -56,7 +71,7 @@ Google Sheet
 → Redis Vector Index: zeo:vec:faq hoặc cfc:vec:faq
 ```
 
-Luồng học từ lỗi:
+Hạ tầng learning queue dự kiến:
 
 ```text
 Bot không chắc / guardrail fail
@@ -66,6 +81,8 @@ Bot không chắc / guardrail fail
 → admin duyệt / bổ sung FAQ
 → sync lại knowledge
 ```
+
+Khoảng trống hiện tại: `chat_pipeline.py` mới gửi Telegram qua `notify_admin_unanswered`; source không thấy thao tác push event vào `zeo:learning:queue`/`cfc:learning:queue`, và hai workflow chatbot 5 node cũng không enqueue. Hai workflow export chỉ pop/requeue dữ liệu đã có. Vì vậy vòng học tự động từ chatbot đến Sheet chưa được nối end-to-end.
 
 ## 3. Cây Thư Mục Quan Trọng
 
@@ -77,6 +94,13 @@ Bot không chắc / guardrail fail
 │   │   ├── cfc_faq_google_sheet_from_CfcCoBayN8n_2026_08_13.csv
 │   │   ├── *.bak
 │   │   └── các file docx/md nguồn FAQ
+│   ├── evals/
+│   │   ├── vietnamese_chatbot_eval_cases.jsonl
+│   │   └── zeo_benchmark_1000_cases.jsonl
+│   ├── testing/
+│   │   ├── zeo_chatbot_test_cases.jsonl
+│   │   ├── cfc_chatbot_test_cases.jsonl
+│   │   └── facebook_live_test_*.md
 │   ├── javis/
 │   │   ├── README.md
 │   │   ├── knowledge/
@@ -96,7 +120,7 @@ Bot không chắc / guardrail fail
 │   │   │   ├── main.py                  # Server FastAPI chính (port 8000)
 │   │   │   ├── admin_routes.py          # Facade Gateway Router (~55 dòng)
 │   │   │   ├── chat_pipeline.py         # Não bộ xử lý hội thoại & NLU
-│   │   │   ├── rag_search.py            # Semantic Search FAQ (In-memory RAM < 1ms)
+│   │   │   ├── rag_search.py            # Lexical hot cache + Redis Vector KNN fallback
 │   │   │   ├── knowledge_sync.py        # Đồng bộ Redis Vector Index
 │   │   │   ├── embedder.py              # Vector embedding Ollama (bge-m3)
 │   │   │   ├── ai_engine.py             # Kết nối LLMs (Groq, Gemini, OpenRouter, Ollama)
@@ -105,9 +129,11 @@ Bot không chắc / guardrail fail
 │   │   │   ├── document_ingestor.py     # Nạp tài liệu MD vào Vector Index
 │   │   │   ├── shopee_matcher.py        # Khớp link Shopee Mall khi chat
 │   │   │   ├── telegram_notifier.py     # Bắn thông báo Telegram
-│   │   │   ├── eval_test_suite.py       # Bộ 107 test cases kiểm thử NLU
-│   │   │   ├── tests/                   # Unit tests độc lập (PriceConstraint, hard filters)
-│   │   │   ├── settings.json            # File cấu hình API keys
+│   │   │   ├── eval_test_suite.py       # 98 single-turn + 14 multi-turn cases trong source hiện tại
+│   │   │   ├── eval_sheet_grounding_cases.jsonl
+│   │   │   ├── tests/                   # 4 file unit test hiện có
+│   │   │   ├── settings.example.json    # Cấu hình mẫu không chứa secret
+│   │   │   ├── settings.json            # Cấu hình local/private, không đưa vào tài liệu
 │   │   │   ├── requirements.txt         # Thư viện Python
 │   │   │   └── static/                  # Frontend Web Admin (HTML/CSS/JS)
 │   │   └── skills/
@@ -120,6 +146,7 @@ Bot không chắc / guardrail fail
 │   │       ├── zeo_learning_queue_export.workflow.ts
 │   │       ├── cfc_learning_queue_export.workflow.ts
 │   │       ├── chatbot_operations_alert.workflow.ts
+│   │       ├── zeo_shopee_sync.workflow.ts
 │   │       ├── n8n-workflows.d.ts
 │   │       ├── tsconfig.json
 │   │       ├── .n8n-state.json
@@ -128,18 +155,23 @@ Bot không chắc / guardrail fail
 │       └── redis/
 ├── logs/
 │   ├── python_api.log
-│   └── python_api.pid
-├── start_all.sh
-├── stop_all.sh
-├── test.md
-├── BAO_CAO_TRIEN_KHAI_CHATBOT_ZEO_CFC.md
+│   ├── python_api.pid
+│   └── test-pids.txt
+├── testing/
+│   ├── start_all.sh
+│   ├── stop_all.sh
+│   ├── run.md
+│   ├── push.md
+│   ├── test.md
+│   ├── run_test_md_scenarios.py
+│   └── KICH_BAN_TEST_SEP_KHO_TINH_ZEO.md
 ├── SO_DO_WORKFLOW_CHATBOT_ZEO_CFC_CHO_BAO_CAO.md
 └── TONG_HOP_HE_THONG_CHATBOT_ZEO_CFC_HIEN_HANH.md
 ```
 
 Ghi chú:
 
-- `ChatbotN8n/javis-test/` đang là thư mục khác/dirty submodule hoặc workspace phụ, không phải trọng tâm vận hành hiện tại của hệ thống này.
+- Không có thư mục `ChatbotN8n/javis-test/` trong workspace được kiểm tra ngày 22/08/2026.
 - `.codegraph/` là index code cục bộ, không thuộc runtime chatbot.
 
 ## 4. Dữ Liệu Kiến Thức Google Sheet / CSV
@@ -149,12 +181,28 @@ File chính:
 ```text
 ChatbotN8n/google_upload/zeo_faq_google_sheet_from_ZeoN8n_2026_08_13.csv
 ChatbotN8n/google_upload/cfc_faq_google_sheet_from_CfcCoBayN8n_2026_08_13.csv
+ChatbotN8n/google_upload/zeo_shopee_catalog_template.csv
 ```
 
-Số dòng hiện tại:
+Số record hiện tại, đếm bằng CSV parser và không tính header:
 
-- ZeO CSV: 80 dòng gồm header.
-- CFC CSV: 20 dòng gồm header.
+- ZeO FAQ: **81 record**, tất cả đang `active`; gồm 65 `audience=customer` và 16 `audience=agent`.
+- CFC FAQ: **19 record**, tất cả đang `active` và `audience=customer`.
+- ZeO Shopee catalog: **52 record**, gồm 49 `in_stock` và 3 hết hàng.
+
+Snapshot Redis local ngày 22/08/2026 có 65 FAQ ZeO và 19 FAQ CFC, khớp với đường sync chuẩn đã lọc `audience=customer`. Nếu Redis rỗng, `rag_search.py` fallback CSV hiện nạp cả 16 dòng ZeO `audience=agent`; rerank chỉ phạt `audience=agent` chứ không loại bỏ chắc chắn. `knowledge_sync.py` cũng chỉ loại đúng `audience=internal`, nên producer khác ghi snapshot có thể đưa agent content vào index. Đây là grounding gap cần sửa.
+
+Các bộ dữ liệu kiểm thử JSONL hiện có:
+
+| File | Số record JSON hợp lệ |
+|---|---:|
+| `ChatbotN8n/evals/vietnamese_chatbot_eval_cases.jsonl` | 172 |
+| `ChatbotN8n/evals/zeo_benchmark_1000_cases.jsonl` | 1.000 |
+| `ChatbotN8n/javis/server/eval_sheet_grounding_cases.jsonl` | 40 |
+| `ChatbotN8n/testing/zeo_chatbot_test_cases.jsonl` | 109 |
+| `ChatbotN8n/testing/cfc_chatbot_test_cases.jsonl` | 63 |
+
+Các con số trên mô tả file trong workspace, không đồng nghĩa tất cả bộ JSONL đều được chạy bởi `eval_test_suite.py` hoặc `testing/start_all.sh --test`.
 
 Schema hiện tại:
 
@@ -189,7 +237,7 @@ Các nhóm dữ liệu ZeO đáng chú ý:
 - Tổng quan công ty, slogan, USP.
 - Dòng sản phẩm giặt giũ, rửa chén, lau sàn, tẩy rửa vệ sinh.
 - ZeO, PANO, Oplus: công nghệ, mùi hương, quy cách, sản phẩm chưa xác minh.
-- Giá: chỉ có câu trả lời chung, không có bảng giá cụ thể.
+- FAQ giá chỉ có câu trả lời chung; giá sản phẩm cụ thể nằm trong Shopee catalog snapshot, không nằm trong FAQ CSV.
 
 Các nhóm dữ liệu CFC đáng chú ý:
 
@@ -231,12 +279,12 @@ python-multipart
 
 Vai trò:
 
-- Khởi tạo FastAPI app.
+- Khởi tạo FastAPI app phiên bản khai báo `2.1.0`.
 - Mount admin dashboard tại `/admin` và `/`.
 - Đăng ký `admin_routes`.
 - Cung cấp API chính cho n8n và RAG.
 - Chạy background task:
-  - sync Shopee catalog mỗi 10 phút nếu có cấu hình sheet.
+  - sync Shopee catalog mỗi 10 phút nếu `settings.json` có cấu hình `shopee.sheet_url` hợp lệ.
   - lưu analytics snapshot mỗi 1 giờ.
 
 Endpoint chính:
@@ -248,8 +296,9 @@ Endpoint chính:
 | `POST /sync?brand=cfc` | Sync CFC snapshot Redis sang vector index |
 | `POST /sync?brand=all` | Sync cả ZeO và CFC |
 | `POST /search` | Search RAG semantic trực tiếp |
-| `POST /rewrite` | Rewrite câu trả lời bằng Ollama, giữ nguyên fact |
+| `POST /rewrite` | Prompt Ollama viết lại và yêu cầu giữ fact; chưa có output validator, lỗi thì trả answer gốc |
 | `POST /api/chat-pipeline` | API chính n8n gọi để trả lời Messenger |
+| `POST /api/shopee/refresh-cache` | Xóa cache catalog trong RAM để lần đọc sau nạp snapshot mới |
 | `GET /admin` | Dashboard quản trị |
 
 ### 5.2 `chat_pipeline.py`
@@ -268,7 +317,7 @@ Vai trò:
 - RAG fallback nếu không route được.
 - Guardrail chống trả nhầm policy/contact/address/internal content.
 - Lưu session/history/trace vào Redis.
-- Đẩy câu không chắc vào admin/learning flow.
+- Gửi Telegram cho admin khi câu không chắc. Enqueue tự động vào Redis learning queue chưa được nối trong pipeline hiện tại.
 
 Các khối quan trọng:
 
@@ -308,8 +357,9 @@ Vai trò:
 
 - Kết nối Redis.
 - Normalize query tiếng Việt.
-- Tạo embedding query qua `embedder.py`.
-- Search RediSearch KNN trong index `zeo:vec:faq` hoặc `cfc:vec:faq`.
+- Thử lexical search trên FAQ hot cache trong RAM trước; kết quả đủ cao có thể trả ngay.
+- Nếu lexical chưa đủ chắc, tạo embedding query qua `embedder.py` và search RediSearch KNN trong index `zeo:vec:faq` hoặc `cfc:vec:faq`.
+- Khi Ollama/Redis lỗi, có degraded lexical fallback.
 - Rerank kết quả bằng rule lexical/entity.
 - Trả kết quả tốt nhất kèm score/confidence/source.
 - `get_faq_by_intent()` lấy đúng câu trả lời theo intent từ Redis vector docs.
@@ -338,6 +388,7 @@ Vai trò:
 - Gọi Ollama bge-m3 để tạo vector.
 - Upsert HASH vào Redis Vector Index.
 - Xóa stale docs không còn trong snapshot.
+- Làm mới FAQ hot cache sau khi sync thành công.
 
 Index:
 
@@ -393,8 +444,8 @@ Nếu không có link chính thức trong catalog/Sheet thì bot không nên t�
 
 Vai trò:
 
-- `admin_routes.py`: Facade Gateway Router tinh gọn (~55 dòng) nạp toàn bộ sub-routers từ các domain nghiệp vụ.
-- `domains/`: Bóc tách thành 9 Bounded Contexts độc lập:
+- `admin_routes.py`: Facade Gateway Router tinh gọn (~55 dòng) nạp 8 sub-router nghiệp vụ.
+- `domains/`: Có 9 package gồm `common` và 8 package có router:
   - `domains.common`: Shared Kernel (Redis pool, settings I/O, config).
   - `domains.system`: Settings, Status, Health check & Analytics weekly.
   - `domains.assistant`: Trợ lý điều hành AI & Autonomous tool calling.
@@ -409,14 +460,15 @@ Nhóm endpoint tiêu biểu:
 
 | Nhóm Domain | Endpoint tiêu biểu | Chức năng chính |
 |---|---|---|
-| **System & Settings** | `/settings`, `/status`, `/stats/today`, `/analytics/weekly` | Quản trị kết nối, cấu hình API keys và theo dõi sức khỏe hệ thống |
-| **AI Assistant** | `/assistant/chat`, `/assistant/quick-prompts` | Trợ lý điều hành tự động thực thi tool và tra cứu số liệu CRM/n8n |
-| **Customers CRM** | `/customers`, `/customers/{brand}/{id}/session`, `/customers/export` | Quản lý profile, số điện thoại Leads, lịch sử chat và xuất file CSV |
-| **n8n Automation** | `/n8n/workflows`, `/n8n/deploy`, `/n8n/executions`, `/n8n/ws/file-watch` | Bật/tắt workflow, đẩy code .ts lên n8n và theo dõi file thay đổi real-time |
-| **AI Reports** | `/reports/latest`, `/reports/generate` | Sinh Bản Tin Báo Cáo Điều Hành kinh doanh hàng ngày với Groq / Ollama |
-| **Learning Queue** | `/learning-queue`, `/learning-queue/approve`, `/learning/ai-suggest` | Duyệt câu hỏi chưa chắc và AI tự động gom nhóm gợi ý câu trả lời |
-| **Knowledge Hub** | `/sheets/get-tabs`, `/sheets/preview`, `/sheets/sync-direct`, `/documents/upload` | Google Sheets Live Hub (chọn Tab n8n-style) và nạp tài liệu Markdown |
-| **RAG Test** | `/test/query` | Thử nghiệm độ chính xác của Semantic Search và câu trả lời bot |
+| **System & Settings** | `/admin/settings`, `/admin/status`, `/admin/stats/today`, `/admin/analytics/weekly` | Quản trị kết nối, cấu hình và theo dõi sức khỏe hệ thống |
+| **AI Assistant** | `/admin/assistant/chat`, `/admin/assistant/quick-prompts` | Trợ lý điều hành có thể thực thi tool và tra cứu số liệu CRM/n8n |
+| **Customers CRM** | `/admin/customers`, `/admin/customers/{brand}/{id}/session`, `/admin/customers/export` | Quản lý profile, số điện thoại lead, lịch sử chat và xuất CSV |
+| **n8n Automation** | `/admin/n8n/workflows`, `/admin/n8n/deploy`, `/admin/n8n/executions`, `/admin/n8n/ws/file-watch` | Bật/tắt workflow, deploy file `.ts` và theo dõi file |
+| **AI Reports** | `/admin/reports/latest`, `/admin/reports/generate` | Sinh bản tin báo cáo điều hành với provider được cấu hình |
+| **Learning Queue** | `/admin/learning-queue`, `/admin/learning-queue/approve`, `/admin/learning/ai-suggest` | Duyệt câu hỏi chưa chắc và gợi ý FAQ |
+| **Knowledge Hub** | `/admin/sheets/get-tabs`, `/admin/sheets/preview`, `/admin/sheets/sync-direct`, `/admin/documents/upload` | Xem/sync Sheet và nạp tài liệu Markdown |
+| **Shopee API** | `/admin/shopee/catalog`, `/admin/shopee/sync-sheet` | Đọc catalog và gọi đồng bộ Sheet |
+| **RAG Test** | `/admin/test/query` | Thử Semantic Search và câu trả lời bot |
 
 ### 5.8 `document_ingestor.py`
 
@@ -460,8 +512,7 @@ Vai trò:
 
 Vai trò:
 
-- Bộ test regression cho chatbot.
-- Có single-turn cases và multi-turn cases.
+- Bộ regression inline gồm 98 single-turn case và 14 multi-turn scenario; tổng cộng 131 lượt gọi pipeline nhưng báo cáo 112 case.
 - Kiểm tra intent, context memory, out-of-scope, no-hallucination guardrails.
 
 Chạy test:
@@ -471,17 +522,23 @@ cd /Users/hyden/Documents/David-nguyen/N8n
 ChatbotN8n/javis/server/.venv/bin/python ChatbotN8n/javis/server/eval_test_suite.py
 ```
 
-Lưu ý: cần Redis/Ollama/knowledge đã sync để test đầy đủ.
+Lưu ý:
+
+- Cần Redis/Ollama/knowledge đã sync để test live đầy đủ; khi dependency không truy cập được, nhiều nhánh có thể chạy degraded/local fallback.
+- Runner chấp nhận một số nhóm intent tương đương và hiện chỉ in tổng kết, không `sys.exit(1)` khi có case fail. Vì vậy phải đọc số PASS/FAIL trong output, không chỉ nhìn exit code.
+- Hai unit test planner dùng fake planner, nên 2/2 unit pass không chứng minh Ollama live đã hiểu câu hỏi.
 
 ## 6. Redis
 
-Redis dùng cho 5 loại dữ liệu:
+Redis đang được dùng cho nhiều nhóm dữ liệu:
 
 1. Snapshot kiến thức từ n8n.
 2. Vector index RAG.
 3. Customer profile.
 4. Session/history/context memory.
 5. Learning queue/admin review.
+6. Shopee catalog snapshot/cache metadata.
+7. Analytics/report, Telegram dedup và deploy log của admin.
 
 Key chính:
 
@@ -522,12 +579,20 @@ Session hiện lưu thêm:
     "active_entities": {
       "product": "...",
       "product_intent": "...",
-      "category": "..."
+      "category": "...",
+      "product_id": "...",
+      "shopee_url": "...",
+      "price": null,
+      "rank": null
     },
     "last_products_shown": [],
+    "customer_constraints": {},
+    "active_flow": {"name": "", "stage": ""},
+    "covered_fact_ids": [],
     "recent_turns": [],
     "conversation_summary": "...",
-    "last_source_id": "..."
+    "last_source_id": "...",
+    "updated_at": "..."
   },
   "last_trace": {
     "normalized_text": "...",
@@ -538,6 +603,8 @@ Session hiện lưu thêm:
   }
 }
 ```
+
+`last_trace` thay đổi theo nhánh xử lý; không phải fast-path nào cũng có đủ `matched_intent`, `score` hoặc `source_id` như ví dụ trên.
 
 ## 7. Ollama / Model
 
@@ -567,8 +634,9 @@ qwen2.5:7b-instruct
 Vai trò của model chat:
 
 - `plan_chat_intent_with_ollama()` có thể phân loại câu khó thành JSON intent/tool. `shadow` chỉ ghi nhận dự đoán để đối chiếu; `assist` mới được phép chọn deterministic tool. Mặc định vẫn `off` để không đổi hành vi cũ.
+- `settings.json` local được kiểm tra không có block `llm_nlu`; vì vậy planner rơi về mặc định `off` nếu không có biến môi trường ghi đè.
 - Planner không được trả giá, link hay tên sản phẩm trực tiếp; matcher deterministic phải đọc catalog thật rồi mới tạo kết quả.
-- Grounded synthesizer chỉ được viết lại facts đã truy xuất thành văn phong CSKH. Không được tự sáng tác fact.
+- Synthesizer được prompt bám facts đã truy xuất, nhưng chưa có output validator đầy đủ và vẫn có nhánh gọi khi facts rỗng.
 - Nếu Ollama timeout, JSON lỗi, confidence thấp hoặc tool không tìm được dữ liệu, pipeline tiếp tục deterministic/RAG/fallback hiện hành.
 
 ## 8. n8n Workflows Trong `local-n8n`
@@ -579,7 +647,7 @@ Thư mục:
 ChatbotN8n/workflows/local-n8n/
 ```
 
-Các workflow `.ts` được viết theo `@n8n-as-code/transformer`. Local file đang có `active: false`; trạng thái production thật phụ thuộc n8n server sau khi deploy.
+Có 8 workflow `.ts` được viết theo `@n8n-as-code/transformer`. Tất cả file local đang có `active: false`; trạng thái production chỉ được kết luận sau khi kiểm tra n8n server. `.n8n-state.json` là metadata lịch sử và còn chứa mapping cũ, không phải bằng chứng workflow đang chạy.
 
 ### 8.1 `zeo_chatbot.workflow.ts`
 
@@ -624,6 +692,8 @@ MessengerTrigger
 → NhanKhachAuto
 ```
 
+Connection thứ năm là nhánh error output từ `GoiFastApiChatPipeline` về `PrepareMessengerReply`, để n8n vẫn tạo phản hồi fallback khi API lỗi.
+
 ### 8.2 `cfc_cobay_chatbot.workflow.ts`
 
 Tên workflow:
@@ -643,7 +713,6 @@ Vai trò giống `zeo_chatbot.workflow.ts` nhưng dùng cho thương hiệu CFC 
 ```text
 brand: "cfc"
 Facebook Page ID: 946909570780806
-```
 cfc:kb:basic:active
 cfc:learning:queue
 ```
@@ -692,6 +761,8 @@ ScheduleTrigger
 → ReadFaqRows
 ```
 
+Lưu ý lịch chạy: source local chỉ khai báo `field: 'minutes'` nhưng chưa đặt `minutesInterval`. Vì vậy không ghi nhận đây là cron 00:00; cần cấu hình interval rõ ràng và activate workflow trên n8n trước khi kỳ vọng chạy tự động.
+
 Redis key:
 
 ```text
@@ -739,6 +810,8 @@ HTTP gọi Python:
 ```text
 POST http://127.0.0.1:8000/sync?brand=cfc
 ```
+
+Workflow CFC có cùng lưu ý schedule với ZeO: file local chưa khai báo `minutesInterval` cụ thể.
 
 ### 8.5 `zeo_learning_queue_export.workflow.ts`
 
@@ -832,6 +905,32 @@ Redis key:
 ops:telegram:dedup:{hash}
 ```
 
+Dedup alert được cấu hình TTL 900 giây trong workflow local.
+
+### 8.8 `zeo_shopee_sync.workflow.ts`
+
+Tên workflow:
+
+```text
+Zeo Shopee Catalog Sync
+```
+
+Số node:
+
+```text
+6 nodes, 5 connections
+```
+
+Vai trò:
+
+- Đọc catalog ZeO từ Google Sheet.
+- Normalize row và ghi snapshot `zeo:shopee:catalog:active` vào Redis.
+- Ghi metadata lần sync.
+- Gọi `POST http://127.0.0.1:8000/api/shopee/refresh-cache`.
+- Có cron `0 0 * * *` theo timezone `Asia/Ho_Chi_Minh`.
+
+File local đang `active: false`, nên cron 00:00 chỉ có hiệu lực sau khi workflow tương ứng được deploy và activate trên n8n.
+
 ## 9. Luồng Trả Lời Messenger Hiện Hành
 
 ### 9.1 Luồng chuẩn nhanh
@@ -875,9 +974,9 @@ Messenger
    - shipping
    - usage/dosage safety
    - contextual follow-up
-10. Shopee matcher/catalog tool trả product_id, giá, link và tồn kho đã kiểm chứng
+10. Shopee matcher/catalog tool trả product_id, giá, link và trạng thái tồn kho theo snapshot hiện hành
 11. RAG lexical/semantic search nếu chưa bắt được intent chắc chắn
-12. Grounded synthesizer (nếu cần) chỉ viết lại facts đã có
+12. CSKH synthesizer (nếu cần) được prompt bám facts; output chưa được validator kiểm chứng đầy đủ
 13. Guardrail theo intent/category/risk
 14. Fallback trung thực nếu score thấp
 15. Lưu session/history/trace và `last_products_shown`
@@ -901,6 +1000,7 @@ Messenger
   "area": "",
   "lead_stage": "new|browsing_catalog|collecting_contact|lead_ready|escalated",
   "shopee_url": null,
+  "fallback_reason": "",
   "latency_ms": 0.0
 }
 ```
@@ -946,10 +1046,14 @@ Chức năng chính:
 - Xem learning queue.
 - Test query.
 - Sync documents/FAQ.
-- Quản lý Shopee catalog.
+- Xem Shopee catalog và mở Google Sheets Live Hub để sync.
 - Gửi test Telegram.
 - Xem analytics/report.
 - Chat với assistant nội bộ.
+
+Giao diện hiện không có trang/menu Shopee CRUD riêng. File `static/js/pages/shopee.js` cũ vẫn được load nhưng gọi một số CRUD endpoint không còn tồn tại; đây là mã legacy cần dọn hoặc nối lại trước khi mô tả là chức năng quản lý catalog hoàn chỉnh.
+
+Lưu ý an toàn: các route `/admin/*` hiện chưa có lớp xác thực trong FastAPI, CORS đang cho phép `*`, trong khi assistant có tool chạy shell và bật/tắt workflow. Không nên public trực tiếp dashboard/API admin qua tunnel nếu chưa thêm authentication, authorization và giới hạn origin.
 
 File giao diện:
 
@@ -965,11 +1069,14 @@ ChatbotN8n/javis/server/admin_routes.py
 
 ## 12. Shopee / Kênh Mua Hàng
 
-File catalog local:
+Nguồn catalog mà matcher đang đọc:
 
 ```text
-ChatbotN8n/javis/knowledge/shopee_catalog.json
+Redis: zeo:shopee:catalog:active
+Fallback: ChatbotN8n/google_upload/zeo_shopee_catalog_template.csv
 ```
+
+`ChatbotN8n/javis/knowledge/shopee_catalog.json` vẫn tồn tại nhưng không được `shopee_matcher.py` dùng trong luồng runtime hiện tại.
 
 Code xử lý:
 
@@ -982,6 +1089,8 @@ Nguyên tắc:
 - Nếu có link trong catalog thì match và trả link.
 - Nếu không có link chính thức thì không tự bịa.
 - Các kênh TikTok/Zalo/Facebook nếu Sheet chưa có link chính thức thì trả `official_channel_unverified`.
+- Giá, badge và `in_stock` là dữ liệu của snapshot gần nhất, không phải truy vấn live Shopee tại thời điểm khách hỏi.
+- Luồng `/admin/sheets/sync-direct` và upload CSV hiện ghi schema Shopee rút gọn (`variant`, `promotion`, `link`), trong khi matcher ưu tiên schema (`variants`, `discount`, `link_shopee`, `item_id`, `in_stock`). Ngoài ra service đang gọi tên hàm cache cũ `reload_catalog()` rồi nuốt exception. Vì vậy chưa nên coi admin 1-click sync là tương đương workflow `zeo_shopee_sync` hoặc là refresh cache đáng tin cậy cho production.
 
 ## 13. Telegram Alert
 
@@ -1003,20 +1112,27 @@ Redis dedup key:
 ops:telegram:dedup:{hash}
 ```
 
-## 14. File Vận Hành Ở Root
+## 14. File Vận Hành
 
 | File | Vai trò |
 |---|---|
-| `start_all.sh` | Khởi động các service local |
-| `stop_all.sh` | Dừng các service local |
+| `testing/start_all.sh` | Khởi động service local; hỗ trợ interactive, `--background`, `--test` |
+| `testing/stop_all.sh` | Dừng service local bằng PID và các fallback process pattern rộng |
 | `logs/python_api.log` | Log Python API |
 | `logs/python_api.pid` | PID Python API |
-| `run.md` | Ghi chú/lệnh chạy |
-| `push.md` | Ghi chú deploy/push |
-| `test.md` | Bộ test thủ công lớn |
-| `BAO_CAO_TRIEN_KHAI_CHATBOT_ZEO_CFC.md` | Báo cáo ngắn đã triển khai |
-| `PHASE1_DISCOVERY_CHATBOT_ZEO_CFC.md` | Phân tích phase 1 trước đó |
+| `logs/test-pids.txt` | PID được ghi trong chế độ test |
+| `testing/run.md` | Ghi chú/lệnh chạy |
+| `testing/push.md` | Ghi chú deploy/push |
+| `testing/test.md` | Bộ test thủ công lớn |
+| `testing/run_test_md_scenarios.py` | Wrapper legacy đang dựng sai đường dẫn và hiện exit 1 |
+| `ChatbotN8n/javis/server/run_test_md_scenarios.py` | Runner scenario thực tế |
+| `testing/KICH_BAN_TEST_SEP_KHO_TINH_ZEO.md` | Kịch bản demo/stress test thủ công |
+| `SO_DO_WORKFLOW_CHATBOT_ZEO_CFC_CHO_BAO_CAO.md` | Sơ đồ và prompt tạo hình báo cáo |
 | `TONG_HOP_HE_THONG_CHATBOT_ZEO_CFC_HIEN_HANH.md` | Tài liệu hiện hành này |
+
+`testing/start_all.sh --test` không mở n8n hoặc public tunnel; nó chạy unit discovery và 3 API smoke request, nhưng không tự chạy `eval_test_suite.py`. Chế độ interactive/`--background` có mở n8n và named Cloudflare tunnel, nên cần kiểm soát việc public dashboard.
+
+`testing/stop_all.sh` có fallback `pkill -f` cho n8n, cloudflared, Ollama, uvicorn và `kill -9` mọi listener trên port 8000. Script cũng không đọc `logs/test-pids.txt`; hãy kiểm tra target trước khi chạy để tránh dừng process không thuộc phiên hiện tại.
 
 ## 15. Cách Kiểm Tra Hệ Thống
 
@@ -1060,32 +1176,54 @@ cd /Users/hyden/Documents/David-nguyen/N8n
 ChatbotN8n/javis/server/.venv/bin/python ChatbotN8n/javis/server/eval_test_suite.py
 ```
 
-### 15.5 Kịch bản Test Hội Thoại Đa Lượt Chuẩn Thực Tế (9 Lượt CSKH)
+Chạy scenario runner đúng:
+
+```bash
+cd /Users/hyden/Documents/David-nguyen/N8n/ChatbotN8n/javis/server
+.venv/bin/python run_test_md_scenarios.py --all
+```
+
+Không dùng wrapper `N8n/testing/run_test_md_scenarios.py` cho đến khi sửa phép dựng `SERVER_DIR`.
+
+### 15.5 Kết quả xác minh gần nhất
+
+| Bộ kiểm tra | Kết quả ngày 22/08/2026 | Ý nghĩa |
+|---|---:|---|
+| Unit discovery `tests/test_*.py` | **26/26 PASS** | Chủ yếu local/mocked; 2 planner tests dùng fake planner |
+| `eval_test_suite.py` | **112/112 PASS**, 2,7ms/lượt trung bình | Offline/degraded trong lần chạy này; 98 single + 14 scenario, tổng 131 lượt; runner chưa fail exit code |
+| `run_test_md_scenarios.py --all` | **48/55 lượt PASS (87,3%)** | Offline/degraded; 11 scenario; scenario 04, 05, 09, 16 còn REVIEW |
+| `GET /health` local | Từng PASS trong phiên audit; lần curl cuối port 8000 không lắng nghe | Khi pass đã thấy `bge-m3` và hai FAQ vector index; cần start lại FastAPI để kiểm tra hiện thời |
+
+Scenario runner chỉ yêu cầu một trong các `expect_words` xuất hiện và cũng không trả exit code lỗi khi có REVIEW. Do đó chưa được dùng 112/112 hay 48/55 như một chứng nhận zero-hallucination hoặc production readiness.
+
+### 15.6 Kịch bản Test Hội Thoại Đa Lượt Chuẩn Thực Tế (9 Lượt CSKH)
+
+Kịch bản dưới đây kiểm tra hành vi, không đóng đinh giá/tên sản phẩm. Giá và link phải đối chiếu snapshot catalog đang active ở thời điểm test.
 
 ```text
 1. [Khách]: "Xin chào"
    → [Bot]: Chào hỏi thân thiện, giới thiệu các dòng sản phẩm ZeO Vietnam.
 
 2. [Khách]: "Có sản phẩm nào giá tầm dưới 100k ko nhỉ"
-   → [Bot]: Lọc động 4 sản phẩm tiêu biểu dưới 100k (Nước rửa chén 12k, Bột giặt Pano 46k, Nước giặt 95k, Tẩy toilet 23k) + gợi mở tư vấn.
+   → [Bot]: Chỉ trả sản phẩm đang bán có giá < 100.000đ trong snapshot; không vi phạm khoảng giá.
 
 3. [Khách]: "có bột giặt ko"
    → [Bot]: Giới thiệu 3 nhóm bột giặt (ZeO Enzyme, Oplus 4in1, PANO VEILEX) và hỏi nhu cầu sạch sâu / thơm lâu / tiết kiệm.
 
 4. [Khách]: "nhu cầu tiết kiệm đi"
-   → [Bot]: Tư vấn sâu 3 lựa chọn kinh tế nhất: Bột giặt Oplus 4in1 (66.000đ), Bột giặt Pano bao lớn (46.350đ), Nước giặt Pano can 3.8kg (123.291đ).
+   → [Bot]: Tư vấn đúng nhóm tiết kiệm từ catalog/FAQ hiện hành, không kéo nhầm sản phẩm ngoài ngữ cảnh.
 
 5. [Khách]: "có link shopee ko"
-   → [Bot]: Gửi link gian hàng Shopee Mall chính hãng kèm mã Freeship Extra.
+   → [Bot]: Gửi link gian hàng hoặc deep-link phù hợp; chỉ nói Freeship Extra nếu snapshot/Sheet hiện hành có fact đó.
 
 6. [Khách]: "nước rửa chén nào bán chạy nhỉ"
-   → [Bot]: Trả về Top 1 Bestseller Nước rửa chén Vitamin E Pano (12.350đ) + direct link Shopee Mall.
+   → [Bot]: Chỉ gọi là “bán chạy” khi snapshot có badge/ranking đáng tin cậy; nếu badge thiếu thì không giả định item đầu tiên là Top 1.
 
 7. [Khách]: "cái số 2 là sao nhỉ"
    → [Bot]: Giải thích USP 4in1 của Bột giặt Oplus theo đúng ngữ cảnh hội thoại.
 
 8. [Khách]: "xin giá nước rửa chén vitamin e"
-   → [Bot]: Báo đúng giá ưu đãi 12.350đ (giảm 6% từ 13.140đ) + direct link Shopee Mall.
+   → [Bot]: Báo đúng giá snapshot và deep-link của sản phẩm đích danh; không dùng sản phẩm cũ trong context.
 
 9. [Khách]: "cho xin link web của công ty"
    → [Bot]: Trả về website chính thức https://zeo.vn/ từ Google Sheet.
@@ -1093,25 +1231,31 @@ ChatbotN8n/javis/server/.venv/bin/python ChatbotN8n/javis/server/eval_test_suite
 
 ## 16. Điểm Mạnh Hiện Tại
 
-- **Google Sheet làm Single Source of Truth**: Dữ liệu FAQ và Shopee Catalog được quản lý tập trung trên Google Sheet.
-- **Tự động hóa đồng bộ (Automation Sync)**: n8n workflow tự động sync Google Sheet $\rightarrow$ Redis Snapshot & Vector Index lúc 00:00 hàng ngày.
-- **Shopee Dynamic Catalog Engine**: Không hardcode link hay giá. Tra cứu 52 sản phẩm thật (49 đang bán, 3 hết hàng) realtime từ Redis.
+- **Dữ liệu có nguồn quản trị tập trung**: FAQ và catalog được biên soạn từ Sheet/CSV, sau đó dùng Redis snapshot/cache ở runtime.
+- **Có pipeline đồng bộ rõ ràng**: FAQ workflow ghi Redis rồi rebuild vector index; Shopee workflow được cấu hình cron 00:00. Tự động chạy hay không còn phụ thuộc workflow đã được activate trên n8n.
+- **Shopee Dynamic Catalog Engine**: Matcher đọc snapshot 52 sản phẩm (49 `in_stock`, 3 hết hàng) từ Redis hoặc fallback CSV; đây không phải dữ liệu live trực tiếp từ Shopee.
 - **Smart CS AI Agent Intelligence**:
   - Tự động parse và lọc sản phẩm theo ngân sách / tầm giá (`match_products_by_budget`).
   - Nhận diện và tư vấn đa lượt theo nhu cầu thực tế (`match_need_preference`: tiết kiệm, thơm lâu, sạch sâu, dịu nhẹ).
-  - Báo giá realtime và dẫn link Shopee Mall trực tiếp cho sản phẩm đích danh (`match_specific_product_price`).
+  - Báo giá theo snapshot catalog và dẫn deep-link cho sản phẩm đích danh (`match_specific_product_price`).
   - Có lớp **Ollama NLU Planner** tùy chọn (`off`/`shadow`/`assist`): Ollama chỉ phân loại ý định JSON, sau đó code deterministic mới chọn catalog/giá/link để tránh bịa.
-  - Nhận diện Top Bán Chạy / Mới Ra Mắt theo từng nhóm ngành danh mục.
+  - Có matcher cho Bán Chạy / Mới Ra Mắt, nhưng badge đang bị mất ở Redis sync và route new-arrival còn xung đột; chưa xem là ổn định.
 - **Hiệu năng**: Fast-path deterministic thường ở mức vài ms; lần offline regression gần nhất ngày 21/08/2026 trung bình 2,9ms/câu trong điều kiện fallback local.
-- **Chống ảo giác tuyệt đối (Zero Hallucination Guardrails)**: Tuyệt đối không bịa giá, tồn kho, liều lượng, hay link kênh bán hàng.
-- **Bộ Kiểm Thử NLU Toàn Diện (Regression Suite)**: Lần xác minh mới nhất đạt **112/112**, cộng thêm 26/26 unit tests (11 PriceConstraint/price-ranking + 6 product/context follow-up + 2 Ollama NLU planner + 7 conversation guards).
+- **Có guardrail chống bịa cho các fact trọng yếu**: Giá, tồn kho, liều lượng và link được ưu tiên lấy từ matcher/Sheet/Redis hoặc fallback rõ ràng. Đây là mục tiêu thiết kế, không phải bảo đảm tuyệt đối cho mọi câu.
+- **Có regression suite hữu ích**: Mốc chạy ngày 21/08/2026 đạt **112/112** eval và 26/26 unit tests; kết quả chỉ chứng minh các case đã định nghĩa trong môi trường chạy đó.
 
 ## 17. Điểm Yếu / Rủi Ro & Trạng Thái Xử Lý
 
 - **Dữ liệu giá & link Shopee**: Đã chuyển sang catalog động qua `shopee_matcher.py` và Redis `zeo:shopee:catalog:active`; vẫn cần freshness/source-version guard ở các phase tiếp theo.
-- **Phình mã nguồn regex**: *Đã giải quyết* bằng việc module hóa tách biệt logic Shopee, tối ưu hóa regex word boundary (`\b...\b`), và phân tầng rõ ràng giữa Fast-Path và Hybrid RAG.
-- **Redis snapshot rỗng khi mới khởi động**: *Đã phòng ngừa* bằng cơ chế tự động nạp fallback JSON nếu Redis chưa có key, đồng thời hỗ trợ webhook endpoint `/api/shopee/refresh-cache`.
+- **Badge ranking bị mất khi sync**: Redis catalog ngày 22/08 có 52 record nhưng không record nào có `badge`, vì workflow Shopee chưa ghi trường này. `match_best_sellers()`/`match_new_arrivals()` vì vậy có thể fallback theo thứ tự item còn hàng thay vì ranking thật.
+- **Một số câu trả lời Shopee chưa grounded**: `shopee_matcher.py` còn hardcode các khẳng định tuyệt đối như “hoàn toàn không ăn da tay”, “tẩy vết máu 100%”, không phai/mục vải hoặc ảnh hưởng vi mạch. Các fact này chưa được truy vết trong FAQ/catalog và cần bỏ hoặc đưa về Sheet kèm nguồn duyệt trước khi dùng production.
+- **Admin sync Shopee lệch schema/cache**: Direct sync/upload ghi schema rút gọn và gọi nhầm `reload_catalog()`; có thể làm matcher thiếu `item_id`, `in_stock`, badge, link hoặc tiếp tục dùng cache cũ.
+- **Bề mặt admin chưa được bảo vệ**: `/admin/*` chưa có auth, CORS `*`, assistant có shell/workflow tool; public tunnel tạo rủi ro quyền truy cập nghiêm trọng.
+- **Phình mã nguồn regex**: Đã tách matcher Shopee và phân tầng fast-path/RAG, nhưng `chat_pipeline.py` vẫn lớn và cần tiếp tục modular hóa cùng regression test.
+- **Redis snapshot rỗng khi mới khởi động**: Matcher fallback về CSV ZeO nếu Redis chưa có key và có endpoint `/api/shopee/refresh-cache`; không có catalog CFC tương đương trong fallback CSV hiện tại.
 - **RAG Semantic Search**: Hiện sử dụng Redis Vector Search KNN kết hợp Ollama `bge-m3` embedding tiếng Việt. Cần đảm bảo container Redis và Ollama luôn hoạt động ổn định.
+- **Session RAM là process-local**: Cache RAM giảm round-trip nhưng không loại bỏ hoàn toàn race/cross-worker inconsistency; session Redis hiện chưa có TTL/versioning đầy đủ.
+- **Script dừng service có phạm vi rộng**: `testing/stop_all.sh` có thể dừng process khác cùng pattern hoặc port 8000.
 
 ## 18. Hướng Nâng Cấp Nên Làm Tiếp
 
@@ -1283,24 +1427,28 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
 - Có dữ liệu thì trả đúng.
 - Không có dữ liệu thì không bịa.
 - Câu rủi ro thì hỏi thêm hoặc chuyển admin.
-- Lỗi phải được đưa vào learning queue để cập nhật Sheet.
+- Lỗi nên được đưa vào learning queue để cập nhật Sheet; kết nối enqueue tự động từ chatbot hiện còn thiếu.
 - Google Sheet cập nhật thì Redis/RAG phải sync lại để bot phản ánh đúng dữ liệu mới.
 
 ## 23. Module Danh Mục Shopee Động & Đồng Bộ Tự Động (Shopee Dynamic Catalog)
 
+Các mục 23–30 lưu lịch sử các đợt nâng cấp. Khi một mô tả lịch sử khác phần trạng thái hiện hành ở mục 1–17 hoặc bảng xác minh mục 15.5, dùng phần trạng thái hiện hành. Các caveat được bổ sung trực tiếp bên dưới để tránh biến changelog thành cam kết production.
+
 ### 23.1. Mục Tiêu & Nguyên Tắc
-- **Catalog động là nguồn chính**: Giá, sản phẩm, Top Bán Chạy và Top Mới Ra Mắt được dựng từ Redis snapshot; một số URL/hotline/fallback text vẫn đang hardcode và cần dần chuyển về config/Sheet.
-- **Đồng bộ tự động 12h khuya (00:00 hàng ngày)**: Workflow `zeo_shopee_sync.workflow.ts` đọc Google Sheet $\rightarrow$ ghi Redis `zeo:shopee:catalog:active` $\rightarrow$ gọi webhook `POST /api/shopee/refresh-cache`.
+- **Catalog snapshot là nguồn runtime chính**: Giá, sản phẩm và các metadata có mặt được đọc từ Redis; khi Redis rỗng matcher fallback CSV local. Snapshot hiện thiếu badge, và một số URL/hotline/fallback text/claim tư vấn vẫn đang hardcode.
+- **Cấu hình sync 00:00**: `zeo_shopee_sync.workflow.ts` có cron `0 0 * * *`, ghi Redis rồi gọi `POST /api/shopee/refresh-cache`. File local đang `active: false`, nên chỉ tự chạy sau khi deploy/activate trên n8n.
+
 ### 23.2. Cấu Trúc Dữ Liệu Shopee Catalog
-1. **File CSV Danh mục**: `ChatbotN8n/google_upload/zeo_shopee_catalog_template.csv` gồm đúng **52 sản phẩm Shopee Mall chính hãng** được giải mã và chuẩn hóa trực tiếp từ 2 file cào dữ liệu:
+1. **File CSV Danh mục**: `ChatbotN8n/google_upload/zeo_shopee_catalog_template.csv` gồm **52 record**. Một số script build tham chiếu hai file crawl nguồn nhưng hai file đó không có trong checkout hiện tại, nên provenance không tái lập được chỉ từ workspace này:
    - **49 sản phẩm đang bán** (`in_stock: TRUE`).
    - **3 sản phẩm hết hàng** (`in_stock: FALSE` gồm: Nước tẩy toilet Pano 960g, Nước tẩy quần áo màu ZeO 400ml, Bộ 4 Tinh dầu thơm phòng ZeO).
    - **0 sản phẩm CFC** trong gian hàng ZeO Shopee Mall.
-   - **100% URL Shopee Mall thật nhấp được ngay** (dạng `https://shopee.vn/<slug>-i.20523065.<item_id>`).
-   - Đầy đủ cột `badge` (`BEST_SELLER_TOP_1..10`, `NEW_ARRIVAL_TOP_1..10`, `STANDARD`, `OUT_OF_STOCK`).
+   - Cả 52 record trong snapshot CSV có URL dạng `https://shopee.vn/<slug>-i.20523065.<item_id>`; khả năng truy cập về sau vẫn phụ thuộc Shopee và item còn tồn tại.
+   - CSV có đủ `BEST_SELLER_TOP_1..10`; nhóm new-arrival chỉ có rank 1, 4, 5, 6, 7, 9 cùng các badge `NEW_ARRIVAL` không rank, không đủ `TOP_1..10`.
+   - Snapshot Redis đang chạy không có trường `badge` vì workflow sync bỏ cột này.
 2. **Khớp sản phẩm thông minh (`shopee_matcher.py`)**:
    - Khớp ưu tiên: Top Bán Chạy / Mới Ra Mắt $\rightarrow$ Khớp theo Danh mục chính xác (+5 điểm) $\rightarrow$ Từ khóa sản phẩm (+4 điểm) $\rightarrow$ Biến thể / SKU $\rightarrow$ Fallback gian hàng.
-   - Trả lời động: `match_best_sellers()` và `match_new_arrivals()` duyệt trực tiếp Redis snapshot để sinh câu trả lời với giá, % giảm và link Shopee tự động.
+   - `match_best_sellers()` và `match_new_arrivals()` duyệt catalog đã nạp từ cache/Redis/CSV để sinh câu trả lời. Tuy nhiên detector `sản phẩm mới nhất/mới ra mắt` ở `chat_pipeline.py` hiện chạy sớm và có thể trả `new_product_unverified` trước khi tới matcher new-arrival; nhánh này cần thống nhất lại.
 3. **Endpoint hỗ trợ**: `POST /api/shopee/refresh-cache` làm mới cache tức thì mà không cần restart server.
 
 ### 23.3. Trí Tuệ Tư Vấn Khách Hàng Thông Minh (Smart CS AI Agent)
@@ -1324,25 +1472,25 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Khi khách hỏi tắt theo quy cách/dung tích nối tiếp (vd: lượt 1 giới thiệu can lớn $\rightarrow$ lượt 2 hỏi *"Can 3.8kg giá bao nhiêu tiền?"* hoặc *"Giá bao nhiêu 1 chai?"*): Bot tự động lấy thực thể từ lượt trước trong `conversation_state`, ghép nối và tra cứu chính xác sản phẩm tương ứng trong Redis Shopee Catalog để báo giá ưu đãi và gửi link Shopee trực tiếp.
    - Nếu khách chỉ hỏi danh mục chung (vd: *"nước giặt giá bao nhiêu tiền 1 can"*), hệ thống tự chuyển sang bảng giá chung (`zeo_price_inquiry_general`) từ Google Sheet.
 
-4. **Tư Vấn Can Lớn & Quán Ăn / Nhà Hàng (`match_bulk_or_restaurant_need`) — 100% Load Từ Redis**:
-   - Khách hỏi *"Quán ăn cần mua nước rửa chén can lớn dùng cho bếp"*, *"Nhà hàng cần can 3.8kg / 9kg"* $\rightarrow$ Bot quét trực tiếp Redis Shopee Catalog, bóc tách đúng các sản phẩm can lớn: Nước rửa chén Enzyme ZeO (16.900đ), Nước rửa chén Pano can 3.8kg (76.050đ) kèm link Shopee Mall và số hotline sỉ B2B.
+4. **Tư Vấn Can Lớn & Quán Ăn / Nhà Hàng (`match_bulk_or_restaurant_need`)**:
+   - Khách hỏi can lớn thì matcher lọc catalog đã nạp từ cache/Redis/CSV. Tên, giá và link phải lấy từ snapshot hiện hành, không đóng đinh theo ví dụ lịch sử.
 
-5. **Tư Vấn Chăm Sóc Da Tay & Không Ăn Da Tay (`match_skin_care_dishwashing`) — 100% Load Từ Redis**:
-   - Khách hỏi băn khoăn về da tay *"Nước rửa chén có ăn da tay không shop, tay mình hay bị tróc da?"* $\rightarrow$ Bot giải thích độ pH trung tính, đồng thời quét Redis giới thiệu ngay 3 dòng dưỡng ẩm: PANO Vitamin E (12.350đ), Pano Chanh tự nhiên (13.000đ), ZeO Enzyme (16.900đ) kèm direct link.
+5. **Tư Vấn Chăm Sóc Da Tay (`match_skin_care_dishwashing`)**:
+   - Matcher có thể gợi ý sản phẩm từ catalog, nhưng phần khẳng định pH/an toàn da tay hiện là text hardcode chưa có fact nguồn tương ứng. Cần thay bằng answer đã duyệt trong Sheet hoặc lời khuyên thận trọng trước khi dùng production.
 
 6. **Bổ Sung Kiến Thức Hóa Đơn Đỏ VAT & Hướng Dẫn Sử Dụng Tẩy Rửa**:
    - `corporate_invoice_support`: Hỗ trợ xuất hóa đơn GTGT điện tử cho doanh nghiệp/hộ kinh doanh khi mua hàng.
    - `cleaning_usage_instruction`: Hướng dẫn các bước ngâm và cọ rửa bồn cầu / tẩy vệ sinh an toàn, hiệu quả.
 
 7. **Bán Chạy & Mới Ra Mắt Theo Danh Mục**:
-   - Khách hỏi *"nước rửa chén nào bán chạy nhỉ"* $\rightarrow$ Bot trả về Top 1 Bestseller Nước rửa chén Vitamin E Pano (12.350đ) và link trực tiếp.
+   - Câu bán chạy có thể dùng badge catalog. Câu “mới nhất/mới ra mắt” còn xung đột routing như lưu ý tại mục 23.2.
 
 8. **Phân Tách Rõ Ràng Các Kênh Thông Tin (Website vs Mua Hàng Online vs Shopee Mall)**:
-   - Hỏi **Website** $\rightarrow$ Trả về website chính thức `https://zeo.vn/` hoặc `https://cfccobay.vn/` từ Google Sheet.
+   - Hỏi **Website** $\rightarrow$ Sheet hiện ghi `https://zeo.vn/` cho ZeO và `https://cfccobay.com` cho CFC. `ai_engine.py` còn hardcode sai CFC thành `.vn`, cần sửa để không mâu thuẫn nguồn.
    - Hỏi **Link Shopee / Đặt Online** $\rightarrow$ Trả về gian hàng Shopee Mall chính hãng hoặc link mua hàng từ Sheet.
 
-9. **Chuẩn Hóa Link Shopee Mall Chính Hãng Chuẩn Xác 100%**:
-   - Toàn bộ link sản phẩm Shopee được nạp trực tiếp từ danh mục chính thức của gian hàng ZeO Vietnam Official trên Shopee Mall (`zeo:shopee:catalog:active`), đảm bảo đầy đủ tham số định tuyến để mở thẳng App Shopee hoặc Web Shopee mà không bị lỗi 404 hay lỗi ký tự.
+9. **Chuẩn Hóa Link Shopee Mall**:
+   - Catalog snapshot lưu deep-link cho từng item. Hệ thống có thể kiểm tra định dạng/không rỗng, nhưng không thể bảo đảm link không 404 nếu Shopee đổi slug, gỡ item hoặc thay chính sách định tuyến.
 
 10. **Bộ Lọc Câu Hỏi Cá Nhân & Phản Hồi Lịch Sự (Polite Dismiss & Clarification)**:
    - Khách hỏi cá nhân / ngoài lề (*"có biết anh Thuận là anh nào không"*, *"ai tạo ra bot"*): Bot phản hồi lịch sự xác định vai trò trợ lý CSKH và hỏi lại nhu cầu sản phẩm.
@@ -1352,7 +1500,7 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
    - Khách hỏi tẩy sàn / lau sàn (*"có cái nào mà tẩy sàn nhà ko"*, *"xin ít sản phẩm để tẩy sàn nhà đi"*): Bắt đúng nhóm Nước lau sàn ZeO & Oplus đậm đặc 2X.
 
 11. **Kết Quả Đánh Giá NLU Regression Suite**:
-   - Trạng thái mới nhất: **112/112 regression PASS** và **26/26 unit PASS** (11 PriceConstraint/price-ranking + 6 product/context follow-up + 2 Ollama NLU planner + 7 conversation guards, 21/08/2026).
+   - Mốc ngày 21/08/2026: **112/112 regression PASS** và **26/26 unit PASS**. Kết quả cập nhật ngày 22/08 nằm tại mục 15.5.
 
 ---
 
@@ -1360,30 +1508,34 @@ Mục tiêu đúng của hệ thống không phải là trả lời mọi thứ.
 
 Ngày cập nhật: **18/08/2026**
 
-### 24.1 Google Sheets Live Hub (Xem Trước & Đồng Bộ 1 Chạm — Cơ Chế Chuẩn n8n)
+### 24.1 Google Sheets Live Hub (Xem Trước & Direct Sync)
 - **Tự động tải danh sách Tab (From List)**:
   - Endpoint `POST /admin/sheets/get-tabs`: Kết nối Google Sheets API v4 metadata, tự động đọc toàn bộ danh sách các Tab (Sheet Name) trong bảng tính và nạp vào Dropdown cho người dùng chọn trước khi xem trước/đồng bộ.
 - **Tích hợp xem trước bảng tính trực tiếp**:
   - Hỗ trợ cả Sheet công khai và Sheet riêng tư (thông qua Google Cloud API Key / OAuth Bearer Token).
   - Endpoint `POST /admin/sheets/preview`: Bóc tách cấu trúc cột, số dòng theo đúng Sheet Tab đã chọn.
 - **Đồng bộ trực tiếp vào Redis (1-Click Sync)**:
-  - Endpoint `POST /admin/sheets/sync-direct`: Đồng bộ thẳng vào `zeo:shopee:catalog:active` (Shopee) hoặc `zeo:kb:basic:active` (FAQ) và kích hoạt cập nhật Vector Index tự động.
-- **Tải lên File CSV / Excel trực tiếp (Offline / No Key)**:
+  - Endpoint `POST /admin/sheets/sync-direct` có thể ghi Redis và sync vector cho FAQ, nhưng đây là đường giản lược: nó bỏ `audience`, `answer_mode`, `source_id`, `profile_slots`, `escalation_policy`, ép `active=True` và không có các validation/min-row/duplicate-intent như workflow n8n. Không dùng thay đường sync chuẩn cho production cho đến khi bổ sung validation.
+- **Tải lên File CSV trực tiếp (Offline / No Key)**:
   - Endpoint `POST /admin/sheets/upload-csv`: Cho phép kéo thả file CSV xuất từ Google Sheet trực tiếp mà không cần cấp quyền Google Drive.
+  - Source chỉ decode/parse CSV; chưa hỗ trợ `.xlsx`/Excel. Với target Shopee, direct sync/upload còn lệch schema và chưa refresh đúng hot cache như nêu tại mục 12.
 
 ### 24.2 Trợ Lý Điều Hành AI & Tự Động Thực Thi Công Cụ (Autonomous Tool Execution)
-- **Chấm dứt việc AI trả lời lý thuyết**: Tích hợp cơ chế `_match_autonomous_tool` trong `ai_engine.py`.
+- Có cơ chế `_match_autonomous_tool` trong `ai_engine.py` để một số câu hỏi gọi tool thật thay vì chỉ sinh text.
 - Khi người dùng hỏi về:
   - Tình hình khách hàng/leads hôm nay $\rightarrow$ Tự động chạy `get_business_stats` đọc Redis CRM.
-  - Danh mục Shopee $\rightarrow$ Tự động chạy `get_shopee_catalog_summary` đọc catalog live.
+  - Danh mục Shopee $\rightarrow$ Tự động chạy `get_shopee_catalog_summary` đọc snapshot/cache hiện hành.
   - Danh sách / Lỗi n8n $\rightarrow$ Tự động chạy `list_n8n_workflows` hoặc `get_n8n_executions`.
   - Hàng đợi học $\rightarrow$ Tự động chạy `get_learning_queue_summary`.
+
+Các tool có thể chạy shell hoặc thay đổi trạng thái workflow; chỉ mở cho admin đã xác thực và phải log/audit hành động.
+
 ### 24.3 Tinh Gọn Giao Diện Web Admin
 - **Loại bỏ Menu & Tab Shopee Catalog**: Đã gỡ bỏ mục Shopee Catalog khỏi thanh Sidebar điều hướng, gỡ trang Shopee và gỡ bỏ thẻ cấu hình Shopee trong mục Cài đặt (Settings) theo yêu cầu, giữ giao diện Web Admin gọn gàng, tập trung vào Quản trị Chatbot, CRM Lead, n8n Console và Kho Kiến Thức FAQ RAG.
 
 ### 24.4 Nâng Cấp Báo Cáo AI Briefing (AI Insights)
-- **Tối ưu Model Routing**: Chuyển Groq sang model `openai/gpt-oss-120b` và bổ sung candidate model fallback (`openai/gpt-oss-20b`, `qwen/qwen3.6-27b`, `groq/compound`), loại bỏ lỗi 404 model not found.
-- **Dự phòng tổng hợp số liệu (System Fallback Synthesis)**: Trong trường hợp toàn bộ AI provider mất mạng hoặc quá tải, hệ thống tự động tổng hợp bản tin báo cáo phân tích theo mẫu chuẩn từ số liệu thực tế của Redis (Khách hàng, Leads SĐT, Learning Queue), đảm bảo không bao giờ bị lỗi giao diện.
+- **Model Routing**: `call_groq()` generic vẫn thử default `llama-3.3-70b-versatile` trước; sau đó mới thử `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.6-27b`, `groq/compound`. Cấu hình chỉ có hiệu lực ở call site truyền model hoặc khi default không che mất config.
+- **Dự phòng tổng hợp số liệu**: Khi AI provider lỗi, hệ thống có template fallback từ số liệu Redis. Cơ chế này giảm lỗi hiển thị nhưng không bảo đảm giao diện không bao giờ lỗi.
 - **Render Markdown trực quan**: Định dạng bảng biểu, tiêu đề và gạch đầu dòng rõ ràng trên giao diện web.
 
 ### 24.5 SPA URL Hash Routing & Đồng Bộ Thanh Điều Hướng (Deep Linking)
@@ -1402,7 +1554,7 @@ Ngày cập nhật: **18/08/2026**
   - `domains/learning/`: Hàng đợi học (Learning Queue) & AI gợi ý FAQ.
   - `domains/knowledge/`: Kho kiến thức, Tài liệu Markdown & Google Sheets Live Hub.
   - `domains/rag_test/`: Kiểm thử Semantic Search RAG & NLU evaluation.
-- **Facade Gateway Router**: `admin_routes.py` trở thành Facade Router tinh gọn (~55 dòng) nạp toàn bộ sub-routers từ các domain, đảm bảo 100% Backward Compatibility cho `main.py` và các module hiện hành.
+- **Facade Gateway Router**: `admin_routes.py` trở thành Facade Router tinh gọn (~55 dòng), nạp 8 sub-router và giữ các re-export đang được `main.py`/module khác dùng. Chưa có test chứng minh backward compatibility tuyệt đối cho mọi client.
 - **Tổ chức thư mục `scripts/`**: Toàn bộ các script cào dữ liệu Shopee (`crawl_shopee_*.py`), tiền xử lý CSV (`clean_*.py`, `format_*.py`) và sinh tài liệu (`generate_doc.py`) được quy hoạch vào thư mục `scripts/`, giữ thư mục gốc server sạch sẽ và đúng chuẩn Enterprise codebase.
 
 ---
@@ -1414,39 +1566,41 @@ Ngày cập nhật: **19/08/2026**
 ### 25.1 Grounded CSKH Synthesizer (`synthesize_cskh_answer`)
 - **Tận dụng Ollama Local (`qwen2.5:7b-instruct`) / Groq / Gemini Flash**:
   - Khi tra cứu được dữ liệu thực tế (Facts từ Google Sheet / Redis Catalog), module `synthesize_cskh_answer` trong `ai_engine.py` chuyển thể Fact khô khan thành câu trả lời CSKH ngọt ngào, lễ phép, xưng "mình/dạ em", gọi "bạn/anh/chị".
-  - **Zero-Hallucination Guardrail**: Tuyệt đối không bịa đặt thông tin ngoài Fact được cung cấp; timeout cực nhanh (2.0s - 2.5s) với fallback tự động về template chuẩn khi mất mạng.
-  - **Quy tắc văn phong sạch (Clean Styling)**: Lọc sạch 100% các emoji phản cảm, sến súa hoặc không phù hợp thương hiệu như 🔥, 💥, ⚡, 💣, 😈, 💯; chỉ giữ lại các icon trang nhã (🌿, ⭐️, 💙, 👉).
+  - **Grounding instruction**: Prompt yêu cầu model chỉ viết lại facts và có timeout/fallback template. Đây là lớp giảm rủi ro, không phải bảo đảm zero-hallucination.
+  - **Clean Styling**: Bộ lọc loại một danh sách emoji cụ thể; không phải whitelist tuyệt đối cho mọi ký tự/emoji.
 
 ### 25.2 Multi-Intent Disambiguation (Bóc Tách Câu Hỏi Ghép Nhiều Ý)
 - Khi khách hỏi câu ghép có liên từ (`và`, `với lại`, `còn`, `kèm theo`, `tiện thể`):
   - Hệ thống tự động phân tách câu hỏi thành 2 vế độc lập (Sub-queries).
-  - Tra cứu song song từng vế qua Shopee Catalog Matcher và RAG Lexical/Vector Index.
-  - Hợp nhất các Fact và đưa qua CSKH Synthesizer để sinh 1 câu trả lời duy nhất mạch lạc, giải đáp trọn vẹn cả 2 thắc mắc (ví dụ: Giá sản phẩm + Chính sách Freeship/Giao hàng về tỉnh).
+  - Xử lý tuần tự tối đa 2 vế qua Shopee matcher/RAG rồi hợp nhất facts.
+  - Ví dụ giá + giao hàng chỉ được bổ sung ưu đãi/Freeship khi fact đó có trong nguồn đã duyệt.
 
 ### 25.3 Tư Vấn Nỗi Đau & Nhu Cầu Chuyên Biệt (Consultative Sales Matching)
 - Bổ sung các bộ matcher thông minh theo insight thực tế của người tiêu dùng:
-  1. **Quần áo trẻ nhỏ / Da nhạy cảm (`match_baby_or_sensitive_laundry`)**: Tư vấn Bột giặt ZeO Nha Đam (17.550đ) và Combo 10 gói xả vải Nano Clean (17.100đ) dịu nhẹ, an toàn da liễu.
-  2. **Máy giặt cửa trước ít bọt (`match_front_load_washer`)**: Tư vấn Nước giặt PANO Túi 3.5kg (95.058đ) và Nước giặt 2in1 Oplus Hương nước hoa Pháp ít bọt, bảo vệ lồng giặt và vi mạch.
-  3. **Da tay mỏng / Tróc da tay khi rửa chén (`match_skin_care_dishwashing`)**: Giải thích độ pH trung tính và tư vấn Nước rửa chén PANO Vitamin E (12.350đ), Oplus Nha Đam.
+  1. **Quần áo trẻ nhỏ / Da nhạy cảm (`match_baby_or_sensitive_laundry`)**: Có route tư vấn và chọn item từ catalog, nhưng claim “an toàn da liễu/không hóa chất tẩy gắt” hiện chưa có fact nguồn tương ứng.
+  2. **Máy giặt cửa trước ít bọt (`match_front_load_washer`)**: Có route chọn sản phẩm, nhưng claim bảo vệ vi mạch/lồng giặt cần nguồn duyệt trước khi trả khách.
+  3. **Da tay mỏng / Tróc da tay (`match_skin_care_dishwashing`)**: Có route gợi ý sản phẩm; claim pH trung tính/hoàn toàn không ăn da tay hiện là hardcode chưa grounded.
   4. **Can lớn tiết kiệm cho quán ăn / nhà hàng (`match_bulk_or_restaurant_need`)**: Tư vấn Can lớn 3.8kg / 9kg tối ưu chi phí và hỗ trợ số liên hệ sỉ B2B.
+
+Giá trong các câu trả lời này phải lấy từ snapshot hiện hành; các con số ghi trong lịch sử thay đổi không phải giá cố định.
 
 ### 25.4 Phân Luồng & Cảnh Báo Khiếu Nại Hàng Lỗi Khẩn Cấp (`notify_urgent_complaint`)
 - Nhận diện các phản ánh hàng bể nắp, nứt vỡ, rách bao, chảy nước (`URGENT_DAMAGE_TRIGGERS`):
-  - Bot lập tức xin lỗi chân thành, cam kết 100% chính sách đổi mới hoặc hoàn tiền đầy đủ trong 24h, hướng dẫn khách gửi ảnh/video và số điện thoại nhận hàng.
+  - Bot xin lỗi, hướng dẫn gửi ảnh/video và số điện thoại, đồng thời nêu phương án đổi/hoàn theo chính sách. Source hiện không cam kết hoàn tất đổi/hoàn trong 24 giờ; không được diễn giải thời hạn phản hồi thành thời hạn xử lý xong.
   - Tự động dispatch cảnh báo khẩn cấp `notify_urgent_complaint` về nhóm Telegram Admin kèm tên khách, số điện thoại, nội dung phản ánh và Sender ID để CSKH xử lý ngay.
 
-### 25.5 In-Memory Local Session Cache (Tối Ưu 0ms Hội Thoại Đa Lượt)
+### 25.5 In-Memory Local Session Cache
 - Bổ sung `_local_session_cache` trong `chat_pipeline.py`:
-  - Giúp lượt chat kế tiếp của cùng 1 khách hàng đọc ngay `conversation_state`, `active_entities` và `covered_fact_ids` trong RAM (0ms latency), loại bỏ hoàn toàn hiện tượng async race condition khi lưu Redis.
-  - Dữ liệu vẫn được lưu bền vững vào Redis (`session:messenger:*`) dưới dạng background task.
+  - Giúp lượt chat kế tiếp có thể đọc state từ RAM và giảm round-trip Redis. Không bảo đảm 0ms, không chia sẻ giữa worker/process và không loại bỏ hoàn toàn race condition.
+  - Pipeline lập background task để lưu Redis (`session:messenger:*`). Nếu process chết trước khi task hoàn tất thì state có thể mất; chưa có write-through/versioning đầy đủ.
 
 ### 25.6 Khắc Phục Bắt Sai Ý Định Giá & Nâng Cấp Tư Vấn Vết Máu / Vết Ố / Hiệu Quả Làm Sạch
 - **Khắc phục xung đột tiền tố `[GIÁ RẺ]`**: Khi `_resolve_reference` giải quyết tham chiếu (ví dụ *"Cái số 2 dùng ổn không, liệu có tẩy được vết máu không"* -> `[GIÁ RẺ] Bột giặt Pano...`), tiền tố `[GIÁ RẺ]` trong tên sản phẩm từng khiến bộ lọc giá hiểu lầm khách đang hỏi giá. Hệ thống đã tách biệt câu hỏi gốc của khách, loại bỏ tiền tố và chặn câu hỏi giá khi khách đang hỏi tính năng (`dùng ổn không`, `tẩy vết máu`, `tẩy ố`, `có sạch không`).
-- **Module `match_stain_removal_or_efficacy`**: Tư vấn chuyên sâu cơ chế Enzyme Thụy Điển & hạt tẩy VEILEX đánh bay vết bẩn gốc protein (máu, mồ hôi, sữa), dầu mỡ, thức ăn; kèm mẹo giặt nước lạnh chuẩn xác và hướng dẫn kết hợp Nước tẩy Javen ZeO cho đồ trắng.
+- **Module `match_stain_removal_or_efficacy`**: Có route cho câu hỏi vết máu/vết ố, nhưng text hiện chứa claim “tẩy vết máu 100%”, không phai/mục vải chưa được nguồn FAQ/catalog xác nhận. Đây là lỗi grounding cần sửa, không phải tính năng đã duyệt.
 - **Bóc tách câu ghép đa mệnh đề theo dấu câu (`_detect_and_process_multi_intent`)**: Xử lý mượt mà các câu hỏi kép phân tách bởi dấu phẩy, dấu chấm hỏi hoặc liên từ (ví dụ: *"có sản phẩm nào dưới 200k ko nhỉ, có giao về rạch giá đc ko"* -> giải đáp đồng thời cả Phân khúc giá dưới 200k và Chính sách giao hàng về Rạch Giá).
 
-### 25.7 Kết Quả Đánh Giá NLU Regression Suite Mới Nhất
-- **112/112 Test Cases (100.0% Pass Rate)**:
+### 25.7 Mốc Regression Ngày 21/08/2026
+- **112/112 case theo expectation của runner**:
   - 98 câu đơn lẻ + 14 kịch bản hội thoại đa lượt (Multi-turn Context Memory).
   - Case mới xác minh `khoảng 200k -> xin link sản phẩm đó` trả URL sản phẩm trực tiếp, không phải link gian hàng chung.
 - **PriceConstraint/price-ranking unit suite: 11/11 PASS**:
@@ -1458,8 +1612,10 @@ Ngày cập nhật: **19/08/2026**
   - Câu hỏi explicit như `Giá nước xả vải ZeO shop ơi` không được dùng nhầm sản phẩm cũ trong context.
   - Câu nhu cầu `cái nào giặt đồ thơm thơm` được route sang tư vấn thơm lâu thay vì catalog chung.
 - **Ollama NLU planner unit suite: 2/2 PASS**:
-  - Planner dạng JSON có thể route wording khó như `món nào giá chát nhất vậy` vào tool `match_price_extreme(..., mode="highest")`.
+  - Test dùng fake planner để kiểm integration JSON/tool, không gọi Ollama live.
   - Ollama không sinh câu trả lời khách; giá/link vẫn lấy từ Shopee catalog và matcher deterministic.
+
+Mốc cập nhật ngày 22/08/2026 nằm ở mục 15.5; scenario `--all` hiện chưa pass toàn bộ.
 
 ---
 
@@ -1470,10 +1626,10 @@ Ngày cập nhật: **21/08/2026**
 ### 26.1 Nguyên Tắc Vận Hành Mới
 - **Trạng thái thực tế 21/08/2026**: Pipeline là kiến trúc hybrid có kiểm soát, không phải LLM-only. Numeric constraint, an toàn, complaint, CRM và các intent rõ ràng tiếp tục dùng deterministic router; LLM chỉ tổng hợp facts hoặc hỗ trợ nhánh confidence thấp.
 - **Phân định ranh giới rõ ràng**:
-  1. **Data Layer (Code/Redis/Sheet)**: Đóng vai trò là công cụ cung cấp sự thật (Data/Tool Provider) — nạp Bảng giá thực, Danh mục Shopee, Kiến thức FAQ từ Google Sheet vào Vector Index (`bge-m3`).
+  1. **Data Layer (Code/Redis/Sheet)**: Cung cấp FAQ và catalog snapshot. FAQ được vector hóa bằng `bge-m3`; catalog giá hiện vẫn lọc bằng Python, chưa phải product vector index typed.
   2. **Decision Layer (`chat_pipeline.py`)**: Điều phối deterministic router, reference resolution, structured product memory, catalog matcher, optional Ollama NLU planner và RAG theo độ chắc chắn.
   3. **Language Layer (`ai_engine.py`)**: Ollama có thể phân loại intent dạng JSON hoặc viết lại facts thành câu CSKH; không được tự quyết định giá/link/tồn kho ngoài tool result.
-  4. **Guardrail Layer**: Chặn unsupported facts, xử lý SĐT/địa chỉ CRM Lead, khiếu nại khẩn cấp và fallback/learning queue.
+  4. **Guardrail Layer**: Chặn một số unsupported facts, xử lý SĐT/địa chỉ CRM Lead, khiếu nại khẩn cấp và fallback/Telegram alert. Auto-enqueue learning queue chưa nối.
 - **Lợi ích vận hành**: Cập nhật dữ liệu trong schema hiện có có thể phản ánh qua sync mà không sửa code; operator, policy hoặc hành vi nghiệp vụ mới vẫn phải qua test và có thể cần thay đổi parser/router.
 
 ### 26.2 Khắc Phục Lỗi Phản Hồi Câu Ngắn & Nhớ Ngữ Cảnh Chọn Nhóm (Short-Query & Slot-Filling Context)
@@ -1483,17 +1639,19 @@ Ngày cập nhật: **21/08/2026**
   2. Bổ sung `_ordinal_reference_index` hỗ trợ các mẫu `nhóm 1`, `nhóm 2`, `nhóm 3`, `nhóm 4` để mở bung chi tiết nhóm ngành khi khách chọn theo số thứ tự sau khi xem catalog tổng quan.
   3. Cố định thứ tự ưu tiên: Nhận diện chi tiết sản phẩm cụ thể (`_detect_specific_product_intent`) chạy trước tổng quan nhóm (`_detect_product_group_intent`) để các câu hỏi đặc thù (mùi hương lau sàn, chứng nhận Pasteur, VEILEX) không bị đè bởi nhóm chung.
 
-### 26.4 Xử Lý Chuyên Sâu Ý Định Nhập Hàng / Mua Sỉ (Wholesale & B2B Inquiries)
+### 26.3 Xử Lý Chuyên Sâu Ý Định Nhập Hàng / Mua Sỉ (Wholesale & B2B Inquiries)
 - **Vấn đề đã xử lý**: Khi khách dùng cụm từ *"cần nhập"*, *"muốn nhập"*, *"nhập nước rửa chén oplus loại 400g"*, hệ thống cũ bỏ sót từ khóa và bị nhảy sang Bột giặt Oplus.
 - **Giải pháp triển khai**:
   1. Mở rộng từ khóa nhận diện sỉ/đại lý trong PATH 3.7: Bổ sung `can nhap`, `muon nhap`, `nhap lo`, `nhap ve`, `nhap dai ly`.
   2. Bổ sung điều kiện loại trừ từ khóa sỉ (`nhap`, `si`, `dai ly`) tại các nhánh catalog thông thường để không bị bắt nhầm thành hỏi thông tin sản phẩm.
-  3. Cá nhân hóa câu trả lời B2B: Tự động trích xuất tên sản phẩm khách muốn nhập (ví dụ: *Oplus Nước rửa chén*) $\rightarrow$ Xác nhận chính sách chiết khấu đại lý tốt, xin Số điện thoại + Khu vực để chuyên viên liên hệ báo giá sỉ, đồng thời cung cấp link Shopee Mall nếu khách muốn mua lẻ trải nghiệm.
-### 26.5 Kết Quả Kiểm Thử Đạt 100% Pass Rate
-- `eval_test_suite.py`: **112/112 Tests PASS (100.0%)**; gồm regression budget result -> direct product link, mắc nhất -> top price, privacy, nước xả lấy từ Shopee, ngữ cảnh đổi trả và chọn nhóm số 3.
-- `run_test_md_scenarios.py`: Tất cả các kịch bản thực tế của người dùng (`--scenario user`, `--scenario user_slot`, `--scenario 01`, `--scenario 02`, `--scenario 03`, `--scenario 26`, `--scenario 27`) đều đạt **100.0% Perfect Pass**.
+  3. Cá nhân hóa câu trả lời B2B: Tự động trích xuất tên sản phẩm khách muốn nhập, xin số điện thoại + khu vực để chuyên viên liên hệ. Không khẳng định mức/chính sách chiết khấu nếu Sheet hoặc admin chưa cung cấp fact đã duyệt.
 
-### 26.6 Công Thức Kết Hợp Hoàn Hảo: Redis (Bộ Nhớ Dài Hạn) + Ollama (Bộ Não Suy Luận)
+### 26.4 Kết Quả Kiểm Thử Theo Từng Mốc
+- `eval_test_suite.py`: mốc 21/08 và lần offline/degraded 22/08 đều báo **112/112** theo expectation của runner.
+- Tập con `--scenario user`, `user_slot`, `01`, `02`, `03`, `26`, `27` từng pass ở mốc 21/08; không suy ra toàn bộ scenario pass.
+- Lần chạy offline/degraded `--all` ngày 22/08: **48/55 lượt (87,3%)**; scenario 04, 05, 09, 16 còn REVIEW.
+
+### 26.5 Kết Hợp Redis State + Ollama Hỗ Trợ Suy Luận
 - **Trạng thái**: Structured product memory đã triển khai lát cắt đầu tiên cho danh sách theo giá và follow-up xin link; write-through/versioning đầy đủ vẫn thuộc phần còn lại của Phase 2.
 - **Cơ chế hoạt động thực tế trong mã nguồn**:
   1. **Redis (Long-Term Memory & State Store)**:
@@ -1501,11 +1659,11 @@ Ngày cập nhật: **21/08/2026**
      - Lưu trạng thái phiên chat `f"{brand}:session:messenger:{sender_id}"` và `recent_turns` tối đa 6 lượt. Hiện key chưa đặt TTL.
      - Kết quả budget hiện lưu `product_id`, rank, category, price snapshot, URL và `shown_at` trong `last_products_shown`; `source_version` được giữ khi nguồn có cung cấp.
      - Follow-up `xin link sản phẩm đó` resolve theo `product_id`, lookup catalog hiện hành và fallback exact product name cho session cũ chỉ có name/category/intent.
-  2. **Ollama Local (Reasoning & Conversational Brain)**:
+  2. **Python resolver + Ollama tùy chọn**:
      - Pipeline hiện truyền `conversation_summary` cho CSKH synthesizer; tham số full `chat_history`/`catalog_products` có trong engine nhưng chưa được cấp ở mọi call site.
-     - Tự động suy luận ngữ cảnh: Giải mã đại từ (*"cái số 2"*, *"loại đó"*), hiểu hành động chọn danh mục sau khi xem catalog (*"nước giặt"*, *"số 1"*), nhận diện ý định mua sỉ/đại lý (*"cần nhập nước rửa chén oplus loại 400g"*).
+     - Giải mã đại từ (*"cái số 2"*, *"loại đó"*), chọn danh mục và phần lớn route mua sỉ do Python deterministic xử lý, không phải Ollama tự nhớ.
      - Lớp NLU planner tùy chọn hỗ trợ `off`, `shadow`, `assist`. Ollama local chỉ trả JSON intent/tool; pipeline chỉ áp dụng kế hoạch ở `assist`, khi confidence đạt ngưỡng và matcher deterministic trả được kết quả.
-     - Sinh câu trả lời chuẩn văn phong CSKH 5 sao, trung thực 100% theo dữ liệu thực tế và tự động lọc bỏ icon rác/sến súa.
+     - Có thể viết lại facts theo văn phong CSKH và lọc một số icon; output vẫn phải qua grounding/validation vì LLM không bảo đảm đúng tuyệt đối.
   3. **Cơ chế Fallback thông minh đa tầng**:
      - CSKH synthesizer ưu tiên `Ollama Local`, sau đó theo provider list của `generate_ai_text`; deterministic facts/fallback vẫn là lớp bảo vệ cuối.
 
@@ -1569,8 +1727,8 @@ Gate: `RangeViolationRate = 0`, Recall@K/MRR tăng và p95 không suy giảm đ�
 
 - **Đã có lát cắt đầu tiên**: `plan_chat_intent_with_ollama()` trả JSON schema cho price/budget/link, product search/availability, chọn nhóm catalog, tư vấn nhu cầu, đổi trả, privacy, clarification và unknown; pipeline không cho planner trả text trực tiếp.
 - Rule parser xử lý comparator/số; Ollama JSON Schema chỉ fallback cho câu khó hoặc confidence thấp.
-- Validator đối chiếu `product_id`, price, stock, URL và source version trước khi phát câu trả lời.
-- Nếu validation fail: deterministic fallback + learning queue, không tự sửa fact bằng LLM.
+- **Chưa triển khai đầy đủ** validator đối chiếu `product_id`, price, stock, URL và source version trước khi phát câu trả lời.
+- **TODO** khi validation fail: deterministic fallback + enqueue learning queue. Hiện pipeline chủ yếu gửi Telegram alert và lưu session/history.
 
 Gate: `UnsupportedClaimRate = 0` cho giá/tồn kho/link và clarification rate hợp lý.
 
@@ -1646,7 +1804,7 @@ Các lỗi từ transcript thực tế đã được khóa bằng code và test:
 
 Ollama được đặt đúng vai trò **NLU planner**, không phải nguồn sự thật. Kết quả planner phải đi qua deterministic matcher/Sheet/Redis trước khi trả khách. Nếu Ollama timeout, JSON sai hoặc confidence thấp, luồng cũ tiếp tục hoạt động.
 
-Smoke test live đã chạy trên worker tạm `127.0.0.1:8001` với Redis và Ollama thật: health pass, Redis có 52 sản phẩm ZeO, bảy lượt hội thoại trọng yếu đều trả HTTP 200 và đúng intent. Worker `:8001` đã được dừng sau test.
+Theo ghi nhận ngày 21/08/2026, một worker tạm `127.0.0.1:8001` từng pass health và 7 lượt smoke với Redis/Ollama. Không có artifact log độc lập trong checkout để tái lập claim này, và audit ngày 22/08 không chạy lại bộ 7 lượt; dùng bảng mục 15.5 làm trạng thái kiểm thử hiện tại.
 
 ---
 

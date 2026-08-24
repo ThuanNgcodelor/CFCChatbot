@@ -1876,3 +1876,65 @@ Hai lượt scenario còn REVIEW là khác tên intent nhưng nội dung đúng 
 - `pano_laundry_fragrance_options` vs expected alias `pano_fragrance_options`.
 
 Không đổi source intent chỉ để ăn điểm test; nếu muốn báo cáo 55/55 thì nên thêm alias tương đương trong scenario runner.
+
+---
+
+## 32. Cập Nhật Web Admin: Chat Pipeline Debug (22/08/2026)
+
+Dashboard cũ có trang `Test Bot — Semantic Vector Search RAG`, chỉ gọi `/admin/test/query` và test `semantic_search()` thô. Điều này không còn phản ánh đúng luồng khách thật vì pipeline hiện có QueryPlan, context/reference resolver, deterministic router, Shopee matcher, RAG fallback và guardrail.
+
+### 32.1 Thay đổi đã triển khai
+
+| File | Thay đổi |
+|---|---|
+| `ChatbotN8n/javis/server/domains/rag_test/routes.py` | Thêm endpoint `POST /admin/test/chat-pipeline` để chạy đúng `process_chat_pipeline()` và trả debug payload |
+| `ChatbotN8n/javis/server/static/admin.html` | Đổi trang Test thành `Chat Pipeline Debug`, thêm mode Full Pipeline / Raw RAG Search, sender_id test, reset session và các panel trace |
+| `ChatbotN8n/javis/server/static/js/pages/test.js` | Viết lại logic test: Full Pipeline gọi endpoint mới, Raw RAG vẫn gọi endpoint cũ |
+| `ChatbotN8n/javis/server/static/js/core.js` | Thêm `APP.testMode='pipeline'`, cập nhật version UI v2.3 |
+
+### 32.2 Endpoint debug mới
+
+```text
+POST /admin/test/chat-pipeline
+```
+
+Payload:
+
+```json
+{
+  "brand": "zeo",
+  "sender_id": "dashboard_debug_001",
+  "text": "xin link sản phẩm đó",
+  "fb_name": "Dashboard Debug",
+  "include_rag": true
+}
+```
+
+Response gồm:
+
+- `response`: output thật của `ChatPipelineResponse`.
+- `debug.query_plan`: intent/attributes/entities/references do QueryPlan hiểu.
+- `debug.reference_resolution`: kết quả resolve `cái đó/số 1/sản phẩm đó`.
+- `debug.query_entities`: entity sản phẩm/danh mục.
+- `debug.last_trace`: trace cuối trong session RAM/Redis.
+- `debug.conversation_state`: active entities, active flow, last products shown.
+- `debug.raw_rag`: top-k semantic result để đối chiếu với pipeline.
+
+### 32.3 Cách dùng đúng
+
+- Dùng **Full Pipeline** để test giống khách Messenger thật.
+- Dùng **Raw RAG Search** chỉ để debug riêng vector/semantic search.
+- Khi test hội thoại nhiều lượt, giữ nguyên `sender_id`.
+- Khi muốn test lại từ đầu, bấm `Reset Session`.
+
+### 32.4 Kết quả xác minh
+
+```text
+Python py_compile: PASS
+JS node --check:   PASS
+Unit tests:        34/34 PASS
+eval_test_suite:   112/112 PASS
+Debug smoke:       "Bồn cầu bị cặn vôi..." -> query_plan=cleaning_toilet_stain, intent=zeo_cleaning_hygiene_product_overview
+```
+
+Lưu ý: smoke test trong sandbox không truy cập được Redis thật nên có warning `Operation not permitted`; behavior vẫn xác minh được bằng fallback/local cache. Cần mở dashboard local để kiểm tra visual layout cuối cùng.

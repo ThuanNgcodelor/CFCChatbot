@@ -11,9 +11,10 @@ window.APP = {
   customerBrand: 'all',
   lqBrand: 'all',
   testBrand: 'zeo',
+  testMode: 'pipeline',
   customerPage: 1,
   allCustomers: [],
-  version: '2.1',
+  version: '2.3',
 };
 
 // ── Lucide Icon Auto-Refresh ──────────────────────

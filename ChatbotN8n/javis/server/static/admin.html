@@ -97,7 +97,7 @@
     </nav>
 
     <div class="sidebar-footer">
-      <div class="version">CFC AI v2.2 · FastAPI + Redis</div>
+      <div class="version">CFC AI v2.3 · QueryPlan Debug</div>
       <div class="sys-status">
         <span class="sys-dot" id="sidebar-sys-dot"></span>
         <span id="sidebar-sys-label">Đang kết nối...</span>
@@ -319,9 +319,9 @@
 
       <footer class="page-footer">
         <div class="page-footer-info">
-          <span>CFC AI Enterprise v2.2</span>
+          <span>CFC AI Enterprise v2.3</span>
           <span class="sep">/</span>
-          <span>FastAPI + RediSearch + Ollama bge-m3</span>
+          <span>FastAPI + QueryPlan + RediSearch + Ollama bge-m3</span>
           <span class="sep">/</span>
           <span id="footer-time"></span>
         </div>
@@ -535,22 +535,34 @@
         <div class="page-header-left">
           <h2>
             <i data-lucide="sparkles"></i>
-            <span>Test Bot — Semantic Vector Search RAG</span>
+            <span>Chat Pipeline Debug</span>
           </h2>
-          <p>Thử nghiệm câu hỏi bằng tiếng Việt (có dấu hoặc không dấu) để kiểm tra độ tin cậy và intent</p>
+          <p>Test đúng luồng khách thật: QueryPlan → context/reference → router/Shopee/RAG → guardrail</p>
         </div>
       </div>
 
       <div class="card" style="padding:24px;margin-bottom:24px">
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <input class="form-input" style="flex:1;min-width:280px" id="test-query" placeholder="Nhập câu hỏi test tiếng Việt (VD: mua phân cò bay ở đâu, giá nước giặt zeo...)">
-          <div class="filter-tabs">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <div class="filter-tabs" id="test-mode-tabs">
+            <button class="filter-tab active" onclick="setTestMode('pipeline',this)">Full Pipeline</button>
+            <button class="filter-tab" onclick="setTestMode('rag',this)">Raw RAG Search</button>
+          </div>
+          <div class="filter-tabs" id="test-brand-tabs">
             <button class="filter-tab active" onclick="setTestBrand('zeo',this)">ZeO</button>
             <button class="filter-tab" onclick="setTestBrand('cfc',this)">CFC</button>
           </div>
+          <input class="form-input" style="width:220px" id="test-sender-id" value="dashboard_debug_001" placeholder="sender_id test">
+          <button class="btn btn-ghost" onclick="resetTestSession()" id="test-reset-btn">
+            <i data-lucide="rotate-ccw"></i>
+            <span>Reset Session</span>
+          </button>
+        </div>
+
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <input class="form-input" style="flex:1;min-width:280px" id="test-query" placeholder="Nhập câu hỏi test tiếng Việt (VD: xin link sản phẩm đó, bồn cầu cặn vôi, PANO 3.5kg trào bọt...)">
           <button class="btn btn-primary" onclick="runTest()" id="test-btn">
             <i data-lucide="play"></i>
-            <span>Thực Hiện Test</span>
+            <span>Chạy Debug</span>
           </button>
         </div>
 
@@ -563,9 +575,28 @@
             <span class="badge" id="res-confidence-badge">—</span>
           </div>
 
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:12px;margin-bottom:16px">
+            <div style="background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Fallback</div>
+              <div style="font-size:12.5px;font-weight:700;color:var(--text-main);font-family:'JetBrains Mono',monospace" id="res-fallback">—</div>
+            </div>
+            <div style="background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Lead Stage</div>
+              <div style="font-size:12.5px;font-weight:700;color:var(--text-main);font-family:'JetBrains Mono',monospace" id="res-stage">—</div>
+            </div>
+            <div style="background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Shopee URL</div>
+              <div style="font-size:12.5px;font-weight:700;color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="res-shopee">—</div>
+            </div>
+            <div style="background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Latency</div>
+              <div style="font-size:12.5px;font-weight:700;color:var(--text-main);font-family:'JetBrains Mono',monospace" id="res-latency">—</div>
+            </div>
+          </div>
+
           <div style="margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-              <span style="font-size:12px;color:var(--text-dim)">Similarity Score</span>
+              <span style="font-size:12px;color:var(--text-dim)" id="res-score-label">Score</span>
               <span style="font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace" id="res-score">—</span>
             </div>
             <div style="height:6px;background:var(--bg-surface2);border-radius:var(--r-full);overflow:hidden">
@@ -578,9 +609,26 @@
             <div style="font-size:13.5px;color:var(--text-main);line-height:1.65;background:var(--bg-app);padding:14px 16px;border-radius:var(--r-sm);border:1px solid var(--border)" id="res-answer">—</div>
           </div>
 
-          <div>
-            <div class="form-label">Top 5 Document Matching:</div>
+          <div style="margin-bottom:20px">
+            <div class="form-label" id="res-top5-label">Top 5 Document Matching:</div>
             <div id="res-top5"></div>
+          </div>
+
+          <div id="pipeline-debug-panel" style="display:none">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+              <div>
+                <div class="form-label">QueryPlan</div>
+                <pre id="res-query-plan" style="white-space:pre-wrap;max-height:280px;overflow:auto;background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px;font-size:11.5px;color:var(--text-muted);font-family:'JetBrains Mono',monospace"></pre>
+              </div>
+              <div>
+                <div class="form-label">Reference / Session State</div>
+                <pre id="res-reference" style="white-space:pre-wrap;max-height:280px;overflow:auto;background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px;font-size:11.5px;color:var(--text-muted);font-family:'JetBrains Mono',monospace"></pre>
+              </div>
+            </div>
+            <div>
+              <div class="form-label">Last Trace</div>
+              <pre id="res-trace" style="white-space:pre-wrap;max-height:320px;overflow:auto;background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px;font-size:11.5px;color:var(--text-muted);font-family:'JetBrains Mono',monospace"></pre>
+            </div>
           </div>
         </div>
       </div>

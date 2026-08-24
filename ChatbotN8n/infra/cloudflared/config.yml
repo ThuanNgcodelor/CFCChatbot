@@ -14,15 +14,15 @@ ingress:
     service: http://localhost:5678
 
   # --------------------------------------------------------------------------
-  # 2. Python FastAPI (Port 8000) - Admin Dashboard & AI Chat Pipeline
+  # 2. JAVIS OS (Port 7777) - Unified Brain & Dashboard
   # --------------------------------------------------------------------------
-  # Domain chính cho Admin & API
+  # Domain chính cho Javis OS Dashboard & API
   - hostname: dinhduongcantho.io.vn
-    service: http://localhost:8000
+    service: http://localhost:7777
 
   # (Tuỳ chọn) Subdomain riêng cho API nếu muốn phân tách
   - hostname: api.dinhduongcantho.io.vn
-    service: http://localhost:8000
+    service: http://localhost:7777
 
   # --------------------------------------------------------------------------
   # 3. Catch-all rule (Bắt buộc phải nằm ở cuối cùng)

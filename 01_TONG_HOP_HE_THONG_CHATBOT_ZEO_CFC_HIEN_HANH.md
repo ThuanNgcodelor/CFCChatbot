@@ -1,6 +1,6 @@
 # Tổng Hợp Hệ Thống Chatbot ZeO / CFC Hiện Hành
 
-Ngày cập nhật: 2026-08-22 (đối chiếu trực tiếp source, workflow, dữ liệu và test hiện có)
+Ngày cập nhật: 2026-08-24 (đối chiếu trực tiếp source, workflow, dữ liệu và test hiện có)
 Phạm vi: `ChatbotN8n/javis/`, `ChatbotN8n/workflows/local-n8n/`, dữ liệu Google Sheet/CSV, Redis, Ollama, RAG và các file vận hành liên quan.
 
 Đây là tài liệu sống của dự án. Khi nội dung tài liệu khác source/runtime thì ưu tiên source và trạng thái runtime thực tế, sau đó cập nhật lại tài liệu này. Lần rà soát này chỉ xác nhận source trong workspace; không tự suy ra trạng thái production từ file local.
@@ -9,12 +9,13 @@ Lưu ý bảo mật: không đưa password Redis, token n8n, API key, Facebook t
 
 ### Trạng thái kiểm chứng của tài liệu
 
-| Phạm vi | Trạng thái ngày 22/08/2026 |
+| Phạm vi | Trạng thái ngày 24/08/2026 |
 |---|---|
 | Source FastAPI, router, matcher, RAG | Đã đối chiếu trực tiếp file hiện có |
 | 8 workflow `.workflow.ts` local | Đã đối chiếu cấu trúc, node, connection, schedule và endpoint; tất cả file local đang `active: false` |
 | CSV/JSONL trong workspace | Đã đếm bằng parser; số liệu được ghi tại mục 4 và 15 |
-| FastAPI local `:8000` | Health từng pass trong phiên audit ngày 22/08, nhưng lần kiểm tra cuối cùng không kết nối được port 8000; không coi service đang chạy ở thời điểm bàn giao |
+| Python API mới `javis-os :7777` | 5 workflow n8n chính đã push/verify ngày 24/08/2026 để gọi `http://127.0.0.1:7777`; `javis-os` load logic legacy in-process từ `ChatbotN8n/javis/server` |
+| FastAPI legacy `:8000` | Là runtime cũ; không còn là đích của 5 workflow đã push ngày 24/08/2026. Chỉ tắt hẳn sau khi test page Messenger live ổn định qua `:7777` |
 | Redis runtime local | ZeO FAQ 65 customer records, CFC FAQ 19; ZeO catalog 52 records (49 stock/3 out), chưa có CFC catalog |
 | Test code hiện có | Unit 26/26 và offline eval 112/112 đã chạy ngày 22/08; scenario `--all` chỉ đạt 48/55 lượt, xem mục 15 |
 | n8n production và Messenger thật | Chưa xác minh lại trong lần cập nhật tài liệu này |
@@ -41,7 +42,7 @@ Nguyên tắc vận hành:
 ```text
 Facebook Messenger
 → n8n chatbot workflow (I/O Gateway)
-→ Python FastAPI /api/chat-pipeline (Single Brain)
+→ Javis OS Python API :7777 /api/chat-pipeline (Single Brain compatibility)
   ├── Per-Sender Lock (Tuần tự hóa tin nhắn, chống race condition)
   ├── Redis/RAM Conversation State + Structured Product Memory
   ├── Deterministic Router/Tools (giá, link, tồn kho, safety, CRM)
@@ -65,7 +66,7 @@ Google Sheet
 → n8n knowledge sync workflow
 → Normalize row
 → Redis snapshot: zeo:kb:basic:active hoặc cfc:kb:basic:active
-→ POST http://127.0.0.1:8000/sync?brand=...
+→ POST http://127.0.0.1:7777/sync?brand=...
 → knowledge_sync.py
 → Ollama bge-m3 tạo embedding
 → Redis Vector Index: zeo:vec:faq hoặc cfc:vec:faq
@@ -246,7 +247,21 @@ Các nhóm dữ liệu CFC đáng chú ý:
 - Giá/đại lý/phân phối: yêu cầu khách gửi số điện thoại, khu vực, cây trồng.
 - Liều lượng/cách dùng: không tự bịa, cần kỹ sư/admin tư vấn.
 
-## 5. Python FastAPI Server
+## 5. Python API Runtime
+
+Trạng thái local mới ngày 24/08/2026: n8n local workflow gọi `javis-os` tại `http://127.0.0.1:7777` cho các endpoint tương thích:
+
+```text
+POST /api/chat-pipeline
+POST /sync?brand=...
+POST /search
+POST /rewrite
+POST /api/shopee/refresh-cache
+```
+
+`javis-os` hiện chạy chế độ trung gian: load trực tiếp module legacy từ `ChatbotN8n/javis/server` trong cùng process, nên không cần bật thêm FastAPI legacy `:8000` cho smoke test. Ngày 24/08/2026 đã push/verify các workflow `Zeo Chatbot`, `CFC Co Bay Chatbot`, `Zeo Knowledge`, `CFC Co Bay Knowledge`, `Zeo Shopee Catalog Sync` sang URL `:7777`; cần test page Messenger live trước khi tắt hẳn runtime legacy `:8000`.
+
+## 5.1 Python FastAPI Server Legacy
 
 Thư mục:
 
@@ -275,7 +290,7 @@ pydantic
 python-multipart
 ```
 
-### 5.1 `main.py`
+### 5.2 `main.py`
 
 Vai trò:
 
@@ -301,7 +316,7 @@ Endpoint chính:
 | `POST /api/shopee/refresh-cache` | Xóa cache catalog trong RAM để lần đọc sau nạp snapshot mới |
 | `GET /admin` | Dashboard quản trị |
 
-### 5.2 `chat_pipeline.py`
+### 5.3 `chat_pipeline.py`
 
 Đây là não trả lời chính hiện tại.
 
@@ -678,7 +693,7 @@ Node chính:
 |---|---|---|
 | `MessengerTrigger` | facebookTrigger | Nhận tin Messenger |
 | `LocDauVao` | code | Lọc/chuẩn hóa input, bóc tách text/senderId/messageId |
-| `GoiFastApiChatPipeline` | httpRequest | Gọi `http://127.0.0.1:8000/api/chat-pipeline` (Single Brain) |
+| `GoiFastApiChatPipeline` | httpRequest | Gọi `http://127.0.0.1:7777/api/chat-pipeline` (Single Brain compatibility trong Javis OS) |
 | `PrepareMessengerReply` | code | Chuẩn bị final reply trả về từ Python |
 | `NhanKhachAuto` | httpRequest | Gửi reply về khách hàng qua Graph API Facebook |
 
@@ -773,7 +788,7 @@ zeo:sync:faq:basic:last-success
 HTTP gọi Python:
 
 ```text
-POST http://127.0.0.1:8000/sync?brand=zeo
+POST http://127.0.0.1:7777/sync?brand=zeo
 ```
 
 ### 8.4 `cfc_knowledge_sync_basic.workflow.ts`
@@ -808,7 +823,7 @@ cfc:sync:faq:basic:last-success
 HTTP gọi Python:
 
 ```text
-POST http://127.0.0.1:8000/sync?brand=cfc
+POST http://127.0.0.1:7777/sync?brand=cfc
 ```
 
 Workflow CFC có cùng lưu ý schedule với ZeO: file local chưa khai báo `minutesInterval` cụ thể.
@@ -926,7 +941,7 @@ Vai trò:
 - Đọc catalog ZeO từ Google Sheet.
 - Normalize row và ghi snapshot `zeo:shopee:catalog:active` vào Redis.
 - Ghi metadata lần sync.
-- Gọi `POST http://127.0.0.1:8000/api/shopee/refresh-cache`.
+- Gọi `POST http://127.0.0.1:7777/api/shopee/refresh-cache`.
 - Có cron `0 0 * * *` theo timezone `Asia/Ho_Chi_Minh`.
 
 File local đang `active: false`, nên cron 00:00 chỉ có hiệu lực sau khi workflow tương ứng được deploy và activate trên n8n.

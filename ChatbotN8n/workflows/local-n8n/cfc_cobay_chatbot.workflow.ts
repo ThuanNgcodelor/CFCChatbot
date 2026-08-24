@@ -108,7 +108,7 @@ return [{ json: {
     })
     GoiFastApiChatPipeline = {
         method: 'POST',
-        url: 'http://127.0.0.1:8000/api/chat-pipeline',
+        url: 'http://127.0.0.1:7777/api/chat-pipeline',
         sendBody: true,
         specifyBody: 'json',
         jsonBody:

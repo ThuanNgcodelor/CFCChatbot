@@ -34,7 +34,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
     name: 'Zeo Shopee Catalog Sync',
     active: false,
     isArchived: false,
-    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1' },
+    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate' },
 })
 export class ZeoShopeeCatalogSyncWorkflow {
     // =====================================================================
@@ -183,7 +183,7 @@ return [{
     })
     NotifyFastapiShopeeCache = {
         method: 'POST',
-        url: 'http://127.0.0.1:8000/api/shopee/refresh-cache',
+        url: 'http://127.0.0.1:7777/api/shopee/refresh-cache',
         options: {
             timeout: 10000,
         },

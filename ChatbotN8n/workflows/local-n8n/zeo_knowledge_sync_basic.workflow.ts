@@ -1,30 +1,29 @@
 import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
-// Workflow : Zeo Knowledge
-// Nodes   : 7  |  Connections: 6
+// Workflow : Zeo Data Sync
+// Nodes   : 11  |  Connections: 10
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
 // ManualTrigger                      manualTrigger
 // ScheduleTrigger                    scheduleTrigger
-// ReadFaqRows                        googleSheets               [creds]
+// ReadFaqRows                        googleSheets               [creds]  ← ZeoN8n/FAQ
 // NormalizeKnowledge                 code
 // WriteRedisSnapshot                 redis                      [creds]
 // WriteRedisSyncMetadata             redis                      [creds]
 // RebuildZeoVectorIndex              httpRequest                [onError→regular]
+// ReadShopeeRows                     googleSheets               [creds]  ← ZeoN8n/Shopee
+// NormalizeShopeeCatalog             code
+// WriteShopeeRedisSnapshot           redis                      [creds]
+// NotifyFastapiShopeeCache           httpRequest                [onError→regular]
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
-// ManualTrigger
-//    → ReadFaqRows
-//      → NormalizeKnowledge
-//        → WriteRedisSnapshot
-//          → WriteRedisSyncMetadata
-//            → RebuildZeoVectorIndex
-// ScheduleTrigger
-//    → ReadFaqRows (↩ loop)
+// ManualTrigger ─┬→ ReadFaqRows → NormalizeKnowledge → WriteRedisSnapshot → WriteRedisSyncMetadata → RebuildZeoVectorIndex
+//                └→ ReadShopeeRows → NormalizeShopeeCatalog → WriteShopeeRedisSnapshot → NotifyFastapiShopeeCache
+// ScheduleTrigger → (both branches above)
 // </workflow-map>
 
 // =====================================================================
@@ -33,12 +32,12 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
     id: 'DhrLUsDsldhxtTdX',
-    name: 'Zeo Knowledge',
+    name: 'Zeo Data Sync',
     active: false,
     isArchived: false,
     settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate' },
 })
-export class ZeoKnowledgeWorkflow {
+export class ZeoDataSyncWorkflow {
     // =====================================================================
     // CONFIGURATION DES NOEUDS
     // =====================================================================
@@ -289,17 +288,144 @@ return [{
         },
     };
 
+    // ─────────────────────────────────────────────────────────────────────
+    // SHOPEE BRANCH — đọc sheet Shopee từ cùng file ZeoN8n
+    // ─────────────────────────────────────────────────────────────────────
+
+    @node({
+        id: '2b000001-0000-0000-0000-000000000001',
+        name: 'Read Shopee Rows',
+        type: 'n8n-nodes-base.googleSheets',
+        version: 4.7,
+        position: [256, 480],
+        credentials: { googleSheetsOAuth2Api: { id: 'li88zysXKFUU5A0d', name: 'Google Sheets account' } },
+    })
+    ReadShopeeRows = {
+        documentId: {
+            __rl: true,
+            value: 'https://docs.google.com/spreadsheets/d/1o4vk2YwTVHbuvJxPedTAELCDeQa7iAszZ1kfDKQx0nk/edit?gid=0#gid=0',
+            mode: 'url',
+        },
+        sheetName: {
+            __rl: true,
+            value: 'Shopee',
+            mode: 'name',
+        },
+        options: {},
+    };
+
+    @node({
+        id: '2b000001-0000-0000-0000-000000000002',
+        name: 'Normalize Shopee Catalog',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [512, 480],
+    })
+    NormalizeShopeeCatalog = {
+        jsCode: `
+function text(v) {
+  return String(v || '').replace(/\\s+/g, ' ').trim();
+}
+function asBool(v) {
+  if (typeof v === 'boolean') return v;
+  return ['true', '1', 'yes', 'y'].includes(String(v || '').trim().toLowerCase());
+}
+function parseList(v) {
+  if (Array.isArray(v)) return v.map(text).filter(Boolean);
+  return String(v || '').split(/[;|,]/).map(text).filter(Boolean);
+}
+
+const rows = $input.all().map(item => item.json);
+const products = [];
+
+for (const r of rows) {
+  const active = asBool(r.active ?? true);
+  const name = text(r.name);
+  const link = text(r.link_shopee || r.shopee_url || r.link);
+  if (!active || !name || !link) continue;
+
+  const inStock = asBool(r.in_stock ?? true);
+  const priceNum = Number(String(r.price || 0).replace(/[^0-9]/g, ''));
+  const origPriceNum = Number(String(r.original_price || priceNum).replace(/[^0-9]/g, ''));
+
+  products.push({
+    item_id: text(r.item_id || name),
+    name: name,
+    brand: text(r.brand || 'ZeO'),
+    category: text(r.category || 'Tẩy rửa & Giặt giũ'),
+    price: priceNum,
+    original_price: origPriceNum,
+    discount: text(r.discount || ''),
+    specs: text(r.specs || name),
+    keywords: parseList(r.keywords),
+    variants: parseList(r.variants),
+    link_shopee: link,
+    in_stock: inStock,
+    badge: text(r.badge || 'STANDARD'),
+    updated_at: new Date().toISOString(),
+  });
+}
+
+if (products.length < 1) {
+  throw new Error('Từ chối ghi Redis: Danh mục Shopee không có sản phẩm hợp lệ.');
+}
+
+const snapshotJson = JSON.stringify(products);
+return [{ json: {
+  snapshot_key: 'zeo:shopee:catalog:active',
+  product_count: products.length,
+  updated_at: new Date().toISOString(),
+  snapshot_json: snapshotJson,
+} }];
+`,
+    };
+
+    @node({
+        id: '2b000001-0000-0000-0000-000000000003',
+        name: 'Write Shopee Redis Snapshot',
+        type: 'n8n-nodes-base.redis',
+        version: 1,
+        position: [768, 480],
+        credentials: { redis: { id: 'DW6fQRCZ77RgdCqL', name: 'Zeo Redis (local)' } },
+    })
+    WriteShopeeRedisSnapshot = {
+        operation: 'set',
+        key: 'zeo:shopee:catalog:active',
+        value: '={{ $json.snapshot_json }}',
+    };
+
+    @node({
+        id: '2b000001-0000-0000-0000-000000000004',
+        name: 'Notify FastAPI Shopee Cache',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4.2,
+        position: [1024, 480],
+        onError: 'continueRegularOutput',
+    })
+    NotifyFastapiShopeeCache = {
+        method: 'POST',
+        url: 'http://127.0.0.1:7777/api/shopee/refresh-cache',
+        options: { timeout: 10000 },
+    };
+
     // =====================================================================
     // ROUTAGE ET CONNEXIONS
     // =====================================================================
 
     @links()
     defineRouting() {
+        // FAQ branch
         this.ManualTrigger.out(0).to(this.ReadFaqRows.in(0));
         this.ScheduleTrigger.out(0).to(this.ReadFaqRows.in(0));
         this.ReadFaqRows.out(0).to(this.NormalizeKnowledge.in(0));
         this.NormalizeKnowledge.out(0).to(this.WriteRedisSnapshot.in(0));
         this.WriteRedisSnapshot.out(0).to(this.WriteRedisSyncMetadata.in(0));
         this.WriteRedisSyncMetadata.out(0).to(this.RebuildZeoVectorIndex.in(0));
+        // Shopee branch (parallel)
+        this.ManualTrigger.out(0).to(this.ReadShopeeRows.in(0));
+        this.ScheduleTrigger.out(0).to(this.ReadShopeeRows.in(0));
+        this.ReadShopeeRows.out(0).to(this.NormalizeShopeeCatalog.in(0));
+        this.NormalizeShopeeCatalog.out(0).to(this.WriteShopeeRedisSnapshot.in(0));
+        this.WriteShopeeRedisSnapshot.out(0).to(this.NotifyFastapiShopeeCache.in(0));
     }
 }

@@ -31,9 +31,11 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
     id: 'ivng9UpBOEGTnVvr',
-    name: 'Zeo Shopee Catalog Sync',
+    name: '[ARCHIVED] Zeo Shopee Catalog Sync',
     active: false,
-    isArchived: false,
+    isArchived: true,
+    // ARCHIVED: Đã gộp vào workflow 'Zeo Data Sync' (zeo_knowledge_sync_basic.workflow.ts)
+    // Không xóa file này để giữ lịch sử.
     settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate' },
 })
 export class ZeoShopeeCatalogSyncWorkflow {

@@ -1,29 +1,39 @@
 import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
-// Workflow : Zeo Data Sync
-// Nodes   : 11  |  Connections: 10
+// Workflow : Zeo Knowledge
+// Nodes   : 11  |  Connections: 11
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
 // ManualTrigger                      manualTrigger
 // ScheduleTrigger                    scheduleTrigger
-// ReadFaqRows                        googleSheets               [creds]  ← ZeoN8n/FAQ
+// ReadFaqRows                        googleSheets               [creds]
 // NormalizeKnowledge                 code
 // WriteRedisSnapshot                 redis                      [creds]
 // WriteRedisSyncMetadata             redis                      [creds]
 // RebuildZeoVectorIndex              httpRequest                [onError→regular]
-// ReadShopeeRows                     googleSheets               [creds]  ← ZeoN8n/Shopee
+// ReadShopeeRows                     googleSheets               [creds]
 // NormalizeShopeeCatalog             code
 // WriteShopeeRedisSnapshot           redis                      [creds]
 // NotifyFastapiShopeeCache           httpRequest                [onError→regular]
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
-// ManualTrigger ─┬→ ReadFaqRows → NormalizeKnowledge → WriteRedisSnapshot → WriteRedisSyncMetadata → RebuildZeoVectorIndex
-//                └→ ReadShopeeRows → NormalizeShopeeCatalog → WriteShopeeRedisSnapshot → NotifyFastapiShopeeCache
-// ScheduleTrigger → (both branches above)
+// ManualTrigger
+//    → ReadFaqRows
+//      → NormalizeKnowledge
+//        → WriteRedisSnapshot
+//          → WriteRedisSyncMetadata
+//            → RebuildZeoVectorIndex
+//    → ReadShopeeRows
+//      → NormalizeShopeeCatalog
+//        → WriteShopeeRedisSnapshot
+//          → NotifyFastapiShopeeCache
+// ScheduleTrigger
+//    → ReadFaqRows (↩ loop)
+//    → ReadShopeeRows (↩ loop)
 // </workflow-map>
 
 // =====================================================================
@@ -32,12 +42,13 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
     id: 'DhrLUsDsldhxtTdX',
-    name: 'Zeo Data Sync',
+    name: 'Zeo Knowledge',
     active: false,
+    description: 'b',
     isArchived: false,
-    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate' },
+    settings: { timezone: 'Asia/Ho_Chi_Minh', executionOrder: 'v1', binaryMode: 'separate', availableInMCP: true },
 })
-export class ZeoDataSyncWorkflow {
+export class ZeoKnowledgeWorkflow {
     // =====================================================================
     // CONFIGURATION DES NOEUDS
     // =====================================================================
@@ -288,10 +299,6 @@ return [{
         },
     };
 
-    // ─────────────────────────────────────────────────────────────────────
-    // SHOPEE BRANCH — đọc sheet Shopee từ cùng file ZeoN8n
-    // ─────────────────────────────────────────────────────────────────────
-
     @node({
         id: '2b000001-0000-0000-0000-000000000001',
         name: 'Read Shopee Rows',
@@ -334,27 +341,21 @@ function parseList(v) {
   if (Array.isArray(v)) return v.map(text).filter(Boolean);
   return String(v || '').split(/[;|,]/).map(text).filter(Boolean);
 }
-
 const rows = $input.all().map(item => item.json);
 const products = [];
-
 for (const r of rows) {
   const active = asBool(r.active ?? true);
   const name = text(r.name);
   const link = text(r.link_shopee || r.shopee_url || r.link);
   if (!active || !name || !link) continue;
-
   const inStock = asBool(r.in_stock ?? true);
   const priceNum = Number(String(r.price || 0).replace(/[^0-9]/g, ''));
   const origPriceNum = Number(String(r.original_price || priceNum).replace(/[^0-9]/g, ''));
-
   products.push({
     item_id: text(r.item_id || name),
-    name: name,
-    brand: text(r.brand || 'ZeO'),
+    name, brand: text(r.brand || 'ZeO'),
     category: text(r.category || 'Tẩy rửa & Giặt giũ'),
-    price: priceNum,
-    original_price: origPriceNum,
+    price: priceNum, original_price: origPriceNum,
     discount: text(r.discount || ''),
     specs: text(r.specs || name),
     keywords: parseList(r.keywords),
@@ -365,18 +366,9 @@ for (const r of rows) {
     updated_at: new Date().toISOString(),
   });
 }
-
-if (products.length < 1) {
-  throw new Error('Từ chối ghi Redis: Danh mục Shopee không có sản phẩm hợp lệ.');
-}
-
+if (products.length < 1) throw new Error('Từ chối ghi Redis: Danh mục Shopee không có sản phẩm hợp lệ.');
 const snapshotJson = JSON.stringify(products);
-return [{ json: {
-  snapshot_key: 'zeo:shopee:catalog:active',
-  product_count: products.length,
-  updated_at: new Date().toISOString(),
-  snapshot_json: snapshotJson,
-} }];
+return [{ json: { snapshot_key: 'zeo:shopee:catalog:active', product_count: products.length, updated_at: new Date().toISOString(), snapshot_json: snapshotJson } }];
 `,
     };
 
@@ -405,7 +397,9 @@ return [{ json: {
     NotifyFastapiShopeeCache = {
         method: 'POST',
         url: 'http://127.0.0.1:7777/api/shopee/refresh-cache',
-        options: { timeout: 10000 },
+        options: {
+            timeout: 10000,
+        },
     };
 
     // =====================================================================
@@ -414,16 +408,14 @@ return [{ json: {
 
     @links()
     defineRouting() {
-        // FAQ branch
         this.ManualTrigger.out(0).to(this.ReadFaqRows.in(0));
+        this.ManualTrigger.out(0).to(this.ReadShopeeRows.in(0));
         this.ScheduleTrigger.out(0).to(this.ReadFaqRows.in(0));
+        this.ScheduleTrigger.out(0).to(this.ReadShopeeRows.in(0));
         this.ReadFaqRows.out(0).to(this.NormalizeKnowledge.in(0));
         this.NormalizeKnowledge.out(0).to(this.WriteRedisSnapshot.in(0));
         this.WriteRedisSnapshot.out(0).to(this.WriteRedisSyncMetadata.in(0));
         this.WriteRedisSyncMetadata.out(0).to(this.RebuildZeoVectorIndex.in(0));
-        // Shopee branch (parallel)
-        this.ManualTrigger.out(0).to(this.ReadShopeeRows.in(0));
-        this.ScheduleTrigger.out(0).to(this.ReadShopeeRows.in(0));
         this.ReadShopeeRows.out(0).to(this.NormalizeShopeeCatalog.in(0));
         this.NormalizeShopeeCatalog.out(0).to(this.WriteShopeeRedisSnapshot.in(0));
         this.WriteShopeeRedisSnapshot.out(0).to(this.NotifyFastapiShopeeCache.in(0));
